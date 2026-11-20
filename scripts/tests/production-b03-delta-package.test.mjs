@@ -14,7 +14,8 @@ test("B03 excludes only exact separately governed C02 printing grants", () => {
   const previous = new Set(normalize(execFileSync("git", ["show", "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec:scripts/rls/sql/generated/21-runtime-grants.sql"], { encoding: "utf8" })).split(/\r?\n/));
   const changed = normalize(fs.readFileSync("scripts/rls/sql/generated/21-runtime-grants.sql", "utf8"))
     .split(/\r?\n/).filter((line) => line.startsWith("GRANT ") && !previous.has(line));
-  assert.equal(changed.length, 18);
+  assert.equal(changed.length, 19);
+  assert.match(changed.find(line => line.includes('ON TABLE public."AuditLog"') && line.startsWith('GRANT SELECT')) || '', /"details"/);
   assert.deepEqual(changed.filter(line => /ON TABLE public\."(?:PrintItem|PrintSession)"/.test(line) && line.startsWith("GRANT UPDATE"))
     .map(line => /ON TABLE public\."([^"]+)"/.exec(line)?.[1]).sort(), ["PrintItem", "PrintSession"]);
   const qrGrants = changed.filter(line => line.includes('ON TABLE public."QRCode"'));

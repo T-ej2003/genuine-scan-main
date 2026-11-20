@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='d9012d0658e194fbe99c7c479db2e6b1140ece438fb0fe901f04ebca3c9f1c3d'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:d9012d0658e194fbe99c7c479db2e6b1140ece438fb0fe901f04ebca3c9f1c3d'
+    AND source_contract_sha256='dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7'
     AND administrator_role='certification-administrator'
 
     AND phase='runtime-grants-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d9012d0658e194fbe99c7c479db2e6b1140ece438fb0fe901f04ebca3c9f1c3d')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -824,6 +824,8 @@ CREATE POLICY "printing_lifecycle_organization_select" ON public."Organization" 
 COMMENT ON POLICY "printing_lifecycle_organization_select" ON public."Organization" IS '{"boundary":"release-fix-5-printing-lifecycle","ownerIdentity":"identity-auth-function-owner","scope":"verified session or exact connector/worker operation plus row-local printing selector"}';
 CREATE POLICY "printing_lifecycle_auditlog_insert" ON public."AuditLog" AS PERMISSIVE FOR INSERT TO "mscqr_rls_cert_auth_owner" WITH CHECK ((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail'))) AND id=current_setting('app.printing_audit_id',true));
 COMMENT ON POLICY "printing_lifecycle_auditlog_insert" ON public."AuditLog" IS '{"boundary":"release-fix-5-printing-lifecycle","ownerIdentity":"identity-auth-function-owner","scope":"verified session or exact connector/worker operation plus row-local printing selector"}';
+CREATE POLICY "printing_lifecycle_auditlog_select" ON public."AuditLog" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND "userId"=current_setting('app.printing_user_id',true) AND "orgId"=current_setting('app.printing_organization_id',true) AND "licenseeId"=current_setting('app.printing_licensee_id',true) AND action='PRINTER_TEST_LABEL_CONFIRMED' AND "entityType"='Printer' AND "entityId"=current_setting('app.printing_printer_id',true));
+COMMENT ON POLICY "printing_lifecycle_auditlog_select" ON public."AuditLog" IS '{"boundary":"release-fix-5-printing-lifecycle","ownerIdentity":"identity-auth-function-owner","scope":"verified session or exact connector/worker operation plus row-local printing selector"}';
 CREATE POLICY "printing_lifecycle_securityeventoutbox_insert" ON public."SecurityEventOutbox" AS PERMISSIVE FOR INSERT TO "mscqr_rls_cert_auth_owner" WITH CHECK ((current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail'))) AND id=current_setting('app.printing_outbox_id',true));
 COMMENT ON POLICY "printing_lifecycle_securityeventoutbox_insert" ON public."SecurityEventOutbox" IS '{"boundary":"release-fix-5-printing-lifecycle","ownerIdentity":"identity-auth-function-owner","scope":"verified session or exact connector/worker operation plus row-local printing selector"}';
 CREATE POLICY "printing_lifecycle_actionidempotencykey_select" ON public."ActionIdempotencyKey" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) LIKE 'printing-idempotency-%' AND "keyHash"=current_setting('app.printing_idempotency_key_hash',true));

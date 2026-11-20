@@ -105,16 +105,31 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   const settledId=psql(admin,`SELECT id FROM public."PrintItem" WHERE "printSessionId"='${historySession}' AND state='PRINT_CONFIRMED' LIMIT 1`);
   const journalEntries=[...uncertain,{name:`${hash('settled-journal')}.json`,sha256:hash('settled-record'),
     printJobId:historyJob,printItemId:settledId,attemptId:null,state:'ATTEMPT_RESERVED'}];
+  const diagnosticId=randomUUID();
+  const diagnostic={name:`${hash('settled-diagnostic')}.json`,sha256:hash('diagnostic-record'),
+    printJobId:`diagnostic:${diagnosticId}`,printItemId:`diagnostic:${diagnosticId}`,
+    attemptId:null,state:'ATTEMPT_RESERVED'};
+  const unverified=[...journalEntries,diagnostic];
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('unverified-diagnostic')}','${JSON.stringify(unverified)}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_MISMATCH/,'a diagnostic without durable confirmation remains blocked');
+  psql(admin,`INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details)
+    SELECT '${randomUUID()}',"assignedUserId","orgId","licenseeId",'PRINTER_TEST_LABEL_CONFIRMED','Printer',id,
+      jsonb_build_object('testJobId','${diagnosticId}') FROM public."Printer" WHERE id='${printer}'`);
+  journalEntries.push(diagnostic);
   const journalHash=hash(JSON.stringify(journalEntries.map(({name,sha256})=>[name,sha256])));
   for(const [table,column] of [['PrintItem','frozenAt'],['PrintSession','frozenItems']]) {
     assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."${table}"','${column}','UPDATE')`),'t');
     assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_app','public."${table}"','${column}','UPDATE')`),'f');
   }
+  assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."AuditLog"','details','SELECT')`),'t');
+  assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_app','public."AuditLog"','details','SELECT')`),'t',
+    'application audit access remains governed by its own RLS policies');
   const protection=`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${journalHash}','${JSON.stringify(journalEntries)}'::jsonb)`;
   const protectedResult=JSON.parse(psql(app,protection));
   assert.equal(protectedResult.protected,12,'uncertain attempts must be durably protected');
-  assert.equal(protectedResult.settled,1,'confirmed history must be verified without freezing it');
+  assert.equal(protectedResult.settled,2,'confirmed print and diagnostic history must be verified without freezing them');
   assert.equal(protectedResult.protectedItemIds.length,12);
   assert.equal(protectedResult.newlyProtected,12,'nullable dispatch metadata must not skip the first protection write');
   assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');

@@ -16,9 +16,10 @@ const sqlFile = (relativePath, repositoryRoot) => fs.readFileSync(path.join(repo
 // C02 printing and connector-upgrade grants belong to their separately governed installations, never B03.
 export function selectB03GrantDelta(changedGrants) {
   const c02Grants = new Set(NAMED_SQL_FUNCTION_CONTRACTS
-    .filter(({ name }) => ["printing_connector_session", "printing_control_job", "printing_reissue_request"].includes(name))
+    .filter(({ name }) => ["printing_connector_session", "printing_control_job", "printing_reissue_request", "printing_upgrade_protect_unknown"].includes(name))
     .flatMap(({ security }) => security.ownerPrivileges)
     .filter(([table, privilege]) => table === "PrinterAgentSession" ||
+      (table === "AuditLog" && privilege === "SELECT") ||
       (privilege === "SELECT" && ["PrintItemEvent", "PrintJobChunk"].includes(table)) ||
       (table === "QRCode" && ["SELECT", "UPDATE"].includes(privilege)) ||
       (["PrintItem", "PrintSession"].includes(table) && privilege === "UPDATE"))

@@ -3942,6 +3942,21 @@
       "ownerIdentity": "identity-auth-function-owner"
     },
     {
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "userId",
+        "orgId",
+        "licenseeId",
+        "action",
+        "entityType",
+        "entityId",
+        "details"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
       "table": "SecurityEventOutbox",
       "command": "INSERT",
       "columns": [

@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "d9012d0658e194fbe99c7c479db2e6b1140ece438fb0fe901f04ebca3c9f1c3d",
+  "sourceContractSha256": "dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -108,7 +108,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "1c1fa4547e4e587b0f7d85d44759ecc476748f79c29616541d2e62876a0988b1"
+      "sha256": "5dae06bed89351367346881ee6769b46ec11fb33fc46e7c2ed3c9931c8b4df26"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -394,7 +394,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 389,
+    "generatedPolicies": 390,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 57,
     "prismaEnums": 58,
@@ -412,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:d9012d0658e194fbe99c7c479db2e6b1140ece438fb0fe901f04ebca3c9f1c3d",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
