@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
 import { administerPrintingPrinter } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { issueConnectorIsolationEvidence, verifyConnectorIsolationEvidence } from "../services/connectorMaintenanceEvidence";
-import { upgradeAttemptKey, upgradeChallengeSchema, upgradeHandoffKey, upgradeProofKey } from "../services/connectorUpgradeDeviceProof";
+import { upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradeProofKey } from "../services/connectorUpgradeDeviceProof";
 import { verifyMaintenanceCheckpoint } from "../services/connectorUpgradeDeviceProof";
 import { trustedBinding } from "./connectorUpgradeDeviceProofController";
 import { getConnectorReleaseManifest } from "../services/connectorReleaseService";
@@ -83,9 +83,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
     let token: string | undefined;
     let payload: Record<string, unknown> = {};
     if (input.action === "authorize") {
-      token = randomBytes(32).toString("hex");
-      payload = { evidence: verifyConnectorIsolationEvidence(input.evidence),
-        tokenHash: createHash("sha256").update(token).digest("hex") };
+      payload = { evidence: verifyConnectorIsolationEvidence(input.evidence) };
       if ((payload.evidence as any).binding?.protocolVersion !== LOCAL_AGENT_DIRECT_PROTOCOL_VERSION) throw new Error("MAINTENANCE_PROTOCOL_UNSUPPORTED");
       const evidence = payload.evidence as any;
       const binding = evidence.binding;
@@ -110,19 +108,30 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       if (await redis.set(upgradeAttemptKey(binding.attemptId),
         JSON.stringify({ ...JSON.parse(attemptRaw), fenceRequestId: binding.fenceRequestId }), "PX", 86_400_000) !== "OK")
         throw new Error("CONNECTOR_UPGRADE_ATTEMPT_STORE_UNAVAILABLE");
+      const ttl = Math.min(900_000, Date.parse(evidence.expiresAt) - Date.now());
+      if (ttl <= 0) throw new Error("CONNECTOR_UPGRADE_HANDOFF_UNAVAILABLE");
+      const authorizationKey = upgradeAuthorizationKey(evidence.evidenceSha256);
+      let authorization = await redis.get(authorizationKey);
+      if (!authorization) {
+        const candidate = JSON.stringify({ token: sealCookieToken(randomBytes(32).toString("hex"), "connector-upgrade.authorization"),
+          capability: sealCookieToken(printingCapability(req), "auth.database-session"), binding, printerId: String(req.params.id) });
+        if (await redis.set(authorizationKey, candidate, "PX", ttl, "NX") === "OK") authorization = candidate;
+        else authorization = await redis.get(authorizationKey);
+      }
+      if (!authorization) throw new Error("CONNECTOR_UPGRADE_HANDOFF_UNAVAILABLE");
+      const authorizationRecord = JSON.parse(authorization);
+      token = openCookieToken(String(authorizationRecord.token), "connector-upgrade.authorization") || undefined;
+      if (!token || !/^[a-f0-9]{64}$/.test(token) || authorizationRecord.printerId !== req.params.id ||
+          JSON.stringify(authorizationRecord.binding) !== JSON.stringify(binding)) throw new Error("CONNECTOR_UPGRADE_HANDOFF_UNAVAILABLE");
+      payload.tokenHash = createHash("sha256").update(token).digest("hex");
+      const handoff = JSON.stringify({ capability: authorizationRecord.capability, binding, printerId: authorizationRecord.printerId });
+      const handoffKey = upgradeHandoffKey(String(payload.tokenHash));
+      if (await redis.set(handoffKey, handoff, "PX", ttl, "NX") !== "OK" && await redis.get(handoffKey) !== handoff)
+        throw new Error("CONNECTOR_UPGRADE_HANDOFF_UNAVAILABLE");
     } else if (input.action === "release") {
       payload = { evidence: verifyConnectorIsolationEvidence(input.evidence,"mscqr-upgrade-verification-v1") };
     } else if (input.action === "consume" || input.action === "verify") {
       payload = { binding: input.binding, tokenHash: createHash("sha256").update(input.token).digest("hex") };
-    }
-    if (token && input.action === "authorize") {
-      const redis = await getRedisClient();
-      const evidence = payload.evidence as any;
-      const ttl = Math.min(900_000, Date.parse(evidence.expiresAt) - Date.now());
-      if (!redis || ttl <= 0 || await redis.set(upgradeHandoffKey(String(payload.tokenHash)),
-        JSON.stringify({ capability: sealCookieToken(printingCapability(req), "auth.database-session"),
-          binding: evidence.binding, printerId: String(req.params.id) }), "PX", ttl, "NX") !== "OK")
-        throw new Error("CONNECTOR_UPGRADE_HANDOFF_UNAVAILABLE");
     }
     const data = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
       operation: ({ request: "MAINTENANCE_REQUEST", inventory: "MAINTENANCE_INVENTORY", authorize: "MAINTENANCE_AUTHORIZE",

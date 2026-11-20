@@ -1494,7 +1494,8 @@ async function main() {
       {user:{userId:ids.maker}},'print.mutation',req=>req.user.userId);
     await rateRedis.del(`rl:${routeKey}`);
     const authorityResult=await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(statement)},200);
-    await postMaintenance('maker',{action:'authorize',evidence:lastAuthorizeEvidence},403);
+    const recoveredAuthorization=await postMaintenance('maker',{action:'authorize',evidence:lastAuthorizeEvidence},200);
+    assert.equal(recoveredAuthorization.data.token,authorityResult.data.token,'lost response must recover the same authorization');
     const expiredChallengeId=randomUUID();
     const expiredProofSha256=hash(expiredChallengeId);
     const expiredStatement={...statement,challengeId:expiredChallengeId,deviceProofSha256:expiredProofSha256};

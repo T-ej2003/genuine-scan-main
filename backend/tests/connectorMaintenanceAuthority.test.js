@@ -27,6 +27,7 @@ const records = new Map([
 let unresolved = false;
 let failHandoffStore = false;
 let authorizations = 0;
+let authorizedTokenHash;
 const redis = { get: async key => records.get(key) || null,
   set: async (key, value, _px, _ttl, nx) => { if (failHandoffStore && key.startsWith('connector-upgrade:handoff:')) return null;
     if (nx === 'NX' && records.has(key)) return null;
@@ -48,9 +49,12 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrint
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
     workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : [],
       diagnostics: {}, localDiagnostics: [] } };
-  if (input.operation === 'MAINTENANCE_AUTHORIZE') { if (authorizations) throw new Error('MAINTENANCE_ATTEMPT_ALREADY_EXISTS');
-    authorizations += 1; return { authorized: true, dispatchFenced: true,
-    binding: input.payload.evidence.binding }; }
+  if (input.operation === 'MAINTENANCE_AUTHORIZE') {
+    if (authorizations && (consumed || authorizedTokenHash !== input.payload.tokenHash))
+      throw new Error('MAINTENANCE_ATTEMPT_ALREADY_EXISTS');
+    if (!authorizations) { authorizations += 1; authorizedTokenHash = input.payload.tokenHash; }
+    return { authorized: true, dispatchFenced: true, binding: input.payload.evidence.binding };
+  }
   if (input.operation === 'MAINTENANCE_CONSUME') {
     if (consumed) throw new Error('MAINTENANCE_AUTHORIZATION_DENIED');
     consumed = true;
@@ -117,19 +121,27 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     assert.equal(noHandoff.code, 409);
     assert.equal(authorizations, 0, 'database authorization must not commit before handoff storage succeeds');
     assert(records.has(proofService.upgradeProofKey(challenge.challengeId)), 'proof must survive a failed handoff store');
+    const reservedAuthorization = JSON.parse(records.get(proofService.upgradeAuthorizationKey(hash(accepted.body.evidence.statement))));
     failHandoffStore = false;
     const issued = response();
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), issued);
     assert.equal(issued.code, 200);
+    assert.equal(issued.body.data.token, reservedAuthorization.token.slice('sealed:'.length),
+      'retry must reuse the token reserved before the failed handoff publication');
     const duplicate = response();
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), duplicate);
-    assert.equal(duplicate.code, 409, 'the serialized database gate rejects a second authorization');
+    assert.equal(duplicate.code, 200, 'lost HTTP responses recover the same live authorization');
     const token = issued.body.data.token;
+    assert.equal(duplicate.body.data.token, token);
+    assert.equal(authorizations, 1);
     assert.equal(typeof token, 'string');
     assert(records.has(proofService.upgradeHandoffKey(hash(token))));
     const handoff = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'consume', token, binding }), handoff);
     assert.equal(handoff.code, 200);
+    const afterConsumption = response();
+    await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), afterConsumption);
+    assert.equal(afterConsumption.code, 409, 'consumed authorization cannot be reissued');
     const replay = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'consume', token, binding }), replay);
     assert.equal(replay.code, 403);

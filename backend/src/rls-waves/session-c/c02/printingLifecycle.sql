@@ -95,6 +95,15 @@ BEGIN
        p_details->'binding'->>'fenceRequestId' IS DISTINCT FROM current_value->>'requestId'
     THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
     IF p_operation='AUTHORIZE' THEN
+      -- A lost HTTP response may retry the same signed evidence and token.
+      -- A consumed token or different evidence must never be reissued.
+      IF current_value->'upgrade'->>'state'='AUTHORIZED' AND
+         current_value->'upgrade'->>'actor'=p_actor AND
+         current_value->'upgrade'->>'tokenHash'=p_details->>'tokenHash' AND
+         current_value->'upgrade'->'binding'=p_details->'binding' AND
+         current_value->'upgrade'->'evidence'=p_details->'evidence' AND
+         (current_value->'upgrade'->>'expiresAt')::timestamptz>clock_timestamp()
+      THEN RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',true); END IF;
       IF coalesce(p_details->>'tokenHash','') !~ '^[a-f0-9]{64}$' OR
          (current_value ? 'upgrade' AND (
            current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR

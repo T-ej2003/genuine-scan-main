@@ -23,6 +23,7 @@ export type UpgradeDeviceChallenge = z.infer<typeof upgradeChallengeSchema>;
 export const upgradeAttemptKey = (id: string) => `connector-upgrade:attempt:${id}`;
 export const upgradeProofKey = (id: string) => `connector-upgrade:proof:${id}`;
 export const upgradeHandoffKey = (tokenHash: string) => `connector-upgrade:handoff:${tokenHash}`;
+export const upgradeAuthorizationKey = (evidenceSha256: string) => `connector-upgrade:authorization:${evidenceSha256}`;
 
 export const createUpgradeDeviceChallenge = (binding: Omit<UpgradeDeviceChallenge, "purpose" | "challengeId" | "nonce" | "expiresAt">, now = Date.now()): UpgradeDeviceChallenge =>
   upgradeChallengeSchema.parse({ ...binding, purpose, challengeId: randomUUID(), nonce: randomBytes(32).toString("base64url"),

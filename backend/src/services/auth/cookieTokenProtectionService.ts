@@ -6,6 +6,7 @@ type CookieTokenPurpose =
   | "auth.access"
   | "auth.refresh"
   | "auth.database-session"
+  | "connector-upgrade.authorization"
   | "customer-verify.session";
 
 const COOKIE_TOKEN_VERSION = "v1";
