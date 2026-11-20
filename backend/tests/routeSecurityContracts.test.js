@@ -36,6 +36,10 @@ assert(
   appSource.includes("app.use(express.urlencoded({ extended: false, limit: \"1mb\" })); app.use(express.json({ limit: \"1mb\" })); app.use(sanitizeRequestInput);"),
   "app root should mount request sanitization globally after body parsers and before routes"
 );
+assert(
+  appSource.includes('app.use("/api/manufacturer/printers/:id/maintenance/evidence", express.json({ limit: "10mb" })); app.use(express.urlencoded'),
+  "bounded maintenance checkpoints should be parsed only on their authenticated evidence route"
+);
 
 [
   "...loginLimiters",
