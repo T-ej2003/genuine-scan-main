@@ -377,6 +377,8 @@ const run = async () => {
     upgradeTransaction.includes("$uri.AbsolutePath -cne '/api/connector-upgrade/handoff'") &&
     upgradeTransaction.includes("Handoff cannot carry browser credentials.") &&
     !upgradeTransaction.includes('X-Database-Session-Capability') &&
+    upgradeTransaction.indexOf("Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options") > 0 &&
+    upgradeTransaction.indexOf("Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") > 0 &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") > 0 &&

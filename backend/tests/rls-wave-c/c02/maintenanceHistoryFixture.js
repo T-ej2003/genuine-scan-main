@@ -102,24 +102,31 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   assert.equal(snapshot.inventory.items.length,12,'twelve legacy reservations remain individually visible');
   const uncertain=snapshot.inventory.items.map((item,index)=>({name:`${hash(`upgrade-journal-${index}`)}.json`,
     sha256:hash(`upgrade-record-${index}`),printJobId:job,printItemId:item.id,attemptId:null,state:'ATTEMPT_RESERVED'}));
-  const journalHash=hash(JSON.stringify(uncertain.map(({name,sha256})=>[name,sha256])));
+  const settledId=psql(admin,`SELECT id FROM public."PrintItem" WHERE "printSessionId"='${historySession}' AND state='PRINT_CONFIRMED' LIMIT 1`);
+  const journalEntries=[...uncertain,{name:`${hash('settled-journal')}.json`,sha256:hash('settled-record'),
+    printJobId:historyJob,printItemId:settledId,attemptId:null,state:'ATTEMPT_RESERVED'}];
+  const journalHash=hash(JSON.stringify(journalEntries.map(({name,sha256})=>[name,sha256])));
   for(const [table,column] of [['PrintItem','frozenAt'],['PrintSession','frozenItems']]) {
     assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."${table}"','${column}','UPDATE')`),'t');
     assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_app','public."${table}"','${column}','UPDATE')`),'f');
   }
   const protection=`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
-    '${printer}','${snapshot.requestId}','${journalHash}','${JSON.stringify(uncertain)}'::jsonb)`;
-  assert.equal(JSON.parse(psql(app,protection)).protected,12,'uncertain attempts must be durably protected');
+    '${printer}','${snapshot.requestId}','${journalHash}','${JSON.stringify(journalEntries)}'::jsonb)`;
+  const protectedResult=JSON.parse(psql(app,protection));
+  assert.equal(protectedResult.protected,12,'uncertain attempts must be durably protected');
+  assert.equal(protectedResult.settled,1,'confirmed history must be verified without freezing it');
+  assert.equal(protectedResult.protectedItemIds.length,12);
   assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${journalHash}',NULL::jsonb)`,true),/UPGRADE_NO_REPLAY_DENIED/);
   assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem" WHERE id IN ('${uncertain.map(item=>item.printItemId).join("','")}')
     AND state='FROZEN' AND "pipelineState"='NEEDS_OPERATOR_ACTION'
     AND "dispatchMetadata"->'upgradeNoReplay'->>'journalSha256'='${journalHash}'`),'12');
+  assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${settledId}'`),'PRINT_CONFIRMED');
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
-    '${printer}','${snapshot.requestId}','${hash('forged-journal')}','${JSON.stringify(uncertain)}'::jsonb)`,true),/UPGRADE_NO_REPLAY_MISMATCH/);
+    '${printer}','${snapshot.requestId}','${hash('forged-journal')}','${JSON.stringify(journalEntries)}'::jsonb)`,true),/UPGRADE_NO_REPLAY_MISMATCH/);
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
-    '${ids.foreignPrinter}','${snapshot.requestId}','${journalHash}','${JSON.stringify(uncertain)}'::jsonb)`,true),
+    '${ids.foreignPrinter}','${snapshot.requestId}','${journalHash}','${JSON.stringify(journalEntries)}'::jsonb)`,true),
     /permission denied|PRINTING_BOUNDARY_DENIED|UPGRADE_NO_REPLAY_DENIED/);
   const claimed=await psqlAsync(app,`SELECT app_rls.printing_connector_event('${registration}','${agent}','${device}','history_fenced_claim_nonce',now()::timestamp,'${randomUUID()}','CLAIM','${randomUUID()}',NULL,'${printer}',NULL,NULL,'{}'::jsonb)`);
   assert.notEqual(claimed.status,0);assert.match(claimed.output,/CONNECTOR_MAINTENANCE_FENCED/);

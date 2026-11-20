@@ -752,6 +752,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $fn$
 DECLARE snapshot jsonb; registration_id text; expected_count integer;
   matches jsonb; entry jsonb; item_row record; marker jsonb; added integer:=0;
+  settled integer:=0; protected_ids jsonb:='[]'::jsonb;
 BEGIN
   IF session_user <> 'mscqr_prd_rls_phase2_app' OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
      p_fence_request_id IS NULL OR p_fence_request_id !~* '^[0-9a-f-]{36}$' OR
@@ -788,7 +789,6 @@ BEGIN
     JOIN public."PrintJob" j ON j.id=ps."printJobId"
     WHERE ps."printerRegistrationId"=registration_id AND
       j."manufacturerId"=current_setting('app.printing_user_id',true) AND
-      pi."printConfirmedAt" IS NULL AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED') AND
       (e."attemptId" IS NOT DISTINCT FROM pi."dispatchMetadata"->>'attemptId');
   IF jsonb_array_length(matches)<>expected_count
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
@@ -805,10 +805,16 @@ BEGIN
       'entrySha256',entry->>'entrySha256','attemptId',entry->>'attemptId');
     IF item_row."printSessionId" IS DISTINCT FROM entry->>'sessionId' OR
        item_row."qrCodeId" IS DISTINCT FROM entry->>'qrCodeId' OR
-       item_row."printConfirmedAt" IS NOT NULL OR item_row.state IN ('PRINT_CONFIRMED','CLOSED') OR
        (item_row."dispatchMetadata" ? 'upgradeNoReplay' AND
          item_row."dispatchMetadata"->'upgradeNoReplay' IS DISTINCT FROM marker)
     THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
+    IF item_row."printConfirmedAt" IS NOT NULL AND item_row.state IN ('PRINT_CONFIRMED','CLOSED') THEN
+      settled:=settled+1;
+      CONTINUE;
+    END IF;
+    IF item_row."printConfirmedAt" IS NOT NULL OR item_row.state IN ('PRINT_CONFIRMED','CLOSED')
+    THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
+    protected_ids:=protected_ids||jsonb_build_array(entry->>'itemId');
     IF NOT (item_row."dispatchMetadata" ? 'upgradeNoReplay') THEN
       UPDATE public."PrintItem" pi SET state='FROZEN',"pipelineState"='NEEDS_OPERATOR_ACTION',
         "frozenAt"=coalesce(pi."frozenAt",clock_timestamp()),"failureReason"='physical_outcome_unconfirmed',
@@ -827,7 +833,8 @@ BEGIN
       "pipelineState"='NEEDS_OPERATOR_ACTION',"failureReason"='physical_outcome_unconfirmed',"updatedAt"=clock_timestamp()
       WHERE j.id=entry->>'jobId';
   END LOOP;
-  RETURN jsonb_build_object('protected',expected_count,'newlyProtected',added,'journalSha256',p_journal_sha256);
+  RETURN jsonb_build_object('protected',expected_count-settled,'settled',settled,
+    'protectedItemIds',protected_ids,'newlyProtected',added,'journalSha256',p_journal_sha256);
 END
 $fn$;
 

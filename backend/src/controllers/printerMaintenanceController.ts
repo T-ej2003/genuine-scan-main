@@ -56,6 +56,7 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
         Object.keys(snapshot.inventory?.diagnostics || {}).length !== 0 ||
         (snapshot.inventory?.localDiagnostics || []).length !== 0)
       throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
+    let protectedItemIds: string[] = [];
     if (checkpoint.journal.count > 0) {
       const fenceRequestId = input.binding.fenceRequestId;
       if (typeof fenceRequestId !== "string") throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
@@ -63,13 +64,19 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
         requestId: printingRequestId(req), printerId: trusted.printerId,
         fenceRequestId, journalSha256: checkpoint.journal.sha256,
         entries: checkpoint.journal.entries });
-      if (protectedResult.protected !== checkpoint.journal.count) throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
+      if (!Array.isArray(protectedResult.protectedItemIds) ||
+          protectedResult.protectedItemIds.length !== protectedResult.protected ||
+          protectedResult.protected + protectedResult.settled !== checkpoint.journal.count)
+        throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
+      protectedItemIds = protectedResult.protectedItemIds;
       snapshot = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
         operation: "MAINTENANCE_INVENTORY", printerId: trusted.printerId, payload: {} });
     }
-    const journalByItem = new Map(checkpoint.journal.entries.map(entry => [entry.printItemId, entry]));
+    const protectedSet = new Set(protectedItemIds);
+    const journalByItem = new Map(checkpoint.journal.entries
+      .filter(entry => protectedSet.has(entry.printItemId)).map(entry => [entry.printItemId, entry]));
     if (snapshot.state !== "DISPATCH_FENCED" || snapshot.requestId !== input.binding.fenceRequestId ||
-        snapshot.inventory.items.length !== journalByItem.size ||
+        journalByItem.size !== protectedSet.size || snapshot.inventory.items.length !== journalByItem.size ||
         snapshot.inventory.items.some((item: any) => {
           const entry = journalByItem.get(item.id);
           const marker = item.dispatchMetadata?.upgradeNoReplay;

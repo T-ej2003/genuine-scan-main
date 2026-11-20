@@ -193,6 +193,10 @@ function Stop-MscqrVerifiedRuntime([string]$Runtime, [string]$Hash) {
     $listeners=@(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction Stop)
     if ($listeners.Count -eq 0 -or @($listeners | Where-Object { $_.OwningProcess -ne $processes[0].ProcessId -or
           $_.LocalAddress -notin @('127.0.0.1','::1') }).Count) { throw 'Connector checkpoint listener ownership is unverified.' }
+    $shutdownRoute=Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction Stop
+    if ($shutdownRoute.StatusCode -ne 200 -or [string]$shutdownRoute.Headers['Allow'] -notmatch '(^|,\s*)POST($|,)') {
+      throw 'Installed connector does not support verified maintenance shutdown.'
+    }
     $fence=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence' -Method Post -TimeoutSec 5 -ErrorAction Stop
     if ($fence.success -isnot [bool] -or -not $fence.success) { throw 'Connector did not persist its maintenance fence.' }
     $drained=$false

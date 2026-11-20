@@ -26,6 +26,7 @@ const records = new Map([
 ]);
 let unresolved = false;
 let protectedEntries = [];
+let protectedJournalSha;
 let failHandoffStore = false;
 let authorizations = 0;
 let authorizedTokenHash;
@@ -57,13 +58,15 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
   } else if (!consumed) throw new Error('MAINTENANCE_AUTHORIZATION_DENIED');
   return { authorized: true, dispatchFenced: true, binding: input.binding };
 }, protectUpgradeUnknownAttempts: async input => {
-  protectedEntries = input.entries;
-  return { protected: input.entries.length };
+  protectedEntries = input.entries.filter(entry => entry.printItemId !== 'settled-item');
+  protectedJournalSha = input.journalSha256;
+  return { protected: protectedEntries.length, settled: input.entries.length - protectedEntries.length,
+    protectedItemIds: protectedEntries.map(entry => entry.printItemId) };
 }, administerPrintingPrinter: async input => {
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
     workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : protectedEntries.map(entry => ({
       id: entry.printItemId, state: 'FROZEN', pipelineState: 'NEEDS_OPERATOR_ACTION',
-      dispatchMetadata: { upgradeNoReplay: { journalSha256: hash(JSON.stringify(protectedEntries.map(({ name, sha256 }) => [name, sha256]))),
+      dispatchMetadata: { upgradeNoReplay: { journalSha256: protectedJournalSha,
         entrySha256: entry.sha256, attemptId: entry.attemptId } },
     })),
       diagnostics: {}, localDiagnostics: [] } };
@@ -125,6 +128,22 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const protectedEvidence = require(path.join(dist, 'services/connectorMaintenanceEvidence')).verifyConnectorIsolationEvidence(reservedResult.body.evidence);
     assert.equal(protectedEvidence.reconciliations.length, 12);
     assert(protectedEvidence.reconciliations.every(item => item.outcome === 'PROTECTED_UNKNOWN'));
+    const settledEntry = { name: `${hash('settled-journal')}.json`, sha256: hash('settled-record'),
+      printJobId: 'settled-job', printItemId: 'settled-item', attemptId: null, state: 'ATTEMPT_RESERVED' };
+    const historicalEntries = [...entries, settledEntry];
+    const historical = proofService.signMaintenanceCheckpoint(device.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), {
+      purpose: 'mscqr-connector-maintenance-checkpoint-v1', challenge, observedAt: new Date().toISOString(),
+      fence: { fenced: true, active: 0, idle: true, socketClosed: true },
+      journal: { count: historicalEntries.length, entries: historicalEntries,
+        sha256: hash(JSON.stringify(historicalEntries.map(({ name, sha256 }) => [name, sha256]))) },
+      physicalOutcomes: 'UNVERIFIED',
+    });
+    const historicalResult = response();
+    await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId,
+      checkpoint: historical, binding }), historicalResult);
+    assert.equal(historicalResult.code, 200);
+    const historicalEvidence = require(path.join(dist, 'services/connectorMaintenanceEvidence')).verifyConnectorIsolationEvidence(historicalResult.body.evidence);
+    assert.equal(historicalEvidence.reconciliations.length, 12, 'settled history is verified but is not frozen again');
     protectedEntries = [];
     const wrongInstaller = response();
     await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId, checkpoint,
