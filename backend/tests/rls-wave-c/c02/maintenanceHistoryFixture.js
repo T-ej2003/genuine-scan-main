@@ -60,8 +60,30 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   const oversize=await call({action:'authorize',evidence:signedEvidence({...padded,padding:padded.padding+'x'})},400);
   assert.equal(oversize.code,'MAINTENANCE_EVIDENCE_TOO_LARGE');
   const authorization=await call({action:'authorize',evidence:signedEvidence(padded)},200);
-  await call({action:'consume',token:authorization.data.token,binding},200);
-  await call({action:'consume',token:authorization.data.token,binding},403);
+  const handoff=(operation,token=authorization.data.token,details=binding)=>
+    `SELECT app_rls.printing_upgrade_handoff('${operation}','${hash(token)}','${JSON.stringify(details)}'::jsonb)`;
+  // Refresh rotation revokes precisely this predecessor capability timestamp.
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=now() WHERE id='${ids.makerRefresh}'`);
+  assert.match(psql(app,`SELECT app_rls.printing_printer_administration('${capability}','printing-printer-admin',
+    '${randomUUID()}','MAINTENANCE_INVENTORY','${printer}','{}'::jsonb)`,true),/DENIED|REVOKED|revoked|denied/,
+    'the browser capability must actually be invalid before installer redemption');
+  const concurrent=await Promise.all([psqlAsync(app,handoff('CONSUME')),psqlAsync(app,handoff('CONSUME'))]);
+  assert.equal(concurrent.filter(result=>result.status===0).length,1,
+    'one installer redemption must win even after browser capability revocation');
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=NULL WHERE id='${ids.makerRefresh}'`);
+  assert.match(psql(app,handoff('CONSUME'),true),/MAINTENANCE_AUTHORIZATION_DENIED/);
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=now() WHERE id='${ids.makerRefresh}'`);
+  assert.equal(JSON.parse(psql(app,handoff('VERIFY'))).authorized,true);
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=NULL WHERE id='${ids.makerRefresh}'`);
+  assert.match(psql(app,handoff('VERIFY',authorization.data.token,{...binding,manufacturerId:ids.orgB}),true),/UPGRADE_HANDOFF_DENIED/);
+  assert.match(psql(app,handoff('VERIFY',authorization.data.token,{...binding,printerId:ids.foreignPrinter}),true),/UPGRADE_HANDOFF_DENIED/);
+  assert.match(psql(app,handoff('VERIFY',authorization.data.token,{...binding,agentId:'other-agent'}),true),/UPGRADE_HANDOFF_DENIED/);
+  const checkpointKey=psql(admin,`SELECT key FROM public."SystemCheckpoint" WHERE value->'upgrade'->'binding'->>'attemptId'='${binding.attemptId}'`);
+  assert.equal(psql(admin,`SELECT has_table_privilege('mscqr_rls_cert_app','public."SystemCheckpoint"','SELECT')`),'f',
+    'installer role must not read the checkpoint directly');
+  psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,'{upgrade,expiresAt}',to_jsonb((now()-interval '1 second')::text)) WHERE key='${checkpointKey}'`);
+  assert.match(psql(app,handoff('VERIFY'),true),/UPGRADE_HANDOFF_DENIED/);
+  psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,'{upgrade,expiresAt}',to_jsonb('${statement.expiresAt}'::text)) WHERE key='${checkpointKey}'`);
   await call({action:'authorize',evidence:signedEvidence(padded)},409);
   assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${historySession}' AND state IN('PRINT_CONFIRMED','CLOSED') AND "printConfirmedAt" IS NOT NULL`),'100000','authorization must preserve settled audit records');
   // A real confirmation remains possible while fenced. Any evidence from the
@@ -70,6 +92,8 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   const [,confirmation]=await Promise.all([call({action:'inventory'},200),psqlAsync(app,confirm)]);
   assert.equal(confirmation.status,0,confirmation.output);
   await call({action:'verify',token:authorization.data.token,binding},403);
+  assert.equal(JSON.parse(psql(app,handoff('REVOKE'))).revoked,true);
+  assert.match(psql(app,handoff('VERIFY'),true),/UPGRADE_HANDOFF_DENIED/);
   snapshot=inventory();
   assert.equal(snapshot.inventory.items.length,2);assert.equal(snapshot.inventory.settledHistory.items,100001);
   for(let index=0;index<10;index++)newItem('RESERVED',0);

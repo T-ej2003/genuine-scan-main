@@ -740,7 +740,7 @@ AS $fn$
 DECLARE snapshot jsonb; registration_id text; expected_count integer;
   matches jsonb; entry jsonb; item_row record; marker jsonb; added integer:=0;
 BEGIN
-  IF session_user <> mscqr_prd_rls_phase2_app OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
+  IF session_user <> 'mscqr_prd_rls_phase2_app' OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
      p_fence_request_id IS NULL OR p_fence_request_id !~* '^[0-9a-f-]{36}$' OR
      p_entries IS NULL OR jsonb_typeof(p_entries) IS DISTINCT FROM 'array' OR
      jsonb_array_length(p_entries) NOT BETWEEN 1 AND 512
@@ -820,5 +820,47 @@ $fn$;
 
 REVOKE ALL ON FUNCTION app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb) TO "mscqr_prd_rls_phase2_app";
+
+CREATE OR REPLACE FUNCTION app_rls.printing_upgrade_handoff(
+  p_operation text, p_token_hash text, p_binding jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+AS $fn$
+DECLARE scope text; checkpoint_key text; checkpoint jsonb; actor_id text;
+BEGIN
+  IF session_user <> 'mscqr_prd_rls_phase2_app' OR p_operation NOT IN ('CONSUME','VERIFY','REVOKE') OR
+     coalesce(p_token_hash,'') !~ '^[a-f0-9]{64}$' OR jsonb_typeof(p_binding) IS DISTINCT FROM 'object' OR
+     coalesce(p_binding->>'registrationId','') !~* '^[0-9a-f-]{36}$' OR
+     coalesce(p_binding->>'attemptId','') !~* '^[0-9a-f-]{36}$' OR
+     coalesce(p_binding->>'manufacturerId','')='' OR
+     coalesce(p_binding->>'printerId','') !~* '^[0-9a-f-]{36}$'
+  THEN RAISE EXCEPTION 'UPGRADE_HANDOFF_DENIED' USING ERRCODE='42501'; END IF;
+  actor_id:=p_binding->>'manufacturerId';
+  scope:=jsonb_build_array('local',p_binding->>'registrationId')::text;
+  checkpoint_key:='connector-maintenance:'||encode(sha256(convert_to(scope,'UTF8')),'hex');
+  PERFORM set_config('app.printing_maintenance_key',checkpoint_key,true);
+  PERFORM pg_advisory_xact_lock(hashtextextended(checkpoint_key,0));
+  SELECT value INTO STRICT checkpoint FROM public."SystemCheckpoint" WHERE key=checkpoint_key FOR UPDATE;
+  IF checkpoint->>'state' IS DISTINCT FROM 'DISPATCH_FENCED' OR
+     checkpoint->'upgrade'->>'actor' IS DISTINCT FROM actor_id OR
+     checkpoint->'upgrade'->>'tokenHash' IS DISTINCT FROM p_token_hash OR
+     checkpoint->'upgrade'->'binding' IS DISTINCT FROM p_binding OR
+     checkpoint->'upgrade'->'binding'->>'fenceRequestId' IS DISTINCT FROM checkpoint->>'requestId' OR
+     coalesce((checkpoint->'upgrade'->>'expiresAt')::timestamptz,'-infinity')<=clock_timestamp() OR
+     checkpoint->'upgrade'->>'state' NOT IN ('AUTHORIZED','CONSUMED')
+  THEN RAISE EXCEPTION 'UPGRADE_HANDOFF_DENIED' USING ERRCODE='42501'; END IF;
+  IF p_operation='REVOKE' THEN
+    UPDATE public."SystemCheckpoint" SET value=jsonb_set(checkpoint,'{upgrade,state}',to_jsonb('REVOKED'::text)),
+      "updatedAt"=clock_timestamp() WHERE key=checkpoint_key;
+    RETURN jsonb_build_object('revoked',true,'dispatchFenced',true);
+  END IF;
+  RETURN app_rls.printing_maintenance_gate(scope,p_operation,actor_id,
+    jsonb_build_object('binding',p_binding,'tokenHash',p_token_hash,
+      'workDigest',checkpoint->'upgrade'->'evidence'->>'workDigest'));
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.printing_upgrade_handoff(text,text,jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_rls.printing_upgrade_handoff(text,text,jsonb) TO "mscqr_prd_rls_phase2_app";
 
 COMMIT;

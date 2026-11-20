@@ -345,12 +345,17 @@ const qrSystemAppSignatures = qrSystemContracts.filter((contract) => contract.se
 const qrSystemWorkerSignatures = qrSystemContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const qrSystemOwnerPrivileges = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const qrSystemOwnerPolicies = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
-const printingLifecycleFunctionSource = readContractSources(printingLifecycleContracts, [
-  ["{{APP_ROLE}}", lit(roleNames.app)],
-  ["{{WORKER_ROLE}}", lit(roleNames.worker)],
+const printingLifecycleBaseContracts = printingLifecycleContracts.filter((contract) => contract.definitionLocation.endsWith("/printingLifecycle.sql"));
+const printingLifecycleUpgradeContracts = printingLifecycleContracts.filter((contract) => contract.definitionLocation.endsWith("/printingUpgradeNoReplayDefinitions.sql"));
+const printingLifecycleFunctionSource = readContractSources(printingLifecycleBaseContracts, [
+  ["{{APP_ROLE}}", lit(roleNames.app)], ["{{WORKER_ROLE}}", lit(roleNames.worker)],
 ]);
-const printingLifecycleAppSignatures = printingLifecycleContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
-const printingLifecycleWorkerSignatures = printingLifecycleContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const printingLifecycleUpgradeSource = readContractSources(printingLifecycleUpgradeContracts, [
+  ["{{APP_ROLE}}", lit(roleNames.app)], ["{{WORKER_ROLE}}", lit(roleNames.worker)],
+]);
+const printingLifecycleAppSignatures = printingLifecycleBaseContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const printingLifecycleUpgradeAppSignatures = printingLifecycleUpgradeContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const printingLifecycleWorkerSignatures = printingLifecycleBaseContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleOwnerPrivileges = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const printingLifecycleOwnerPolicies = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const publicVerificationFunctionSource = publicVerificationContracts.length
@@ -2859,6 +2864,17 @@ const files = new Map([
   ["15-migration-preflight.sql", transactionalPhase(migrationPreflightSql)],
   ["11-ownership-grants.sql", transactionalPhase(roleOwnershipSql)],
   ["20-context-helpers.sql", transactionalPhase(contextHelpersSql)],
+  ["22-printing-upgrade.sql", transactionalPhase(`\\set ON_ERROR_STOP on
+${setRole(roleNames.owner)}
+GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${resetRole}
+${setRole(roleNames.authOwner)}
+${printingLifecycleUpgradeSource}
+${printingLifecycleUpgradeAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${resetRole}
+${setRole(roleNames.owner)}
+REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
+${resetRole}`)],
   ["21-runtime-grants.sql", transactionalPhase(runtimeGrantsSql)],
   ["30-policies.sql", transactionalPhase(policiesSql)],
   ["40-post-apply-verification.sql", transactionalPhase(verificationSql)],
@@ -2868,7 +2884,7 @@ const files = new Map([
 files.set("admin-bootstrap.sql", "\\set ON_ERROR_STOP on\n\\ir 00-preflight.sql\n\\ir 10-roles.sql\n");
 files.set("migration.sql", "\\set ON_ERROR_STOP on\n\\ir 15-migration-preflight.sql\n");
 files.set("admin-ownership.sql", "\\set ON_ERROR_STOP on\n\\ir 11-ownership-grants.sql\n");
-files.set("runtime-policy.sql", "\\set ON_ERROR_STOP on\n\\ir 20-context-helpers.sql\n\\ir 21-runtime-grants.sql\n\\ir 30-policies.sql\n");
+files.set("runtime-policy.sql", "\\set ON_ERROR_STOP on\n\\ir 20-context-helpers.sql\n\\ir 22-printing-upgrade.sql\n\\ir 21-runtime-grants.sql\n\\ir 30-policies.sql\n");
 files.set("verification.sql", "\\set ON_ERROR_STOP on\n\\ir 40-post-apply-verification.sql\n");
 files.set("clean-room-cleanup.sql", "\\set ON_ERROR_STOP on\n\\ir 90-clean-room-role-cleanup.sql\n");
 
@@ -2894,7 +2910,7 @@ const phaseDefinitions = [
   },
   {
     id: "runtime-policy", order: 4, executorClass: "green-cluster-database-administrator", executorRole: administrativeExecutorRole,
-    mutating: true, entrypoint: "runtime-policy.sql", files: ["runtime-policy.sql", "20-context-helpers.sql", "21-runtime-grants.sql", "30-policies.sql"],
+    mutating: true, entrypoint: "runtime-policy.sql", files: ["runtime-policy.sql", "20-context-helpers.sql", "22-printing-upgrade.sql", "21-runtime-grants.sql", "30-policies.sql"],
     requiredCapabilities: ["SET-NOLOGIN-owners", "exact-column-grants", "FORCE-RLS"],
     failureDisposition: "drop-green-database-then-clean-marked-roles",
   },

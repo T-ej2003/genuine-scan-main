@@ -10020,7 +10020,8 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user IN ('mscqr_rls_cert_app','mscqr_rls_cert_worker') AND \"key\"=current_setting('app.printing_maintenance_key',true) AND \"key\" LIKE 'connector-maintenance:%'",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:release-fix-5-maintenance-gate:SystemCheckpoint:SELECT"
+        "contract:release-fix-5-maintenance-gate:SystemCheckpoint:SELECT",
+        "contract:release-fix-5-upgrade-handoff:SystemCheckpoint:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -10047,7 +10048,8 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user IN ('mscqr_rls_cert_app','mscqr_rls_cert_worker') AND \"key\"=current_setting('app.printing_maintenance_key',true) AND \"key\" LIKE 'connector-maintenance:%'",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:release-fix-5-maintenance-gate:SystemCheckpoint:UPDATE"
+        "contract:release-fix-5-maintenance-gate:SystemCheckpoint:UPDATE",
+        "contract:release-fix-5-upgrade-handoff:SystemCheckpoint:UPDATE"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",

@@ -1407,6 +1407,9 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     ["upgrade-protect-unknown","printing_upgrade_protect_unknown","text,text,text,text,text,jsonb","p_capability text, p_request_id text, p_printer_id text, p_fence_request_id text, p_journal_sha256 text, p_entries jsonb","jsonb",
       [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["Printer","SELECT"],["PrintJob","SELECT"],["PrintJob","UPDATE"],["PrintSession","SELECT"],["PrintSession","UPDATE"],["PrintItem","SELECT"],["PrintItem","UPDATE"],["PrintItemEvent","INSERT"]],
       ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:protectUpgradeUnknownAttempts"]],
+    ["upgrade-handoff","printing_upgrade_handoff","text,text,jsonb","p_operation text, p_token_hash text, p_binding jsonb","jsonb",
+      [["SystemCheckpoint","SELECT"],["SystemCheckpoint","UPDATE"]],
+      ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:redeemPrintingUpgradeHandoff"]],
     ["idempotency","printing_idempotency","text,text,text,text,text,text,text,integer,jsonb","p_capability text, p_purpose text, p_request_id text, p_operation text, p_action text, p_key_hash text, p_request_hash text, p_status_code integer, p_response jsonb","jsonb",
       [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]],
       ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:beginPrintingIdempotency","backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:completePrintingIdempotency","backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:abortPrintingIdempotency"]],
@@ -1439,7 +1442,7 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
       ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:mutatePrintingReissueRequest"]],
   ].map(([id,name,signature,identityArguments,returnType,tableCommands,repositoryCallers]) => ({
     id:`release-fix-5-${id}`,schema:"app_rls",name,signature,returnType,identityArguments,
-    definitionLocation:["printing_printer_administration","printing_reissue_request","printing_upgrade_protect_unknown"].includes(name)
+    definitionLocation:["printing_printer_administration","printing_reissue_request","printing_upgrade_protect_unknown","printing_upgrade_handoff"].includes(name)
       ? printingUpgradeNoReplaySource : printingLifecycleSource,definitionKind:"checked-in-production-package",
     definitionStatus:"production-reviewed",security:printingLifecycleSecurity,tableCommands,
     context:"Uses the authenticated database-session capability or the exact connector evidence boundary, derives live tenant and manufacturer scope, and validates one fixed printing lifecycle operation under FORCE RLS.",

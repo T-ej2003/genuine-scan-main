@@ -46,7 +46,17 @@ mock('controllers/connectorUpgradeDeviceProofController.js', { trustedBinding: a
   publicKeyPem: publicPem, sourceVersion: attempt.sourceVersion,
 }) });
 let consumed = false;
-mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { protectUpgradeUnknownAttempts: async input => {
+let revoked = false;
+mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingUpgradeHandoff: async input => {
+  if (revoked || input.tokenHash !== authorizedTokenHash || JSON.stringify(input.binding) !== JSON.stringify(binding))
+    throw new Error('UPGRADE_HANDOFF_DENIED');
+  if (input.operation === 'REVOKE') { revoked = true; return { revoked: true, dispatchFenced: true }; }
+  if (input.operation === 'CONSUME') {
+    if (consumed) throw new Error('MAINTENANCE_AUTHORIZATION_DENIED');
+    consumed = true;
+  } else if (!consumed) throw new Error('MAINTENANCE_AUTHORIZATION_DENIED');
+  return { authorized: true, dispatchFenced: true, binding: input.binding };
+}, protectUpgradeUnknownAttempts: async input => {
   protectedEntries = input.entries;
   return { protected: input.entries.length };
 }, administerPrintingPrinter: async input => {
@@ -150,9 +160,19 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     assert.equal(authorizations, 1);
     assert.equal(typeof token, 'string');
     assert(records.has(proofService.upgradeHandoffKey(hash(token))));
+    assert.equal(JSON.stringify(JSON.parse(records.get(proofService.upgradeHandoffKey(hash(token)))).capability),undefined,
+      'handoff must not retain the rotating browser capability');
     const handoff = response();
-    await controller.redeemConnectorMaintenanceHandoff(request({ action: 'consume', token, binding }), handoff);
+    const refreshed = request({ action: 'consume', token, binding });
+    refreshed.databaseSessionCapability = undefined;
+    await controller.redeemConnectorMaintenanceHandoff(refreshed, handoff);
     assert.equal(handoff.code, 200);
+    const afterRefresh = response();
+    await controller.redeemConnectorMaintenanceHandoff(refreshed, afterRefresh);
+    assert.equal(afterRefresh.code, 403, 'browser refresh cannot permit a second consume');
+    const verification = response();
+    await controller.redeemConnectorMaintenanceHandoff(request({ action: 'verify', token, binding }), verification);
+    assert.equal(verification.code, 200, 'browser capability rotation after redemption cannot revoke the installer token');
     const afterConsumption = response();
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), afterConsumption);
     assert.equal(afterConsumption.code, 409, 'consumed authorization cannot be reissued');
@@ -166,6 +186,12 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const missingToken = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'verify', token: 'b'.repeat(64), binding }), missingToken);
     assert.equal(missingToken.code, 403);
+    const revocation = response();
+    await controller.redeemConnectorMaintenanceHandoff(request({ action: 'revoke', token, binding }), revocation);
+    assert.equal(revocation.code, 200);
+    const afterRevocation = response();
+    await controller.redeemConnectorMaintenanceHandoff(request({ action: 'verify', token, binding }), afterRevocation);
+    assert.equal(afterRevocation.code, 403);
     console.log('connector maintenance authority tests passed');
   } finally {
     delete process.env.CONNECTOR_ISOLATION_AUTHORITY_PRIVATE_KEY_PEM;

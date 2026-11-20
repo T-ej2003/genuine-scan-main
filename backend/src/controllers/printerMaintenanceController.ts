@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import { Response } from "express";
 import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
-import { administerPrintingPrinter, protectUpgradeUnknownAttempts } from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import { administerPrintingPrinter, protectUpgradeUnknownAttempts, redeemPrintingUpgradeHandoff } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { issueConnectorIsolationEvidence, verifyConnectorIsolationEvidence } from "../services/connectorMaintenanceEvidence";
 import { upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradeProofKey } from "../services/connectorUpgradeDeviceProof";
 import { verifyMaintenanceCheckpoint } from "../services/connectorUpgradeDeviceProof";
@@ -136,7 +136,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       let authorization = await redis.get(authorizationKey);
       if (!authorization) {
         const candidate = JSON.stringify({ token: sealCookieToken(randomBytes(32).toString("hex"), "connector-upgrade.authorization"),
-          capability: sealCookieToken(printingCapability(req), "auth.database-session"), binding, printerId: String(req.params.id) });
+          binding, printerId: String(req.params.id) });
         if (await redis.set(authorizationKey, candidate, "PX", ttl, "NX") === "OK") authorization = candidate;
         else authorization = await redis.get(authorizationKey);
       }
@@ -146,7 +146,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       if (!token || !/^[a-f0-9]{64}$/.test(token) || authorizationRecord.printerId !== req.params.id ||
           JSON.stringify(authorizationRecord.binding) !== JSON.stringify(binding)) throw new Error("CONNECTOR_UPGRADE_HANDOFF_UNAVAILABLE");
       payload.tokenHash = createHash("sha256").update(token).digest("hex");
-      const handoff = JSON.stringify({ capability: authorizationRecord.capability, binding, printerId: authorizationRecord.printerId });
+      const handoff = JSON.stringify({ binding, printerId: authorizationRecord.printerId });
       const handoffKey = upgradeHandoffKey(String(payload.tokenHash));
       if (await redis.set(handoffKey, handoff, "PX", ttl, "NX") !== "OK" && await redis.get(handoffKey) !== handoff)
         throw new Error("CONNECTOR_UPGRADE_HANDOFF_UNAVAILABLE");
@@ -177,7 +177,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
 export const redeemConnectorMaintenanceHandoff = async (req: AuthRequest, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
   try {
-    const input = z.object({ action: z.enum(["consume", "verify"]), token: z.string().regex(/^[a-f0-9]{64}$/),
+    const input = z.object({ action: z.enum(["consume", "verify", "revoke"]), token: z.string().regex(/^[a-f0-9]{64}$/),
       binding: maintenanceBinding }).strict().parse(req.body);
     const tokenHash = createHash("sha256").update(input.token).digest("hex");
     const redis = await getRedisClient();
@@ -188,11 +188,12 @@ export const redeemConnectorMaintenanceHandoff = async (req: AuthRequest, res: R
     if (!binding || Object.keys(binding).length !== Object.keys(input.binding).length ||
         Object.entries(binding).some(([key, value]) => input.binding[key] !== value) ||
         stored.printerId !== binding.printerId) throw new Error("CONNECTOR_UPGRADE_HANDOFF_INVALID");
-    const capability = openCookieToken(String(stored.capability), "auth.database-session");
-    if (!capability) throw new Error("CONNECTOR_UPGRADE_HANDOFF_INVALID");
-    const data = await administerPrintingPrinter({ capability, requestId: printingRequestId(req),
-      operation: input.action === "consume" ? "MAINTENANCE_CONSUME" : "MAINTENANCE_VERIFY",
-      printerId: stored.printerId, payload: { binding, tokenHash } });
+    const data = await redeemPrintingUpgradeHandoff({ operation: input.action.toUpperCase() as "CONSUME" | "VERIFY" | "REVOKE",
+      tokenHash, binding: input.binding });
+    if (input.action === "revoke") {
+      if (data?.revoked !== true || data?.dispatchFenced !== true) throw new Error("CONNECTOR_UPGRADE_HANDOFF_INVALID");
+      return res.json({ success: true, data: { revoked: true, dispatchFenced: true } });
+    }
     if (data?.authorized !== true || data?.dispatchFenced !== true ||
         Object.keys(data.binding || {}).length !== Object.keys(binding).length ||
         Object.entries(binding).some(([key, value]) => data.binding[key] !== value))
