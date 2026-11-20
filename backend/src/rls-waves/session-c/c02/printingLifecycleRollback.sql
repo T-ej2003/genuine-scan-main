@@ -54,6 +54,8 @@ REVOKE ALL ON FUNCTION app_rls.printing_control_job(text,text,text,text,text,tex
 REVOKE ALL ON FUNCTION app_rls.printing_printer_administration(text,text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_idempotency(text,text,text,text,text,text,text,integer,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_connector_registration(text,text,text,text,jsonb) FROM PUBLIC;
+DROP FUNCTION IF EXISTS app_rls.printing_upgrade_handoff(text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb);
 REVOKE ALL ON FUNCTION app_rls.printing_maintenance_gate(text,text,text,jsonb) FROM PUBLIC;
 DROP FUNCTION IF EXISTS app_rls.printing_maintenance_gate(text,text,text,jsonb);
 REVOKE ALL ON FUNCTION app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb) FROM PUBLIC;
