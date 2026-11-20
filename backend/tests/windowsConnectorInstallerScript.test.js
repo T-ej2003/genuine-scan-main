@@ -108,6 +108,7 @@ const run = async () => {
   const sourceVersionHelper = fs.readFileSync(sourceVersionHelperPath, "utf8");
   const smokeScript = fs.readFileSync(smokeScriptPath, "utf8");
   const installerTemplate = fs.readFileSync(installerTemplatePath, "utf8");
+  const upgradeTransaction = fs.readFileSync(path.join(__dirname, '..', 'local-print-agent', 'install', 'windows', 'connector-upgrade-transaction.ps1'), 'utf8');
   const readme = fs.readFileSync(readmePath, "utf8");
   const signedReleaseWorkflow = fs.readFileSync(signedReleaseWorkflowPath, "utf8");
 
@@ -363,6 +364,19 @@ const run = async () => {
       installerTemplate.includes('-ExecutionPolicy RemoteSigned -File') &&
       !installerTemplate.includes('-ExecutionPolicy AllSigned -File'),
     "Upgrade execution must verify the signed transaction and sourced helper scripts before noninteractive launch"
+  );
+  assert(installerTemplate.includes('AppId={{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}') &&
+    upgradeTransaction.includes('Uninstall\\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1') &&
+    upgradeTransaction.includes("Get-MscqrRuntimeVersion $runtime") &&
+    upgradeTransaction.includes('Connector checkpoint listener ownership is unverified.') &&
+    upgradeTransaction.includes('Connector did not reach a drained maintenance checkpoint.') &&
+    upgradeTransaction.includes("$handoff = $uri.AbsolutePath -ceq '/api/connector-upgrade/handoff'") &&
+    upgradeTransaction.includes("Handoff cannot carry browser credentials.") &&
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") > 0 &&
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") &&
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") > 0 &&
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") < upgradeTransaction.indexOf('$process.Kill()'),
+    "Upgrade must detect the owned installation and drain fenced work before stopping the connector"
   );
   assert(
     readme.includes("Needs attention: connector installed and running"),

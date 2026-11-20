@@ -39,8 +39,9 @@ import {
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "./crypto";
-import { signUpgradeDeviceChallenge, upgradeChallengeSchema } from "../services/connectorUpgradeDeviceProof";
+import { signMaintenanceCheckpoint, signUpgradeDeviceChallenge, upgradeChallengeSchema } from "../services/connectorUpgradeDeviceProof";
 import { enterMaintenanceFence, maintenanceCheckpoint } from "./maintenanceFence";
+import { inspectDispatchJournal } from "./dispatchJournal";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
 const app = express();
@@ -488,6 +489,30 @@ app.post("/maintenance/device-proof", async (req, res) => {
       signature: signUpgradeDeviceChallenge(state.privateKeyPem, challenge) });
   } catch {
     return res.status(403).json({ success: false, error: "Connector upgrade device challenge was rejected." });
+  }
+});
+
+app.post("/maintenance/checkpoint-evidence", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const challenge = upgradeChallengeSchema.parse(req.body);
+    const state = await loadAgentState();
+    if (challenge.agentId !== state.agentId || challenge.deviceFingerprint !== state.deviceFingerprint ||
+        challenge.currentVersion !== AGENT_BUILD_VERSION || Date.parse(challenge.expiresAt) <= Date.now() - 180_000 ||
+        Date.parse(challenge.expiresAt) > Date.now() + 300_000) throw new Error("Checkpoint challenge rejected");
+    if (!maintenanceCheckpoint().fenced) throw new Error("Maintenance fence is absent");
+    enterMaintenanceFence();
+    stopDirectPrintAcquisition();
+    const checkpoint = { ...maintenanceCheckpoint(), socketClosed: directPrintSocketClosed() };
+    if (!checkpoint.fenced || !checkpoint.idle || !checkpoint.socketClosed) {
+      return res.status(409).json({ success: false, error: "Connector work has not drained." });
+    }
+    const journal = await inspectDispatchJournal();
+    const evidence = signMaintenanceCheckpoint(state.privateKeyPem, { purpose: "mscqr-connector-maintenance-checkpoint-v1",
+      challenge, observedAt: new Date().toISOString(), fence: checkpoint, journal, physicalOutcomes: "UNVERIFIED" });
+    return res.json({ success: true, evidence });
+  } catch {
+    return res.status(403).json({ success: false, error: "Connector maintenance checkpoint could not be verified." });
   }
 });
 

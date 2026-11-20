@@ -166,16 +166,21 @@ function Write-MscqrTransaction([string]$Path, $Journal, [string]$Phase) {
 }
 function Invoke-MscqrMaintenance($Auth, [string]$Action, $Binding) {
   $uri = [Uri]$Auth.endpoint
+  $handoff = $uri.AbsolutePath -ceq '/api/connector-upgrade/handoff'
   if ($uri.Scheme -cne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or
       $uri.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__' -or
-      $uri.AbsolutePath -cne "/api/manufacturer/printers/$($Binding.printerId)/maintenance") { throw 'Invalid authenticated maintenance endpoint.' }
+      (-not $handoff -and $uri.AbsolutePath -cne "/api/manufacturer/printers/$($Binding.printerId)/maintenance")) { throw 'Invalid authenticated maintenance endpoint.' }
   # TLS authentication is required, redirects are prohibited, and no credential
   # or bearer authorization is written into the transaction journal or logs.
   $body = @{ action=$Action; token=$Auth.token; binding=$Binding } | ConvertTo-Json -Depth 20
   $headers = @{}
-  foreach ($property in $Auth.headers.PSObject.Properties) {
-    if($property.Name -notin @('Authorization','X-Database-Session-Capability','X-CSRF-Token','Cookie')) {throw 'Unexpected maintenance authentication header.'}
-    $headers[$property.Name] = [string]$property.Value
+  if ($handoff) {
+    if ($Auth.headers -and @($Auth.headers.PSObject.Properties).Count) { throw 'Handoff cannot carry browser credentials.' }
+  } else {
+    foreach ($property in $Auth.headers.PSObject.Properties) {
+      if($property.Name -notin @('Authorization','X-Database-Session-Capability','X-CSRF-Token','Cookie')) {throw 'Unexpected maintenance authentication header.'}
+      $headers[$property.Name] = [string]$property.Value
+    }
   }
   $reply = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 20 -MaximumRedirection 0
   if ($reply.success -isnot [bool] -or -not $reply.success -or $reply.data.authorized -isnot [bool] -or -not $reply.data.authorized -or
@@ -191,8 +196,26 @@ function Stop-MscqrVerifiedRuntime([string]$Runtime, [string]$Hash) {
   if ($processes.Count -gt 1) { throw 'Multiple connector processes; refusing shutdown.' }
   if ($processes.Count -eq 1) {
     if ([IO.Path]::GetFullPath([string]$processes[0].ExecutablePath) -ine $Runtime) { throw 'Unexpected connector path; refusing shutdown.' }
-    # The independently verified isolation/reconciliation authorization is
-    # checked immediately before this call. A status snapshot is never authority.
+    # Backend authorization is checked before this call. The process-owned
+    # checkpoint must also show that local work drained and acquisition stopped.
+    $listeners=@(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction Stop)
+    if ($listeners.Count -eq 0 -or @($listeners | Where-Object { $_.OwningProcess -ne $processes[0].ProcessId -or
+          $_.LocalAddress -notin @('127.0.0.1','::1') }).Count) { throw 'Connector checkpoint listener ownership is unverified.' }
+    $fence=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence' -Method Post -TimeoutSec 5 -ErrorAction Stop
+    if ($fence.success -isnot [bool] -or -not $fence.success) { throw 'Connector did not persist its maintenance fence.' }
+    $drained=$false
+    for ($attempt=0; $attempt -lt 30; $attempt++) {
+      $listeners=@(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction Stop)
+      if ($listeners.Count -eq 0 -or @($listeners | Where-Object { $_.OwningProcess -ne $processes[0].ProcessId -or
+            $_.LocalAddress -notin @('127.0.0.1','::1') }).Count) { throw 'Connector checkpoint listener ownership is unverified.' }
+      $checkpoint=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint' -TimeoutSec 5 -ErrorAction Stop
+      if ($checkpoint.fenced -isnot [bool] -or -not $checkpoint.fenced -or
+          $checkpoint.idle -isnot [bool] -or $checkpoint.socketClosed -isnot [bool] -or
+          $null -eq $checkpoint.active) { throw 'Connector maintenance checkpoint is invalid.' }
+      if ($checkpoint.idle -and $checkpoint.socketClosed -and [int]$checkpoint.active -eq 0) { $drained=$true; break }
+      Start-Sleep -Milliseconds 500
+    }
+    if (-not $drained) { throw 'Connector did not reach a drained maintenance checkpoint.' }
     $process = Get-Process -Id $processes[0].ProcessId -ErrorAction Stop
     if ($process.Path -ine $Runtime) { throw 'Connector process identity changed.' }
     $process.Kill()

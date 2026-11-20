@@ -4,6 +4,43 @@ import os from "os";
 import path from "path";
 
 export const dispatchJournalRoot = () => process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR || path.join(os.homedir(), ".mscqr", "dispatch-journal");
+export const inspectDispatchJournal = async () => {
+  const root = dispatchJournalRoot();
+  let names: string[];
+  try { names = (await fs.readdir(root)).sort(); }
+  catch (error: unknown) {
+    if (fileErrorCode(error) === "ENOENT") return { count: 0, sha256: createHash("sha256").update("[]").digest("hex"), entries: [] };
+    throw error;
+  }
+  if (!(await fs.lstat(root)).isDirectory()) throw dispatchReconciliationError();
+  if (names.length > 10_000) throw dispatchReconciliationError();
+  let bytes = 0;
+  const entries: { name: string; sha256: string; printJobId: string; printItemId: string; attemptId: string | null; state: string }[] = [];
+  for (const name of names) {
+    if (!/^[a-f0-9]{64}(\.gateway-attempt)?\.json$/.test(name)) throw dispatchReconciliationError();
+    const file = path.join(root, name);
+    const stat = await fs.lstat(file);
+    if (!stat.isFile() || stat.size > 1_048_576 || (bytes += stat.size) > 1_073_741_824) throw dispatchReconciliationError();
+    const content = await fs.readFile(file);
+    const after = await fs.lstat(file);
+    if (content.length !== stat.size || !after.isFile() || after.size !== stat.size ||
+        after.mtimeMs !== stat.mtimeMs || after.ino !== stat.ino) throw dispatchReconciliationError();
+    let record: any;
+    try { record = JSON.parse(content.toString("utf8")); } catch { throw dispatchReconciliationError(); }
+    if (![2, 3].includes(record?.journalVersion) ||
+        !["ATTEMPT_RESERVED", "PREPARING", "PRE_DISPATCH_FAILURE", "PRE_DISPATCH_REPORTED"].includes(record?.state) ||
+        typeof record.printJobId !== "string" || typeof record.printItemId !== "string" ||
+        (record.journalVersion === 3 && typeof record.attemptId !== "string") ||
+        name !== `${dispatchReservationKey(record.testJobId ? `diagnostic:${record.testJobId}` : record.printJobId,
+          record.testJobId ? `diagnostic:${record.testJobId}` : record.printItemId,
+          record.journalVersion === 3 ? record.attemptId : undefined)}${name.endsWith(".gateway-attempt.json") ? ".gateway-attempt" : ""}.json`)
+      throw dispatchReconciliationError();
+    entries.push({ name, sha256: createHash("sha256").update(content).digest("hex"),
+      printJobId: record.printJobId, printItemId: record.printItemId,
+      attemptId: typeof record.attemptId === "string" ? record.attemptId : null, state: record.state });
+  }
+  return { count: entries.length, sha256: createHash("sha256").update(JSON.stringify(entries.map(({ name, sha256 }) => [name, sha256]))).digest("hex"), entries };
+};
 export const dispatchReservationKey = (job: string, item: string, attemptId?: string) =>
   createHash('sha256').update(JSON.stringify(attemptId ? ['v3',job,item,attemptId] : ['v2',job,item])).digest('hex');
 export const legacyDispatchKey = (item: string) => createHash('sha256').update(item).digest('hex');

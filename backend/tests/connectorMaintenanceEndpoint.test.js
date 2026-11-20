@@ -17,7 +17,8 @@ const connector = path.resolve(__dirname, '../dist/local-print-agent/index.js');
   const port = probe.address().port;
   await new Promise(resolve => probe.close(resolve));
   const env = { ...process.env, PRINT_AGENT_PORT: String(port), PRINT_AGENT_STATE_FILE: path.join(root, 'state.json'),
-    PRINT_AGENT_LOCK_DIR: path.join(root, 'lock'), PRINT_AGENT_BACKEND_URL: '', PRINT_GATEWAY_BACKEND_URL: '' };
+    PRINT_AGENT_LOCK_DIR: path.join(root, 'lock'), PRINT_AGENT_DISPATCH_JOURNAL_DIR: path.join(root, 'journal'),
+    PRINT_AGENT_BACKEND_URL: '', PRINT_GATEWAY_BACKEND_URL: '' };
   let child;
   const start = async () => {
     child = spawn(process.execPath, [connector], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -48,6 +49,9 @@ const connector = path.resolve(__dirname, '../dist/local-print-agent/index.js');
         attemptId: challenge.attemptId, manufacturerId: 'manufacturer-test', tenantId: 'tenant-test', printerId: challenge.printerId,
         registrationId: challenge.registrationId, sourceVersion, currentVersion: sourceVersion,
         targetVersion: challenge.targetVersion } }).attemptId, challenge.attemptId);
+    assert.equal((await fetch(`${url}/checkpoint-evidence`, { method: 'POST',
+      headers: { origin: 'https://www.mscqr.com', 'content-type': 'application/json' },
+      body: JSON.stringify(challenge) })).status, 403, 'device proof cannot silently create a maintenance fence');
     const wrongDevice = await fetch(`${url}/device-proof`, { method: 'POST', headers: { origin: 'https://www.mscqr.com', 'content-type': 'application/json' },
       body: JSON.stringify({ ...challenge, deviceFingerprint: 'device-other' }) });
     assert.equal(wrongDevice.status, 403);
@@ -62,6 +66,15 @@ const connector = path.resolve(__dirname, '../dist/local-print-agent/index.js');
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.deepEqual((await response.json()).checkpoint, { fenced: true, active: 0, idle: true, socketClosed: true });
+    const checkpointEvidence = await fetch(`${url}/checkpoint-evidence`, { method: 'POST',
+      headers: { origin: 'https://www.mscqr.com', 'content-type': 'application/json' }, body: JSON.stringify(challenge) });
+    assert.equal(checkpointEvidence.status, 200);
+    const envelope = (await checkpointEvidence.json()).evidence;
+    const verified = deviceProof.verifyMaintenanceCheckpoint(envelope, challenge, state.publicKeyPem);
+    assert.equal(verified.physicalOutcomes, 'UNVERIFIED');
+    assert.equal(verified.journal.count, 0);
+    assert.throws(() => deviceProof.verifyMaintenanceCheckpoint(envelope, { ...challenge, attemptId: randomUUID() }, state.publicKeyPem));
+    assert.throws(() => deviceProof.verifyMaintenanceCheckpoint(envelope, challenge, state.publicKeyPem, Date.now() + 300_000));
     await stop();
     await start();
     const checkpoint = await fetch(`${url}/checkpoint`);

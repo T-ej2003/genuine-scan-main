@@ -17,7 +17,7 @@ const newer = (target: string, source: string) => {
   return false;
 };
 
-const trustedBinding = async (req: AuthRequest) => {
+export const trustedBinding = async (req: AuthRequest) => {
   if (!req.user) throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
   const printerId = z.string().uuid().parse(req.params.id);
   const result = await readUpgradeDeviceBinding({ capability: String(req.databaseSessionCapability || ""),

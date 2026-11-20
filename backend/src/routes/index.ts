@@ -1,4 +1,4 @@
-import { requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
+import { issueVerifiedConnectorMaintenanceEvidence, redeemConnectorMaintenanceHandoff, requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
 import { issueConnectorUpgradeChallenge, verifyConnectorUpgradeProof } from "../controllers/connectorUpgradeDeviceProofController";
 import { Request, type RequestHandler, Router } from "express";
 import {
@@ -917,6 +917,10 @@ const printMutationPreAuthRouteLimiter = createSharedRateLimiter({
     buildPublicActorRateLimitKey(req, "print.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "batchId", "printerId"))),
   handler: createRateLimitJsonHandler("print.mutation:pre-auth", "Too many printing actions. Please wait before retrying."),
 });
+const connectorHandoffIpLimiter = createPublicIpRateLimiter({
+  scope: "connector.upgrade-handoff:ip", windowMs: 5 * 60 * 1000, max: 30,
+  message: "Too many connector upgrade requests. Please wait before retrying.",
+});
 
 const qrRequestReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
@@ -1364,6 +1368,7 @@ protectedMutationRouter.use(createGovernanceMutationRoutes());
 publicReadRouter.get("/public/connector/releases", connectorManifestIpLimiter, connectorManifestActorLimiter, listConnectorReleasesController);
 publicReadRouter.get("/public/connector/releases/latest", connectorManifestIpLimiter, connectorManifestActorLimiter, getLatestConnectorReleaseController);
 publicReadRouter.get("/public/connector/download/:version/:platform", connectorDownloadIpLimiter, connectorDownloadActorLimiter, downloadConnectorReleaseController);
+publicMutationRouter.post("/connector-upgrade/handoff", connectorHandoffIpLimiter, redeemConnectorMaintenanceHandoff);
 publicMutationRouter.post(
   "/public/request-access",
   requestAccessIpLimiter,
@@ -1865,6 +1870,7 @@ protectedMutationRouter.post(
 for (const [path, handler] of [
   ["/manufacturer/printers/:id/maintenance/challenge", issueConnectorUpgradeChallenge],
   ["/manufacturer/printers/:id/maintenance/device-proof", verifyConnectorUpgradeProof],
+  ["/manufacturer/printers/:id/maintenance/evidence", issueVerifiedConnectorMaintenanceEvidence],
 ] as const) protectedMutationRouter.post(path,
   printMutationPreAuthRouteLimiter,
   authenticate,
