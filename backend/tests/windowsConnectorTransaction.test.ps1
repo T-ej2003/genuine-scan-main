@@ -107,13 +107,13 @@ try {
     $binding | Add-Member uninstallerSha256 (Get-FileHash "$live\unins000.exe").Hash
     $binding | Add-Member uninstallDataSha256 (Get-FileHash "$live\unins000.dat").Hash
     $binding | Add-Member uninstallRegistrationSha256 (Get-MscqrUninstallDigest (Get-MscqrUninstallSnapshot $live))
-    [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/fixture/maintenance';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
+    [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/connector-upgrade/handoff';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
     $args=@{LiveDirectory=$live;Payload=$payload;Installer=$installer;AuthFile=$auth;Version=$binding.targetVersion;StateFile=$state;StartupFile=$startup}
     if($scenario -like 'legacy-*') {
       $discovery=Resolve-MscqrUpgradeState $case $live 'fixture'
       $args.StateFile=$discovery.selectedPath;$args.StateDiscovery=$discovery
       $binding.stateDiscoverySha256=$discovery.sha256
-      [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/fixture/maintenance';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
+      [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/connector-upgrade/handoff';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
     }
     $failed=$false
     if($scenario -eq 'extra-startup'){[IO.File]::WriteAllText("$case\unknown-legacy.vbs","$runtime")}
@@ -216,18 +216,19 @@ try {
   Invoke-Expression $wire.Extent.Text.Replace('function Invoke-MscqrMaintenance','function Invoke-MscqrMaintenanceWireFixture').Replace('__MSCQR_MAINTENANCE_API_ORIGIN__','https://isolated.example.invalid')
   function Invoke-RestMethod {param($Uri,$Method,$Headers,$ContentType,$Body,$TimeoutSec,$MaximumRedirection) $script:wireCalls++;return $script:wireReply}
   $wireBinding=[pscustomobject]@{printerId='synthetic';tenantId='synthetic-tenant'}
-  $wireAuth=[pscustomobject]@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/synthetic/maintenance';token='synthetic';headers=[pscustomobject]@{Authorization='Bearer synthetic'}}
+  $wireAuth=[pscustomobject]@{endpoint='https://isolated.example.invalid/api/connector-upgrade/handoff';token='synthetic'}
   $script:wireCalls=0
   $script:wireReply=[pscustomobject]@{success=$true;data=[pscustomobject]@{authorized=$true;dispatchFenced=$true;binding=$wireBinding}}
   Invoke-MscqrMaintenanceWireFixture $wireAuth 'verify' $wireBinding
-  foreach($attack in @('host-header','wrong-origin','string-authorization','unfenced','wrong-tenant')) {
+  foreach($attack in @('browser-credentials','wrong-origin','legacy-endpoint','string-authorization','unfenced','wrong-tenant')) {
     $callsBefore=$script:wireCalls
-    $wireAuth.headers=[pscustomobject]@{Authorization='Bearer synthetic'}
-    $wireAuth.endpoint='https://isolated.example.invalid/api/manufacturer/printers/synthetic/maintenance'
+    $wireAuth.PSObject.Properties.Remove('headers')
+    $wireAuth.endpoint='https://isolated.example.invalid/api/connector-upgrade/handoff'
     $script:wireReply.data.authorized=$true;$script:wireReply.data.dispatchFenced=$true;$script:wireReply.data.binding=$wireBinding
     switch($attack) {
-      'host-header' {$wireAuth.headers | Add-Member Host 'attacker.example.invalid'}
-      'wrong-origin' {$wireAuth.endpoint='https://attacker.example.invalid/api/manufacturer/printers/synthetic/maintenance'}
+      'browser-credentials' {$wireAuth | Add-Member headers ([pscustomobject]@{Authorization='Bearer synthetic'})}
+      'wrong-origin' {$wireAuth.endpoint='https://attacker.example.invalid/api/connector-upgrade/handoff'}
+      'legacy-endpoint' {$wireAuth.endpoint='https://isolated.example.invalid/api/manufacturer/printers/synthetic/maintenance'}
       'string-authorization' {$script:wireReply.data.authorized='true'}
       'unfenced' {$script:wireReply.data.dispatchFenced=$false}
       'wrong-tenant' {$script:wireReply.data.binding=[pscustomobject]@{printerId='synthetic';tenantId='wrong'}}
@@ -235,7 +236,7 @@ try {
     $failed=$false
     try {Invoke-MscqrMaintenanceWireFixture $wireAuth 'verify' $wireBinding}catch{$failed=$true}
     if(-not $failed){throw "Maintenance wire attack accepted: $attack"}
-    if($attack -in @('host-header','wrong-origin') -and $script:wireCalls -ne $callsBefore){throw 'Invalid authority reached the transport'}
+    if($attack -in @('browser-credentials','wrong-origin','legacy-endpoint') -and $script:wireCalls -ne $callsBefore){throw 'Invalid authority reached the transport'}
     Write-Host "PASS maintenance client $attack rejection (transport simulated)"
   }
 } finally {
