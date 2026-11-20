@@ -2,6 +2,7 @@ DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_insert ON public."
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_select ON public."ActionIdempotencyKey";
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_update ON public."ActionIdempotencyKey";
 DROP POLICY IF EXISTS printing_lifecycle_auditlog_insert ON public."AuditLog";
+DROP POLICY IF EXISTS printing_lifecycle_auditlog_select ON public."AuditLog";
 DROP POLICY IF EXISTS printing_lifecycle_batch_select ON public."Batch";
 DROP POLICY IF EXISTS printing_lifecycle_batch_update ON public."Batch";
 DROP POLICY IF EXISTS printing_lifecycle_licensee_select ON public."Licensee";
