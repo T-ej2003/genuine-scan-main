@@ -1512,6 +1512,25 @@ BEGIN
 END
 $function$;`;
 
+const expectedRoutineInventorySql = `INSERT INTO mscqr_rls_install.expected_routine(
+  schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
+  security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
+)
+SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),pg_get_function_result(p.oid),p.prokind::text,
+  owner_role.rolname,l.lanname,p.provolatile::text,p.prosecdef,p.proleakproof,p.proisstrict,p.proparallel::text,
+  p.proconfig,p.prosrc,
+  COALESCE((
+    SELECT jsonb_agg(jsonb_build_array(COALESCE(grantee.rolname,'PUBLIC'),grantor.rolname,acl.privilege_type,acl.is_grantable)
+      ORDER BY COALESCE(grantee.rolname,'PUBLIC'),grantor.rolname,acl.privilege_type,acl.is_grantable)
+    FROM aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) acl
+    LEFT JOIN pg_roles grantee ON grantee.oid=acl.grantee
+    JOIN pg_roles grantor ON grantor.oid=acl.grantor
+  ),'[]'::jsonb)
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid=p.pronamespace
+JOIN pg_roles owner_role ON owner_role.oid=p.proowner
+JOIN pg_language l ON l.oid=p.prolang
+WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops');`;
 const contextHelpersSql = `\\set ON_ERROR_STOP on
 DO $$ BEGIN
 ${requirePackagePhaseSql("ownership-installed", "context helpers")}
@@ -1695,25 +1714,8 @@ REVOKE ALL ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,b
 GRANT USAGE ON SCHEMA app_ops TO ${q(roleNames.migration)};
 GRANT EXECUTE ON FUNCTION app_ops.bootstrap_configured_super_admin(text,text,text,boolean) TO ${q(roleNames.migration)};
 ${resetRole}
-INSERT INTO mscqr_rls_install.expected_routine(
-  schema_name,routine_name,identity_arguments,result_type,routine_kind,owner_name,language_name,volatility,
-  security_definer,leakproof,strict,parallel_mode,configuration,source_body,acl_rows
-)
-SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),pg_get_function_result(p.oid),p.prokind::text,
-  owner_role.rolname,l.lanname,p.provolatile::text,p.prosecdef,p.proleakproof,p.proisstrict,p.proparallel::text,
-  p.proconfig,p.prosrc,
-  COALESCE((
-    SELECT jsonb_agg(jsonb_build_array(COALESCE(grantee.rolname,'PUBLIC'),grantor.rolname,acl.privilege_type,acl.is_grantable)
-      ORDER BY COALESCE(grantee.rolname,'PUBLIC'),grantor.rolname,acl.privilege_type,acl.is_grantable)
-    FROM aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) acl
-    LEFT JOIN pg_roles grantee ON grantee.oid=acl.grantee
-    JOIN pg_roles grantor ON grantor.oid=acl.grantor
-  ),'[]'::jsonb)
-FROM pg_proc p
-JOIN pg_namespace n ON n.oid=p.pronamespace
-JOIN pg_roles owner_role ON owner_role.oid=p.proowner
-JOIN pg_language l ON l.oid=p.prolang
-WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops');
+${expectedRoutineInventorySql}
+
 UPDATE mscqr_rls_install.state SET phase='context-helpers-installed' WHERE singleton;
 `;
 
@@ -2874,7 +2876,9 @@ ${printingLifecycleUpgradeAppSignatures.map((signature) => `GRANT EXECUTE ON FUN
 ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
-${resetRole}`)],
+${resetRole}
+TRUNCATE mscqr_rls_install.expected_routine;
+${expectedRoutineInventorySql}`)],
   ["21-runtime-grants.sql", transactionalPhase(runtimeGrantsSql)],
   ["30-policies.sql", transactionalPhase(policiesSql)],
   ["40-post-apply-verification.sql", transactionalPhase(verificationSql)],

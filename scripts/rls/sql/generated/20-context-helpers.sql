@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='920c6ede25d1b2b2aa4a22e65964feb1613b55fbff3c892a91ef9c2476342225'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:920c6ede25d1b2b2aa4a22e65964feb1613b55fbff3c892a91ef9c2476342225'
+    AND source_contract_sha256='7c7ad9c066420515a1e8fa0eab92fc81a2a101a36dca72a0b97d20df87f4ceab'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:7c7ad9c066420515a1e8fa0eab92fc81a2a101a36dca72a0b97d20df87f4ceab'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:920c6ede25d1b2b2aa4a22e65964feb1613b55fbff3c892a91ef9c2476342225')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:7c7ad9c066420515a1e8fa0eab92fc81a2a101a36dca72a0b97d20df87f4ceab')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -16240,5 +16240,6 @@ JOIN pg_namespace n ON n.oid=p.pronamespace
 JOIN pg_roles owner_role ON owner_role.oid=p.proowner
 JOIN pg_language l ON l.oid=p.prolang
 WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops');
+
 UPDATE mscqr_rls_install.state SET phase='context-helpers-installed' WHERE singleton;
 COMMIT;
