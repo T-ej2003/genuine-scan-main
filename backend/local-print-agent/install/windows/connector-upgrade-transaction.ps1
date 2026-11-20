@@ -167,23 +167,14 @@ function Write-MscqrTransaction([string]$Path, $Journal, [string]$Phase) {
 }
 function Invoke-MscqrMaintenance($Auth, [string]$Action, $Binding) {
   $uri = [Uri]$Auth.endpoint
-  $handoff = $uri.AbsolutePath -ceq '/api/connector-upgrade/handoff'
   if ($uri.Scheme -cne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or
       $uri.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__' -or
-      (-not $handoff -and $uri.AbsolutePath -cne "/api/manufacturer/printers/$($Binding.printerId)/maintenance")) { throw 'Invalid authenticated maintenance endpoint.' }
+      $uri.AbsolutePath -cne '/api/connector-upgrade/handoff') { throw 'Invalid authenticated maintenance endpoint.' }
+  if ($Auth.headers -and @($Auth.headers.PSObject.Properties).Count) { throw 'Handoff cannot carry browser credentials.' }
   # TLS authentication is required, redirects are prohibited, and no credential
   # or bearer authorization is written into the transaction journal or logs.
   $body = @{ action=$Action; token=$Auth.token; binding=$Binding } | ConvertTo-Json -Depth 20
-  $headers = @{}
-  if ($handoff) {
-    if ($Auth.headers -and @($Auth.headers.PSObject.Properties).Count) { throw 'Handoff cannot carry browser credentials.' }
-  } else {
-    foreach ($property in $Auth.headers.PSObject.Properties) {
-      if($property.Name -notin @('Authorization','X-Database-Session-Capability','X-CSRF-Token','Cookie')) {throw 'Unexpected maintenance authentication header.'}
-      $headers[$property.Name] = [string]$property.Value
-    }
-  }
-  $reply = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 20 -MaximumRedirection 0
+  $reply = Invoke-RestMethod -Uri $uri -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 20 -MaximumRedirection 0
   if ($reply.success -isnot [bool] -or -not $reply.success -or $reply.data.authorized -isnot [bool] -or -not $reply.data.authorized -or
       $reply.data.dispatchFenced -isnot [bool] -or -not $reply.data.dispatchFenced -or
       @($reply.data.binding.PSObject.Properties).Count -ne @($Binding.PSObject.Properties).Count) { throw 'Backend maintenance authorization was not verified.' }

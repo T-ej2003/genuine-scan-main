@@ -374,8 +374,9 @@ const run = async () => {
     upgradeTransaction.includes("Get-MscqrRuntimeVersion $runtime") &&
     upgradeTransaction.includes('Connector checkpoint listener ownership is unverified.') &&
     upgradeTransaction.includes('Connector did not reach a drained maintenance checkpoint.') &&
-    upgradeTransaction.includes("$handoff = $uri.AbsolutePath -ceq '/api/connector-upgrade/handoff'") &&
+    upgradeTransaction.includes("$uri.AbsolutePath -cne '/api/connector-upgrade/handoff'") &&
     upgradeTransaction.includes("Handoff cannot carry browser credentials.") &&
+    !upgradeTransaction.includes('X-Database-Session-Capability') &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") > 0 &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") > 0 &&
