@@ -11,7 +11,7 @@ Upgrade an installed Windows connector without changing its registered device, p
 - The backend can issue maintenance evidence only after a manufacturer-authenticated request, a verified device-signed checkpoint, a live database fence and an empty unresolved inventory and dispatch journal. It does not assert physical outcomes.
 - The authority uses a dedicated Ed25519 private key supplied through `CONNECTOR_ISOLATION_AUTHORITY_PRIVATE_KEY_PEM` and checks that it matches `CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM`. Neither key is generated or installed by this source change. Production secret binding needs separate authorization.
 - The installer can redeem a short-lived maintenance token through `/api/connector-upgrade/handoff` without carrying browser credentials. Its private handoff file still needs an automatic, verified producer.
-- Authorization retry after a lost HTTP response reuses the same sealed token and signed evidence. The idempotent database gate change in `printingLifecycle.sql` needs a reviewed incremental production migration before this branch can be deployed.
+- Authorization retry after a lost HTTP response reuses the same sealed token and signed evidence. `printingMaintenanceRetryIncremental.sql` contains the transactional replacement of the changed database gate; live predecessor, owner, grants and RLS still require review before any production execution.
 
 ## Required completion work
 

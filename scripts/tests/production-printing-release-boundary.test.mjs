@@ -44,7 +44,20 @@ test("every printing and public routine changed by this PR has a governed instal
     const before = definitions(old.stdout), after = definitions(fs.readFileSync(file, "utf8"));
     const changed = [...after].filter(([name, sql]) => before.get(name) !== sql).map(([name]) => name);
     assert.ok(changed.length > 0);
-    assert.deepEqual(changed.filter(name => !allowed.includes(name)), [], `${file} changed functions missing from governed release`);
+    const incremental = file.endsWith("printingLifecycle.sql")
+      ? fs.readFileSync("backend/src/rls-waves/session-c/c02/printingMaintenanceRetryIncremental.sql", "utf8") : "";
+    if (incremental) {
+      assert.match(incremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
+      assert.match(incremental, /MAINTENANCE_MIGRATION_IDENTITY_INVALID/);
+      assert.match(incremental, /\nCOMMIT;\n$/);
+      const productionDefinition = after.get("printing_maintenance_gate")
+        .replaceAll("{{APP_ROLE}}", "'mscqr_prd_rls_phase2_app'")
+        .replaceAll("{{WORKER_ROLE}}", "'mscqr_prd_rls_phase2_worker'");
+      assert.deepEqual([...definitions(incremental)], [["printing_maintenance_gate", productionDefinition]],
+        "incremental migration must install the exact canonical function and no other routine");
+    }
+    assert.deepEqual(changed.filter(name => !allowed.includes(name) &&
+      !(incremental && name === "printing_maintenance_gate")), [], `${file} changed functions missing from governed release`);
   }
 });
 
