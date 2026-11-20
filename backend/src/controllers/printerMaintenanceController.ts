@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
 import { administerPrintingPrinter, protectUpgradeUnknownAttempts, redeemPrintingUpgradeHandoff } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { issueConnectorIsolationEvidence, verifyConnectorIsolationEvidence } from "../services/connectorMaintenanceEvidence";
-import { upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradeProofKey } from "../services/connectorUpgradeDeviceProof";
+import { MAX_MAINTENANCE_CHECKPOINT_CHARS, upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradeProofKey } from "../services/connectorUpgradeDeviceProof";
 import { verifyMaintenanceCheckpoint } from "../services/connectorUpgradeDeviceProof";
 import { trustedBinding } from "./connectorUpgradeDeviceProofController";
 import { getConnectorReleaseManifest } from "../services/connectorReleaseService";
@@ -20,7 +20,7 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
   res.setHeader("Cache-Control", "no-store");
   try {
     const input = z.object({ challengeId: z.string().uuid(),
-      checkpoint: z.object({ statement: z.string().max(900_000), signature: z.string().max(200) }).strict(),
+      checkpoint: z.object({ statement: z.string().max(MAX_MAINTENANCE_CHECKPOINT_CHARS), signature: z.string().max(200) }).strict(),
       binding: maintenanceBinding }).strict().parse(req.body);
     const { binding: trusted, publicKeyPem, sourceVersion } = await trustedBinding(req);
     const redis = await getRedisClient();

@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { generateKeyPairSync, randomUUID } = require('node:crypto');
+const { createHash, generateKeyPairSync, randomUUID } = require('node:crypto');
 const path = require('node:path');
 const dist = path.resolve(__dirname, '../dist');
 const mock = (name, exports) => { const filename = require.resolve(path.join(dist, name)); require.cache[filename] = { id: filename, filename, loaded: true, exports }; };
@@ -26,6 +26,25 @@ for (const altered of [
 assert.throws(() => proof.verifyUpgradeDeviceChallenge({ challenge, signature, publicKeyPem, binding, now: 121000 }));
 assert.throws(() => proof.verifyUpgradeDeviceChallenge({ challenge: { ...challenge, attemptId: 'bb058032-0d67-4b60-8430-c762e4d8bab5' }, signature, publicKeyPem, binding, now: 2000 }));
 assert.throws(() => proof.verifyUpgradeDeviceChallenge({ challenge, signature, publicKeyPem: generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString(), binding, now: 2000 }));
+
+const currentChallenge = proof.createUpgradeDeviceChallenge(binding);
+const entries = Array.from({ length: 10_000 }, (_, index) => ({
+  name: `${index.toString(16).padStart(64, '0')}.gateway-attempt.json`, sha256: 'a'.repeat(64),
+  printJobId: `job-${String(index).padStart(176, '0')}`, printItemId: `item-${String(index).padStart(175, '0')}`,
+  attemptId: `attempt-${String(index).padStart(172, '0')}`, state: 'PRE_DISPATCH_REPORTED',
+}));
+const checkpoint = proof.signMaintenanceCheckpoint(privateKeyPem, {
+  purpose: 'mscqr-connector-maintenance-checkpoint-v1', challenge: currentChallenge,
+  observedAt: new Date().toISOString(),
+  fence: { fenced: true, active: 0, idle: true, socketClosed: true },
+  journal: { count: entries.length, entries,
+    sha256: createHash('sha256').update(JSON.stringify(entries.map(({ name, sha256 }) => [name, sha256]))).digest('hex') },
+  physicalOutcomes: 'UNVERIFIED',
+});
+assert(checkpoint.statement.length > 900_000 && checkpoint.statement.length <= proof.MAX_MAINTENANCE_CHECKPOINT_CHARS);
+assert.equal(proof.verifyMaintenanceCheckpoint(checkpoint, currentChallenge, publicKeyPem).journal.count, 10_000);
+assert.throws(() => proof.verifyMaintenanceCheckpoint({ ...checkpoint,
+  statement: checkpoint.statement.padEnd(proof.MAX_MAINTENANCE_CHECKPOINT_CHARS + 1) }, currentChallenge, publicKeyPem));
 
 const redisRecords = new Map();
 const redis = {
