@@ -48,7 +48,8 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrint
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
     workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : [],
       diagnostics: {}, localDiagnostics: [] } };
-  if (input.operation === 'MAINTENANCE_AUTHORIZE') { authorizations += 1; return { authorized: true, dispatchFenced: true,
+  if (input.operation === 'MAINTENANCE_AUTHORIZE') { if (authorizations) throw new Error('MAINTENANCE_ATTEMPT_ALREADY_EXISTS');
+    authorizations += 1; return { authorized: true, dispatchFenced: true,
     binding: input.payload.evidence.binding }; }
   if (input.operation === 'MAINTENANCE_CONSUME') {
     if (consumed) throw new Error('MAINTENANCE_AUTHORIZATION_DENIED');
@@ -115,11 +116,14 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), noHandoff);
     assert.equal(noHandoff.code, 409);
     assert.equal(authorizations, 0, 'database authorization must not commit before handoff storage succeeds');
-    records.set(proofService.upgradeProofKey(challenge.challengeId), JSON.stringify({ challenge, proofSha256 }));
+    assert(records.has(proofService.upgradeProofKey(challenge.challengeId)), 'proof must survive a failed handoff store');
     failHandoffStore = false;
     const issued = response();
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), issued);
     assert.equal(issued.code, 200);
+    const duplicate = response();
+    await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), duplicate);
+    assert.equal(duplicate.code, 409, 'the serialized database gate rejects a second authorization');
     const token = issued.body.data.token;
     assert.equal(typeof token, 'string');
     assert(records.has(proofService.upgradeHandoffKey(hash(token))));

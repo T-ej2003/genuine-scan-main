@@ -95,8 +95,9 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       const attemptRaw = await redis.get(upgradeAttemptKey(binding.attemptId));
       if (!attemptRaw || Object.entries(JSON.parse(attemptRaw)).some(([key, value]) => key !== "fenceRequestId" && binding[key] !== value))
         throw new Error("CONNECTOR_UPGRADE_ATTEMPT_MISMATCH");
-      const raw = await redis.eval('local v=redis.call("GET",KEYS[1]); if v then redis.call("DEL",KEYS[1]); end; return v',
-        1, upgradeProofKey(evidence.challengeId));
+      // The database gate serializes AUTHORIZE and rejects a second live token.
+      // Keep the short-lived proof retryable until that transaction commits.
+      const raw = await redis.get(upgradeProofKey(evidence.challengeId));
       if (typeof raw !== "string") throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
       const stored = JSON.parse(raw);
       const challenge = upgradeChallengeSchema.parse(stored.challenge);
