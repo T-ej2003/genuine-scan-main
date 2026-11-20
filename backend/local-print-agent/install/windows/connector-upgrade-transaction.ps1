@@ -2,6 +2,7 @@ param(
   [ValidateSet('Prepare','Activate','Commit','Recover')][string]$Operation,
   [string]$PayloadDirectory,
   [string]$InstallerFile,
+  [string]$LiveDirectory,
   [string]$AuthorizationFile,
   [string]$TargetVersion
 )
@@ -502,7 +503,10 @@ function Invoke-MscqrUpgradeTransaction {
 
 if ($MyInvocation.InvocationName -ne '.') {
   try {
-    $live=Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
+    $live=[IO.Path]::GetFullPath($LiveDirectory)
+    if ($live -ine [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'))) {
+      throw 'Previous connector installation directory requires separate compatibility verification.'
+    }
     $discovery=$null
     if($Operation -eq 'Prepare') {
       $authorization=Read-MscqrAuthorization $AuthorizationFile

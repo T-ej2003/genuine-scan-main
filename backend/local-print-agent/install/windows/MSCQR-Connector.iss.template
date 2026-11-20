@@ -7,7 +7,7 @@ DefaultDirName={localappdata}\MSCQR\local-print-agent
 DefaultGroupName=MSCQR Connector
 DisableProgramGroupPage=yes
 DisableDirPage=yes
-UsePreviousAppDir=no
+UsePreviousAppDir=yes
 SetupMutex=MSCQRConnectorSetup
 Compression=lzma
 SolidCompression=yes
@@ -98,7 +98,8 @@ begin
   if not Result then exit;
   Params := '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + ExpandConstant('{tmp}\mscqr-payload\connector-upgrade-transaction.ps1') +
     '" -Operation ' + Operation + ' -PayloadDirectory "' + ExpandConstant('{tmp}\mscqr-payload') +
-    '" -InstallerFile "' + ExpandConstant('{srcexe}') + '" -AuthorizationFile "' +
+    '" -InstallerFile "' + ExpandConstant('{srcexe}') + '" -LiveDirectory "' +
+    ExpandConstant('{app}') + '" -AuthorizationFile "' +
     ExpandConstant('{param:MSCQRAUTH|}') + '" -TargetVersion "__MSCQR_CONNECTOR_VERSION__"';
   Code := -1;
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,

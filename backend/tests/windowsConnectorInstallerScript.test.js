@@ -367,6 +367,9 @@ const run = async () => {
     "Upgrade execution must verify the signed transaction and sourced helper scripts before noninteractive launch"
   );
   assert(installerTemplate.includes('AppId={{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}') &&
+    installerTemplate.includes('UsePreviousAppDir=yes') &&
+    installerTemplate.includes("ExpandConstant('{app}') + '\" -AuthorizationFile") &&
+    upgradeTransaction.includes('Previous connector installation directory requires separate compatibility verification.') &&
     upgradeTransaction.includes('Uninstall\\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1') &&
     upgradeTransaction.includes("Get-MscqrRuntimeVersion $runtime") &&
     upgradeTransaction.includes('Connector checkpoint listener ownership is unverified.') &&
