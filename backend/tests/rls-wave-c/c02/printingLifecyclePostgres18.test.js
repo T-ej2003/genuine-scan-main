@@ -60,8 +60,10 @@ const connection = (raw) => {
 };
 const psql = (raw, sql, expectFailure = false) => {
   const target = connection(raw);
-  const result = spawnSync("psql", [target.url, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", sql], {
+  const large = Buffer.byteLength(sql) > 100_000;
+  const result = spawnSync("psql", [target.url, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", ...(large ? [] : ["-c", sql])], {
     encoding: "utf8",
+    ...(large ? { input: sql } : {}),
     env: { ...process.env, PGPASSWORD: target.password },
   });
   const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
