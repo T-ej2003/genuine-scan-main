@@ -724,7 +724,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $fn$
 DECLARE snapshot jsonb; registration_id text; expected_count integer;
   matches jsonb; entry jsonb; item_row record; marker jsonb; added integer:=0;
-  settled integer:=0; diagnostic_count integer:=0; protected_ids jsonb:='[]'::jsonb;
+  settled integer:=0; diagnostic_count integer:=0; prior_operation text; protected_ids jsonb:='[]'::jsonb;
 BEGIN
   IF session_user <> {{APP_ROLE}} OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
      p_fence_request_id IS NULL OR p_fence_request_id !~* '^[0-9a-f-]{36}$' OR
@@ -752,6 +752,7 @@ BEGIN
   SELECT p."printerRegistrationId" INTO STRICT registration_id FROM public."Printer" p
     WHERE p.id=p_printer_id AND p."assignedUserId"=current_setting('app.printing_user_id',true)
       AND p."isActive" AND p."printerRegistrationId" IS NOT NULL;
+  prior_operation:=current_setting('app.printing_operation',true);
   PERFORM set_config('app.printing_operation','printing-connector-upgrade-protect',true),
     set_config('app.printing_printer_id',p_printer_id,true);
   SELECT count(*) INTO diagnostic_count FROM jsonb_to_recordset(p_entries)
@@ -763,6 +764,7 @@ BEGIN
         AND a."licenseeId"=current_setting('app.printing_licensee_id',true)
         AND a.action='PRINTER_TEST_LABEL_CONFIRMED' AND a."entityType"='Printer'
         AND a."entityId"=p_printer_id AND a.details->>'testJobId'=substring(e."printItemId" from 12));
+  PERFORM set_config('app.printing_operation',prior_operation,true);
   SELECT coalesce(jsonb_agg(jsonb_build_object('itemId',pi.id,'sessionId',ps.id,
       'jobId',j.id,'qrCodeId',pi."qrCodeId",'entrySha256',e.sha256,'attemptId',e."attemptId") ORDER BY pi.id),'[]'::jsonb)
     INTO matches FROM jsonb_to_recordset(p_entries)
