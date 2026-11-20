@@ -37,8 +37,9 @@ assert(
   "app root should mount request sanitization globally after body parsers and before routes"
 );
 assert(
-  appSource.includes('app.use("/api/manufacturer/printers/:id/maintenance/evidence", express.json({ limit: "10mb" })); app.use(express.urlencoded'),
-  "bounded maintenance checkpoints should be parsed only on their authenticated evidence route"
+  appSource.includes('scope: "connector.maintenance-evidence:pre-parse"') &&
+    appSource.includes('express.json({ limit: "10mb", inflate: false })); app.use(express.urlencoded'),
+  "bounded maintenance checkpoints should be rate limited before parsing without request inflation"
 );
 
 [
@@ -213,3 +214,18 @@ assert(!authSecurityControllerSource.includes("console.error"), "auth security c
 });
 
 console.log("route security contract tests passed");
+
+const { gzipSync } = require('node:zlib');
+const { createBackendApp } = require('../dist/app');
+const server = createBackendApp().listen(0, '127.0.0.1', async () => {
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/api/manufacturer/printers/00000000-0000-0000-0000-000000000000/maintenance/evidence`;
+    const body = JSON.stringify({ checkpoint: { statement: 'a'.repeat(1_100_000), signature: 'x' } });
+    const raw = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    const compressed = await fetch(url, { method: 'POST',
+      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' }, body: gzipSync(body) });
+    assert.strictEqual(raw.status, 401, 'large unauthenticated evidence must reach authentication, not a generic parser error');
+    assert.strictEqual(compressed.status, 415, 'compressed evidence must be rejected before inflation');
+  } catch (error) { console.error(error); process.exitCode = 1; }
+  finally { server.close(); }
+});
