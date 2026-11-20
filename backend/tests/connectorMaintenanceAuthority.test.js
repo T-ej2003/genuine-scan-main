@@ -82,6 +82,8 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     assert.equal(accepted.code, 200);
     const verified = require(path.join(dist, 'services/connectorMaintenanceEvidence')).verifyConnectorIsolationEvidence(accepted.body.evidence);
     assert.equal(verified.deviceProofSha256, proofSha256);
+    assert(Date.parse(verified.expiresAt) > Date.parse(challenge.expiresAt) + 600_000,
+      'installer authorization must outlive the short device challenge');
     assert.deepEqual(verified.reconciliations, []);
     assert.equal(verified.isolationEvidence[1].sha256, emptyJournal.sha256);
     unresolved = true;

@@ -73,6 +73,15 @@ const connector = path.resolve(__dirname, '../dist/local-print-agent/index.js');
     const verified = deviceProof.verifyMaintenanceCheckpoint(envelope, challenge, state.publicKeyPem);
     assert.equal(verified.physicalOutcomes, 'UNVERIFIED');
     assert.equal(verified.journal.count, 0);
+    const now = Date.now();
+    for (const offset of [-179_000, 299_000]) {
+      const shifted = deviceProof.signMaintenanceCheckpoint(state.privateKeyPem,
+        { ...JSON.parse(envelope.statement), observedAt: new Date(now + offset).toISOString() });
+      assert.equal(deviceProof.verifyMaintenanceCheckpoint(shifted, challenge, state.publicKeyPem, now).fence.fenced, true);
+    }
+    const stale = deviceProof.signMaintenanceCheckpoint(state.privateKeyPem,
+      { ...JSON.parse(envelope.statement), observedAt: new Date(now - 181_000).toISOString() });
+    assert.throws(() => deviceProof.verifyMaintenanceCheckpoint(stale, challenge, state.publicKeyPem, now));
     assert.throws(() => deviceProof.verifyMaintenanceCheckpoint(envelope, { ...challenge, attemptId: randomUUID() }, state.publicKeyPem));
     assert.throws(() => deviceProof.verifyMaintenanceCheckpoint(envelope, challenge, state.publicKeyPem, Date.now() + 300_000));
     await stop();

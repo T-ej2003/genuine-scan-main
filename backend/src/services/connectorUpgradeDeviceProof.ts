@@ -83,7 +83,8 @@ export const verifyMaintenanceCheckpoint = (envelope: { statement: string; signa
   const expected = upgradeChallengeSchema.parse(challenge);
   if (JSON.stringify(statement) !== envelope.statement ||
       canonicalUpgradeDeviceChallenge(statement.challenge) !== canonicalUpgradeDeviceChallenge(expected) ||
-      Date.parse(expected.expiresAt) <= now || Math.abs(Date.parse(statement.observedAt) - now) > 120_000 ||
+      Date.parse(expected.expiresAt) <= now || now - Date.parse(statement.observedAt) > 180_000 ||
+      Date.parse(statement.observedAt) - now > 300_000 ||
       statement.journal.count !== statement.journal.entries.length ||
       statement.journal.sha256 !== createHash("sha256").update(JSON.stringify(statement.journal.entries.map(({ name, sha256 }) => [name, sha256]))).digest("hex") ||
       !verifyPrinterAgentPayloadSignature({ publicKeyPem, payload: envelope.statement, signature: envelope.signature }))

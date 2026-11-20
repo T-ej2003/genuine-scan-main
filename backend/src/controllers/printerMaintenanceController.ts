@@ -61,7 +61,7 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
     const evidence = issueConnectorIsolationEvidence({ purpose: "mscqr-legacy-connector-isolation-v1",
       binding: input.binding, challengeId: challenge.challengeId, deviceProofSha256: proof.proofSha256,
       workDigest: snapshot.workDigest, verifiedAt: new Date(now).toISOString(),
-      expiresAt: new Date(Math.min(now + 120_000, Date.parse(challenge.expiresAt))).toISOString(),
+      expiresAt: new Date(now + 900_000).toISOString(),
       isolationEvidence: [
         { kind: "dispatch-isolation", sha256: createHash("sha256").update(input.checkpoint.statement).digest("hex"), reference: challenge.challengeId },
         { kind: "connector-work-inventory", sha256: checkpoint.journal.sha256, reference: challenge.challengeId },
