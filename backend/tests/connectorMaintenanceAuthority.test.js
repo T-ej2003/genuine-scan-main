@@ -25,8 +25,11 @@ const records = new Map([
   [proofService.upgradeAttemptKey(challenge.attemptId), JSON.stringify(attempt)],
 ]);
 let unresolved = false;
+let failHandoffStore = false;
+let authorizations = 0;
 const redis = { get: async key => records.get(key) || null,
-  set: async (key, value, _px, _ttl, nx) => { if (nx === 'NX' && records.has(key)) return null;
+  set: async (key, value, _px, _ttl, nx) => { if (failHandoffStore && key.startsWith('connector-upgrade:handoff:')) return null;
+    if (nx === 'NX' && records.has(key)) return null;
     records.set(key, value); return 'OK'; },
   eval: async (_script, _count, key) => { const value = records.get(key) || null; records.delete(key); return value; } };
 mock('services/redisService.js', { getRedisClient: async () => redis });
@@ -45,8 +48,8 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrint
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
     workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : [],
       diagnostics: {}, localDiagnostics: [] } };
-  if (input.operation === 'MAINTENANCE_AUTHORIZE') return { authorized: true, dispatchFenced: true,
-    binding: input.payload.evidence.binding };
+  if (input.operation === 'MAINTENANCE_AUTHORIZE') { authorizations += 1; return { authorized: true, dispatchFenced: true,
+    binding: input.payload.evidence.binding }; }
   if (input.operation === 'MAINTENANCE_CONSUME') {
     if (consumed) throw new Error('MAINTENANCE_AUTHORIZATION_DENIED');
     consumed = true;
@@ -107,6 +110,13 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const mismatchedAuthority = response();
     await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId, checkpoint, binding }), mismatchedAuthority);
     assert.equal(mismatchedAuthority.code, 409, 'unmatched production authority configuration must fail closed');
+    failHandoffStore = true;
+    const noHandoff = response();
+    await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), noHandoff);
+    assert.equal(noHandoff.code, 409);
+    assert.equal(authorizations, 0, 'database authorization must not commit before handoff storage succeeds');
+    records.set(proofService.upgradeProofKey(challenge.challengeId), JSON.stringify({ challenge, proofSha256 }));
+    failHandoffStore = false;
     const issued = response();
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), issued);
     assert.equal(issued.code, 200);

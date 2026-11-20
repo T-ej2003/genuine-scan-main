@@ -114,9 +114,6 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
     } else if (input.action === "consume" || input.action === "verify") {
       payload = { binding: input.binding, tokenHash: createHash("sha256").update(input.token).digest("hex") };
     }
-    const data = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
-      operation: ({ request: "MAINTENANCE_REQUEST", inventory: "MAINTENANCE_INVENTORY", authorize: "MAINTENANCE_AUTHORIZE",
-        consume: "MAINTENANCE_CONSUME", verify: "MAINTENANCE_VERIFY", release: "MAINTENANCE_RELEASE" } as const)[input.action], printerId: String(req.params.id), payload });
     if (token && input.action === "authorize") {
       const redis = await getRedisClient();
       const evidence = payload.evidence as any;
@@ -126,6 +123,9 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
           binding: evidence.binding, printerId: String(req.params.id) }), "PX", ttl, "NX") !== "OK")
         throw new Error("CONNECTOR_UPGRADE_HANDOFF_UNAVAILABLE");
     }
+    const data = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
+      operation: ({ request: "MAINTENANCE_REQUEST", inventory: "MAINTENANCE_INVENTORY", authorize: "MAINTENANCE_AUTHORIZE",
+        consume: "MAINTENANCE_CONSUME", verify: "MAINTENANCE_VERIFY", release: "MAINTENANCE_RELEASE" } as const)[input.action], printerId: String(req.params.id), payload });
     res.setHeader("Cache-Control", "no-store");
     return res.json({ success: true, data: { ...data, ...(token ? { token } : {}) } });
   } catch (error: any) {

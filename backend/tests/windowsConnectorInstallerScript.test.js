@@ -379,7 +379,9 @@ const run = async () => {
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") < upgradeTransaction.indexOf('$process.Kill()'),
     "Upgrade must detect the owned installation and drain fenced work before stopping the connector"
   );
-  assert(existingUpgradeCertification.includes("$version -cne $TargetVersion -or $runtimeHash -cne $TargetRuntimeSha256") &&
+  assert(existingUpgradeCertification.includes("[Parameter(Mandatory=$true)][ValidateSet('Before','After')][string]$Stage") &&
+    existingUpgradeCertification.includes(' -TargetVersion $expectedTargetVersion') &&
+    existingUpgradeCertification.includes("$version -cne $TargetVersion -or $runtimeHash -cne $TargetRuntimeSha256") &&
     existingUpgradeCertification.includes("$before.runtimeSha256 -ceq $record.runtimeSha256") &&
     existingUpgradeCertification.includes("$before.journal | ConvertTo-Json"),
     "Existing-install certification must prove the signed target replaced the old runtime without changing journal records"

@@ -1,12 +1,13 @@
 param(
-  [ValidateSet('Before','After')][string]$Stage,
+  [Parameter(Mandatory=$true)][ValidateSet('Before','After')][string]$Stage,
   [Parameter(Mandatory=$true)][string]$EvidenceDirectory,
   [Parameter(Mandatory=$true)][string]$TargetVersion,
   [Parameter(Mandatory=$true)][string]$TargetRuntimeSha256,
   [int]$ExpectedJournalCount = 12
 )
 $ErrorActionPreference = 'Stop'
-. "$PSScriptRoot\connector-upgrade-transaction.ps1"
+$expectedTargetVersion=$TargetVersion
+. "$PSScriptRoot\connector-upgrade-transaction.ps1" -TargetVersion $expectedTargetVersion
 if($TargetRuntimeSha256 -cnotmatch '^[a-fA-F0-9]{64}$' -or $TargetVersion -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
   throw 'Expected target version and runtime digest are required.'
 }
