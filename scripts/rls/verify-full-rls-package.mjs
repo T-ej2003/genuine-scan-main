@@ -189,7 +189,7 @@ export const verifyFullRlsPackage = () => {
     for (const dependency of phase.files.slice(1)) ensure(entrypointLines.filter((line) => line === `\\ir ${dependency}`).length === 1, `${phase.id} must include ${dependency} exactly once`);
   }
 
-  for (const name of ["00-preflight.sql", "10-roles.sql", "15-migration-preflight.sql", "11-ownership-grants.sql", "20-context-helpers.sql", "21-runtime-grants.sql", "30-policies.sql", "40-post-apply-verification.sql", "50-certification-fixtures.sql", "90-clean-room-role-cleanup.sql"]) {
+  for (const name of ["00-preflight.sql", "10-roles.sql", "15-migration-preflight.sql", "11-ownership-grants.sql", "20-context-helpers.sql", "22-printing-upgrade.sql", "21-runtime-grants.sql", "30-policies.sql", "40-post-apply-verification.sql", "50-certification-fixtures.sql", "90-clean-room-role-cleanup.sql"]) {
     const sql = readGenerated(name).toString();
     ensure(sql.startsWith("\\set ON_ERROR_STOP on\nBEGIN;\n") && sql.trimEnd().endsWith("COMMIT;"), `${name} is not phase-transaction atomic`);
     ensure((sql.match(/^BEGIN;$/gm) || []).length === 1 && (sql.match(/^COMMIT;$/gm) || []).length === 1, `${name} has ambiguous transaction boundaries`);
