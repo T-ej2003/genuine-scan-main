@@ -88,6 +88,7 @@ const administrationRollback = "backend/src/rls-waves/session-c/c01/administrati
 const qrSystemSource = "backend/src/rls-waves/session-c/c01/qrSystem.sql";
 const qrSystemRollback = "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql";
 const printingLifecycleSource = "backend/src/rls-waves/session-c/c02/printingLifecycle.sql";
+const printingUpgradeNoReplaySource = "backend/src/rls-waves/session-c/c02/printingUpgradeNoReplayDefinitions.sql";
 const printingLifecycleRollback = "backend/src/rls-waves/session-c/c02/printingLifecycleRollback.sql";
 const publicVerificationSource = "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql";
 const publicVerificationRollback = "backend/src/rls-waves/session-b/b02/publicVerificationRollback.sql";
@@ -1438,7 +1439,8 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
       ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:mutatePrintingReissueRequest"]],
   ].map(([id,name,signature,identityArguments,returnType,tableCommands,repositoryCallers]) => ({
     id:`release-fix-5-${id}`,schema:"app_rls",name,signature,returnType,identityArguments,
-    definitionLocation:printingLifecycleSource,definitionKind:"checked-in-production-package",
+    definitionLocation:["printing_printer_administration","printing_reissue_request","printing_upgrade_protect_unknown"].includes(name)
+      ? printingUpgradeNoReplaySource : printingLifecycleSource,definitionKind:"checked-in-production-package",
     definitionStatus:"production-reviewed",security:printingLifecycleSecurity,tableCommands,
     context:"Uses the authenticated database-session capability or the exact connector evidence boundary, derives live tenant and manufacturer scope, and validates one fixed printing lifecycle operation under FORCE RLS.",
     canonicalWorkflowIds:[`workflow-release-fix-5-${id}`],repositoryCallers,
