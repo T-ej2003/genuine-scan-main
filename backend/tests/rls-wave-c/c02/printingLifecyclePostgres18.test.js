@@ -2343,7 +2343,9 @@ async function main() {
     ${rollback.slice(functionRollbackAt)}
     RESET ROLE;
     COMMIT;`);
-  assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_policies WHERE schemaname='public' AND policyname LIKE 'printing_lifecycle_%'`)), 0);
+  const remainingPrintingPolicies=psql(admin, `SELECT coalesce(string_agg(tablename||'.'||policyname,',' ORDER BY tablename,policyname),'')
+    FROM pg_policies WHERE schemaname='public' AND policyname LIKE 'printing_lifecycle_%'`);
+  assert.equal(remainingPrintingPolicies, '', `printing rollback left policies: ${remainingPrintingPolicies}`);
   assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='app_rls' AND p.proname LIKE 'printing_%'`)), 0);
   assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE
     (n.nspname='app_auth' AND p.proname='require_authenticated_session')
