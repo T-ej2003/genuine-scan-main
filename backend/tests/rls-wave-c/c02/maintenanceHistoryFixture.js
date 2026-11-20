@@ -72,16 +72,19 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   await call({action:'verify',token:authorization.data.token,binding},403);
   snapshot=inventory();
   assert.equal(snapshot.inventory.items.length,2);assert.equal(snapshot.inventory.settledHistory.items,100001);
+  for(let index=0;index<10;index++)newItem('RESERVED',0);
+  snapshot=inventory();
+  assert.equal(snapshot.inventory.items.length,12,'twelve legacy reservations remain individually visible');
   const uncertain=snapshot.inventory.items.map((item,index)=>({name:`${hash(`upgrade-journal-${index}`)}.json`,
     sha256:hash(`upgrade-record-${index}`),printJobId:job,printItemId:item.id,attemptId:null,state:'ATTEMPT_RESERVED'}));
   const journalHash=hash(JSON.stringify(uncertain.map(({name,sha256})=>[name,sha256])));
   const protection=`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${journalHash}','${JSON.stringify(uncertain)}'::jsonb)`;
-  assert.equal(JSON.parse(psql(app,protection)).protected,2,'uncertain attempts must be durably protected');
+  assert.equal(JSON.parse(psql(app,protection)).protected,12,'uncertain attempts must be durably protected');
   assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');
   assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem" WHERE id IN ('${uncertain.map(item=>item.printItemId).join("','")}')
     AND state='FROZEN' AND "pipelineState"='NEEDS_OPERATOR_ACTION'
-    AND "dispatchMetadata"->'upgradeNoReplay'->>'journalSha256'='${journalHash}'`),'2');
+    AND "dispatchMetadata"->'upgradeNoReplay'->>'journalSha256'='${journalHash}'`),'12');
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${hash('forged-journal')}','${JSON.stringify(uncertain)}'::jsonb)`,true),/UPGRADE_NO_REPLAY_MISMATCH/);
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
