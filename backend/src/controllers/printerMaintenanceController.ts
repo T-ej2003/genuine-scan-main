@@ -68,7 +68,7 @@ export const readConnectorUpgradePairing = async (req: AuthRequest, res: Respons
     if (candidate.agentId !== binding.agentId || candidate.deviceFingerprint !== binding.deviceFingerprint ||
         (candidate.registrationId && candidate.registrationId !== binding.registrationId) ||
         (candidate.printerId && candidate.printerId !== binding.printerId)) throw new Error("PAIRING_INVALID");
-    return res.json({ success: true, binding: candidate });
+    return res.json({ success: true, data: { binding: candidate } });
   } catch {
     return res.status(403).json({ success: false, error: "Connector upgrade pairing was rejected." });
   }

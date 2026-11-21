@@ -64,7 +64,7 @@ export const issueConnectorUpgradeChallenge = async (req: AuthRequest, res: Resp
     const challenge = createUpgradeDeviceChallenge({ ...immutable, currentVersion: sourceVersion, attemptId: id });
     if (await redis.set(challengeKey(challenge.challengeId), JSON.stringify(challenge), "PX", 120_000, "NX") !== "OK")
       throw new Error("CONNECTOR_UPGRADE_CHALLENGE_STORE_UNAVAILABLE");
-    return res.json({ success: true, challenge });
+    return res.json({ success: true, data: { challenge } });
   } catch {
     return res.status(409).json({ success: false, error: "Connector upgrade device challenge is unavailable." });
   }

@@ -70,39 +70,39 @@ const response = () => ({ code: 200, setHeader() {}, status(code) { this.code = 
   const issued = response();
   await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), issued);
   assert.equal(issued.code, 200);
-  const signed = proof.signUpgradeDeviceChallenge(privateKeyPem, issued.body.challenge);
+  const signed = proof.signUpgradeDeviceChallenge(privateKeyPem, issued.body.data.challenge);
   const accepted = response();
-  await controller.verifyConnectorUpgradeProof(request({ challengeId: issued.body.challenge.challengeId, signature: signed }), accepted);
+  await controller.verifyConnectorUpgradeProof(request({ challengeId: issued.body.data.challenge.challengeId, signature: signed }), accepted);
   assert.equal(accepted.code, 200);
   const replay = response();
-  await controller.verifyConnectorUpgradeProof(request({ challengeId: issued.body.challenge.challengeId, signature: signed }), replay);
-  assert.equal(issued.body.challenge.attemptId, accepted.body.attemptId);
+  await controller.verifyConnectorUpgradeProof(request({ challengeId: issued.body.data.challenge.challengeId, signature: signed }), replay);
+  assert.equal(issued.body.data.challenge.attemptId, accepted.body.attemptId);
   redisRecords.set(proof.upgradeAttemptKey(accepted.body.attemptId), JSON.stringify({ ...binding,
     attemptId: undefined, fenceRequestId: 'fence-1' }));
   const recovery = response();
   await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion,
     attemptId: accepted.body.attemptId }), recovery);
   assert.equal(recovery.code, 200);
-  assert.equal(recovery.body.challenge.attemptId, accepted.body.attemptId);
-  assert.notEqual(recovery.body.challenge.challengeId, issued.body.challenge.challengeId);
+  assert.equal(recovery.body.data.challenge.attemptId, accepted.body.attemptId);
+  assert.notEqual(recovery.body.data.challenge.challengeId, issued.body.data.challenge.challengeId);
   const recovered = response();
-  await controller.verifyConnectorUpgradeProof(request({challengeId: recovery.body.challenge.challengeId,
-    signature: proof.signUpgradeDeviceChallenge(privateKeyPem, recovery.body.challenge)}), recovered);
+  await controller.verifyConnectorUpgradeProof(request({challengeId: recovery.body.data.challenge.challengeId,
+    signature: proof.signUpgradeDeviceChallenge(privateKeyPem, recovery.body.data.challenge)}), recovered);
   assert.equal(recovered.code, 200);
   activeVersion = binding.targetVersion;
   const replacedRecovery = response();
   await controller.issueConnectorUpgradeChallenge(request({targetVersion:binding.targetVersion,
     attemptId:accepted.body.attemptId}), replacedRecovery);
   assert.equal(replacedRecovery.code, 200);
-  assert.equal(replacedRecovery.body.challenge.sourceVersion, binding.sourceVersion);
-  assert.equal(replacedRecovery.body.challenge.currentVersion, binding.targetVersion);
+  assert.equal(replacedRecovery.body.data.challenge.sourceVersion, binding.sourceVersion);
+  assert.equal(replacedRecovery.body.data.challenge.currentVersion, binding.targetVersion);
   activeVersion = binding.sourceVersion;
   assert.equal(replay.code, 403);
   const second = response();
   await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), second);
   const forged = response();
-  await controller.verifyConnectorUpgradeProof(request({ challengeId: second.body.challenge.challengeId,
-    signature: proof.signUpgradeDeviceChallenge(generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), second.body.challenge) }), forged);
+  await controller.verifyConnectorUpgradeProof(request({ challengeId: second.body.data.challenge.challengeId,
+    signature: proof.signUpgradeDeviceChallenge(generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), second.body.data.challenge) }), forged);
   assert.equal(forged.code, 403);
   const crossManufacturer = response();
   await controller.issueConnectorUpgradeChallenge({ ...request({ targetVersion: binding.targetVersion }), user: { userId: 'other-manufacturer' } }, crossManufacturer);

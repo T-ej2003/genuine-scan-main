@@ -231,6 +231,7 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const pairingRequest = request({}); pairingRequest.params.pairingId = pairingId;
     await controller.readConnectorUpgradePairing(pairingRequest, inspectedPairing);
     assert.equal(inspectedPairing.code, 200);
+    assert.equal(inspectedPairing.body.data.binding.agentId, binding.agentId);
     const wrongManufacturer = response();
     await controller.completeConnectorUpgradePairing({ ...request({ pairingId, token }), user: { userId: 'other-maker' } }, wrongManufacturer);
     assert.equal(wrongManufacturer.code, 403);
