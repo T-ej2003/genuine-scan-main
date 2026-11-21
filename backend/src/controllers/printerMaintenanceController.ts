@@ -7,7 +7,7 @@ import { issueConnectorIsolationEvidence, verifyConnectorIsolationEvidence } fro
 import { MAX_MAINTENANCE_CHECKPOINT_CHARS, upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradePairingKey, upgradePairingResultKey, upgradeProofKey, verifyPostInstallStatement } from "../services/connectorUpgradeDeviceProof";
 import { verifyMaintenanceCheckpoint } from "../services/connectorUpgradeDeviceProof";
 import { trustedBinding } from "./connectorUpgradeDeviceProofController";
-import { getConnectorReleaseManifest } from "../services/connectorReleaseService";
+import { getConnectorReleaseManifest, isCertifiedUpgradeSource } from "../services/connectorReleaseService";
 import { getRedisClient } from "../services/redisService";
 import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { openCookieToken, sealCookieToken } from "../services/auth/cookieTokenProtectionService";
@@ -93,8 +93,8 @@ export const completeConnectorUpgradePairing = async (req: AuthRequest, res: Res
     const attemptRaw = bound.attemptId && await redis.get(upgradeAttemptKey(bound.attemptId));
     const attempt = attemptRaw && JSON.parse(attemptRaw);
     if (handoff.printerId !== printerId || bound.printerId !== printerId ||
-        bound.manufacturerId !== req.user.userId || !attempt ||
-        Object.entries(attempt).some(([key, value]) => key !== "fenceRequestId" && bound[key] !== value) ||
+        bound.manufacturerId !== req.user.userId || !attempt || typeof attempt.historicalSession !== "boolean" ||
+        Object.entries(attempt).some(([key, value]) => !["fenceRequestId", "historicalSession"].includes(key) && bound[key] !== value) ||
         Object.entries(candidate).some(([key, value]) => bound[key] !== value)) throw new Error("PAIRING_INVALID");
     const key = upgradePairingResultKey(input.pairingId);
     const value = JSON.stringify({ sealedToken: sealCookieToken(input.token, "connector-upgrade.authorization"), binding: bound });
@@ -133,12 +133,15 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
         challenge.manufacturerId !== req.user.userId || challenge.printerId !== req.params.id ||
         ["agentId", "deviceFingerprint", "manufacturerId", "tenantId", "printerId", "registrationId"]
           .some(key => input.binding[key] !== challenge[key as keyof typeof challenge]) ||
-        Object.entries(attempt).some(([key, value]) => key !== "fenceRequestId" && input.binding[key] !== value) ||
+        Object.entries(attempt).some(([key, value]) => !["fenceRequestId", "historicalSession"].includes(key) && input.binding[key] !== value) ||
         attempt.sourceVersion !== challenge.sourceVersion ||
         attempt.targetVersion !== challenge.targetVersion ||
         input.binding.attemptId !== challenge.attemptId || input.binding.sourceVersion !== challenge.sourceVersion ||
         input.binding.targetVersion !== challenge.targetVersion ||
         input.binding.installerSha256 !== release.platforms.windows.sha256 ||
+        typeof attempt.historicalSession !== "boolean" ||
+        (attempt.historicalSession === true &&
+          !isCertifiedUpgradeSource(challenge.targetVersion, challenge.sourceVersion, String(input.binding.sourceSha256 || ""))) ||
         input.binding.publicKeySha256 !== createHash("sha256").update(String(proof.publicKeyPem || "")).digest("hex") ||
         input.binding.protocolVersion !== LOCAL_AGENT_DIRECT_PROTOCOL_VERSION ||
         (attempt.fenceRequestId && input.binding.fenceRequestId !== attempt.fenceRequestId))
@@ -267,8 +270,12 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       if (!redis || typeof binding?.attemptId !== "string" || typeof evidence.challengeId !== "string" ||
           !/^[a-f0-9]{64}$/.test(String(evidence.deviceProofSha256 || ""))) throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
       const attemptRaw = await redis.get(upgradeAttemptKey(binding.attemptId));
-      if (!attemptRaw || Object.entries(JSON.parse(attemptRaw)).some(([key, value]) => key !== "fenceRequestId" && binding[key] !== value))
+      if (!attemptRaw || typeof JSON.parse(attemptRaw).historicalSession !== "boolean" ||
+          Object.entries(JSON.parse(attemptRaw)).some(([key, value]) => !["fenceRequestId", "historicalSession"].includes(key) && binding[key] !== value))
         throw new Error("CONNECTOR_UPGRADE_ATTEMPT_MISMATCH");
+      if (JSON.parse(attemptRaw).historicalSession === true &&
+          !isCertifiedUpgradeSource(binding.targetVersion, binding.sourceVersion, binding.sourceSha256))
+        throw new Error("CONNECTOR_UPGRADE_SOURCE_NOT_CERTIFIED");
       // The database gate serializes AUTHORIZE and rejects a second live token.
       // Keep the short-lived proof retryable until that transaction commits.
       const raw = await redis.get(upgradeProofKey(evidence.challengeId));

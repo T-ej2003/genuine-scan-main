@@ -23,7 +23,7 @@ const proofSha256 = hash('verified-device-proof');
 const records = new Map([
   [proofService.upgradeProofKey(challenge.challengeId), JSON.stringify({ challenge, proofSha256,
     publicKeyPem: device.publicKey.export({ type: 'spki', format: 'pem' }).toString() })],
-  [proofService.upgradeAttemptKey(challenge.attemptId), JSON.stringify(attempt)],
+  [proofService.upgradeAttemptKey(challenge.attemptId), JSON.stringify({ ...attempt, historicalSession: true })],
 ]);
 let unresolved = false;
 let protectedEntries = [];
@@ -42,7 +42,9 @@ mock('services/redisService.js', { getRedisClient: async () => redisAvailable ? 
 mock('services/auth/cookieTokenProtectionService.js', { sealCookieToken: value => `sealed:${value}`,
   openCookieToken: value => value.startsWith('sealed:') ? value.slice(7) : null });
 mock('services/connectorReleaseService.js', { getConnectorReleaseManifest: () => ({ releases: [{ version: attempt.targetVersion,
-  productionSignedAvailable: true, platforms: { windows: { installationScope: 'certified-upgrade', sha256: hash('installer') } } }] }) });
+  productionSignedAvailable: true, platforms: { windows: { installationScope: 'certified-upgrade', sha256: hash('installer') } } }] }),
+  isCertifiedUpgradeSource: (target, source, digest) => target === attempt.targetVersion &&
+    source === attempt.sourceVersion && digest === hash('certified source') });
 mock('controllers/connectorUpgradeDeviceProofController.js', { trustedBinding: async () => ({
   binding: { agentId: attempt.agentId, deviceFingerprint: attempt.deviceFingerprint,
     manufacturerId: attempt.manufacturerId, tenantId: attempt.tenantId,
@@ -99,7 +101,7 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
 } });
 const controller = require(path.join(dist, 'controllers/printerMaintenanceController'));
 const binding = { ...attempt, attemptId: challenge.attemptId, fenceRequestId: 'fence-1',
-  installerSha256: hash('installer'), targetSha256: hash('replacement'), stateSha256: 'd'.repeat(64),
+  installerSha256: hash('installer'), sourceSha256: hash('certified source'), targetSha256: hash('replacement'), stateSha256: 'd'.repeat(64),
   publicKeySha256: hash(publicPem), protocolVersion: 'local-agent-direct-v2' };
 const emptyJournal = { count: 0, sha256: hash('[]'), entries: [] };
 const checkpoint = proofService.signMaintenanceCheckpoint(device.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), {
@@ -117,6 +119,10 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const accepted = response();
     await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId, checkpoint, binding }), accepted);
     assert.equal(accepted.code, 200);
+    const unsupported = response();
+    await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId, checkpoint,
+      binding: { ...binding, sourceSha256: hash('other signed source') } }), unsupported);
+    assert.equal(unsupported.code, 409, 'a signed but uncertified source must not reach durable protection');
     const verified = require(path.join(dist, 'services/connectorMaintenanceEvidence')).verifyConnectorIsolationEvidence(accepted.body.evidence);
     assert.equal(verified.deviceProofSha256, proofSha256);
     assert(Date.parse(verified.expiresAt) > Date.parse(challenge.expiresAt) + 600_000,

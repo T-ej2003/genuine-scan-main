@@ -47,6 +47,7 @@ jobs:
           & ./backend/tests/windowsConnectorStateDiscovery.test.ps1
           & ./backend/tests/windowsConnectorSigningHook.test.ps1
           & ./backend/tests/windowsConnectorComponentVerification.test.ps1
+          & ./backend/tests/windowsConnectorCertifiedSource.test.ps1
       - name: Test dispatch journal preservation
         shell: powershell
         run: ./backend/tests/windowsConnectorJournalBackup.test.ps1

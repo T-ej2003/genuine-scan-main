@@ -25,18 +25,19 @@ export const trustedBinding = async (req: AuthRequest) => {
     printerId });
   const trusted = z.object({ agentId: z.string().min(3), deviceFingerprint: z.string().min(8),
     manufacturerId: z.string(), tenantId: z.string().nullable(), printerId: z.string().uuid(),
-    registrationId: z.string().uuid(), publicKeyPem: z.string().min(1), sourceVersion: version }).parse(result);
+    registrationId: z.string().uuid(), publicKeyPem: z.string().min(1), sourceVersion: version,
+    historicalSession: z.boolean() }).parse(result);
   if (trusted.manufacturerId !== req.user.userId || trusted.printerId !== printerId)
     throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
-  const { publicKeyPem, sourceVersion, ...binding } = trusted;
-  return { publicKeyPem, sourceVersion, binding };
+  const { publicKeyPem, sourceVersion, historicalSession, ...binding } = trusted;
+  return { publicKeyPem, sourceVersion, historicalSession, binding };
 };
 
 export const issueConnectorUpgradeChallenge = async (req: AuthRequest, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
   try {
     const { targetVersion, attemptId } = z.object({ targetVersion: version, attemptId: z.string().uuid().optional() }).strict().parse(req.body);
-    const { binding, sourceVersion } = await trustedBinding(req);
+    const { binding, sourceVersion, historicalSession } = await trustedBinding(req);
     const release = getConnectorReleaseManifest().releases.find(item => item.version === targetVersion);
     if (!release?.productionSignedAvailable || release.platforms.windows?.installationScope !== "certified-upgrade")
       throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
@@ -50,7 +51,7 @@ export const issueConnectorUpgradeChallenge = async (req: AuthRequest, res: Resp
       const previous = JSON.parse(raw);
       if (Object.entries(binding).some(([key, value]) => previous[key] !== value) ||
           previous.targetVersion !== targetVersion || ![previous.sourceVersion, targetVersion].includes(sourceVersion) ||
-          !previous.fenceRequestId || !newer(targetVersion, previous.sourceVersion))
+          typeof previous.historicalSession !== "boolean" || !previous.fenceRequestId || !newer(targetVersion, previous.sourceVersion))
         throw new Error("CONNECTOR_UPGRADE_ATTEMPT_MISMATCH");
       immutable = { ...binding, sourceVersion: previous.sourceVersion, targetVersion };
       const status = await administerPrintingPrinter({ capability: String(req.databaseSessionCapability || ""),
@@ -59,7 +60,7 @@ export const issueConnectorUpgradeChallenge = async (req: AuthRequest, res: Resp
       if (status.state !== "DISPATCH_FENCED" || status.requestId !== previous.fenceRequestId)
         throw new Error("CONNECTOR_UPGRADE_FENCE_MISMATCH");
     } else if (!newer(targetVersion, sourceVersion) ||
-      await redis.set(upgradeAttemptKey(id), JSON.stringify(immutable), "PX", 86_400_000, "NX") !== "OK")
+      await redis.set(upgradeAttemptKey(id), JSON.stringify({ ...immutable, historicalSession }), "PX", 86_400_000, "NX") !== "OK")
       throw new Error("CONNECTOR_UPGRADE_ATTEMPT_CONFLICT");
     const challenge = createUpgradeDeviceChallenge({ ...immutable, currentVersion: sourceVersion, attemptId: id });
     if (await redis.set(challengeKey(challenge.challengeId), JSON.stringify(challenge), "PX", 120_000, "NX") !== "OK")
@@ -86,6 +87,7 @@ export const verifyConnectorUpgradeProof = async (req: AuthRequest, res: Respons
     const original = attempt && JSON.parse(attempt);
     if (!original || Object.entries(binding).some(([key, value]) => original[key] !== value) ||
         original.sourceVersion !== challenge.sourceVersion || original.targetVersion !== challenge.targetVersion ||
+        typeof original.historicalSession !== "boolean" ||
         challenge.currentVersion !== sourceVersion || ![original.sourceVersion, original.targetVersion].includes(sourceVersion))
       throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
     const release = getConnectorReleaseManifest().releases.find(item => item.version === challenge.targetVersion);

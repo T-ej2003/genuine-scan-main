@@ -109,6 +109,8 @@ const run = async () => {
   const smokeScript = fs.readFileSync(smokeScriptPath, "utf8");
   const installerTemplate = fs.readFileSync(installerTemplatePath, "utf8");
   const upgradeTransaction = fs.readFileSync(path.join(__dirname, '..', 'local-print-agent', 'install', 'windows', 'connector-upgrade-transaction.ps1'), 'utf8');
+  const liveShutdown = upgradeTransaction.slice(upgradeTransaction.indexOf('function Stop-MscqrVerifiedRuntime'),
+    upgradeTransaction.indexOf('function Start-MscqrVerifiedRuntime'));
   const existingUpgradeCertification = fs.readFileSync(path.join(__dirname, '..', 'local-print-agent', 'install', 'windows', 'certify-existing-upgrade.ps1'), 'utf8');
   const readme = fs.readFileSync(readmePath, "utf8");
   const signedReleaseWorkflow = fs.readFileSync(signedReleaseWorkflowPath, "utf8");
@@ -376,6 +378,15 @@ const run = async () => {
       !installerTemplate.includes('-ExecutionPolicy AllSigned -File'),
     "Upgrade execution must verify the signed transaction and sourced helper scripts before noninteractive launch"
   );
+  assert(upgradeTransaction.includes('Get-MscqrCertifiedSource $authority $Version $installerSha256 $runtime $Live') &&
+    upgradeTransaction.includes('certifiedUpgradeSources') &&
+    !upgradeTransaction.includes("'2026.11.6.2'") &&
+    upgradeTransaction.includes("Start-MscqrOfflineBridge $candidate $stateFile $sourceVersion") &&
+    upgradeTransaction.includes("upgradeMode=$(if($offline){'OFFLINE_EXISTING_INSTALL'}") &&
+    upgradeTransaction.includes("Assert-MscqrStoppedInstallation") &&
+    upgradeTransaction.includes("if($Journal.binding.upgradeMode -ne 'OFFLINE_EXISTING_INSTALL')") &&
+    upgradeTransaction.includes("Assert-MscqrDispatchJournalLive $journal.dispatchJournal"),
+  "Stopped legacy upgrades must preserve the fence and journal without starting the legacy connector");
   assert(installerTemplate.includes('AppId={{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}') &&
     installerTemplate.includes('UsePreviousAppDir=yes') &&
     installerTemplate.includes("ExpandConstant('{app}') + '\" -AuthorizationFile") &&
@@ -387,13 +398,13 @@ const run = async () => {
     upgradeTransaction.includes("$uri.AbsolutePath -cne '/api/connector-upgrade/handoff'") &&
     upgradeTransaction.includes("Handoff cannot carry browser credentials.") &&
     !upgradeTransaction.includes('X-Database-Session-Capability') &&
-    upgradeTransaction.indexOf("Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options") > 0 &&
-    upgradeTransaction.indexOf("Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") &&
-    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") > 0 &&
-    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") &&
-    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") > 0 &&
-    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/shutdown'") &&
-    !upgradeTransaction.includes('$process.Kill()'),
+    liveShutdown.indexOf("Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options") > 0 &&
+    liveShutdown.indexOf("Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options") < liveShutdown.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") &&
+    liveShutdown.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") > 0 &&
+    liveShutdown.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") < liveShutdown.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") &&
+    liveShutdown.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") > 0 &&
+    liveShutdown.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") < liveShutdown.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/shutdown'") &&
+    !liveShutdown.includes('$process.Kill()'),
     "Upgrade must drain fenced work and request a connector-owned shutdown before replacement"
   );
   assert(existingUpgradeCertification.includes("[Parameter(Mandatory=$true)][ValidateSet('Before','After')][string]$Stage") &&

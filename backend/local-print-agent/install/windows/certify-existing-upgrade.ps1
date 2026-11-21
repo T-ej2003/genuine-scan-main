@@ -39,7 +39,10 @@ if($identity.agentId -cne $state.agentId -or $identity.deviceFingerprint -cne $s
 if([string]::IsNullOrWhiteSpace([string]$state.selectedPrinterId)) {throw 'Existing printer selection is missing.'}
 $uninstall=Get-MscqrUninstallSnapshot $live
 $version=[string](@($uninstall | Where-Object name -eq 'DisplayVersion')[0].value)
-if($version -cne (Get-MscqrRuntimeVersion $runtime)) {throw 'Installed version and AppId registration differ.'}
+if($Stage -eq 'Before') {
+  Assert-MscqrStoppedInstallation
+  if($version -cne (Get-MscqrInstalledVersion $live $runtime $version ((Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash))) {throw 'Installed version and AppId registration differ.'}
+} elseif($version -cne (Get-MscqrRuntimeVersion $runtime)) {throw 'Installed version and AppId registration differ.'}
 $runtimeHash=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
 if(($Stage -eq 'Before' -and [version]$version -ge [version]$TargetVersion) -or
    ($Stage -eq 'After' -and ($version -cne $TargetVersion -or $runtimeHash -cne $TargetRuntimeSha256))) {
@@ -47,6 +50,9 @@ if(($Stage -eq 'Before' -and [version]$version -ge [version]$TargetVersion) -or
 }
 $journalDirectory=Join-Path $env:USERPROFILE '.mscqr\dispatch-journal'
 $journal=@(Get-MscqrDispatchJournalFiles $journalDirectory | ForEach-Object {
+  if($Stage -eq 'Before' -and (Read-MscqrJson $_).state -cne 'ATTEMPT_RESERVED') {
+    throw 'Existing dispatch journal contains a different state; retain it for separate review.'
+  }
   [pscustomobject]@{name=[IO.Path]::GetFileName($_);sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()}
 })
 if($journal.Count -ne $ExpectedJournalCount) {throw 'Dispatch journal count differs from the expected existing installation.'}

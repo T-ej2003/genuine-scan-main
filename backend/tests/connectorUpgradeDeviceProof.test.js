@@ -57,7 +57,7 @@ let tenantId = binding.tenantId;
 let activeVersion = binding.sourceVersion;
 mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrintingPrinter: async () => ({state:'DISPATCH_FENCED',requestId:'fence-1'}), readUpgradeDeviceBinding: async ({ printerId: id }) => {
   assert.equal(id, printerId);
-  return { ...binding, tenantId, sourceVersion: activeVersion, publicKeyPem };
+  return { ...binding, tenantId, sourceVersion: activeVersion, publicKeyPem, historicalSession: false };
 } });
 let installationScope = 'certified-upgrade';
 mock('services/connectorReleaseService.js', { getConnectorReleaseManifest: () => ({ releases: [{ version: binding.targetVersion,
@@ -79,7 +79,7 @@ const response = () => ({ code: 200, setHeader() {}, status(code) { this.code = 
   await controller.verifyConnectorUpgradeProof(request({ challengeId: issued.body.data.challenge.challengeId, signature: signed }), replay);
   assert.equal(issued.body.data.challenge.attemptId, accepted.body.attemptId);
   redisRecords.set(proof.upgradeAttemptKey(accepted.body.attemptId), JSON.stringify({ ...binding,
-    attemptId: undefined, fenceRequestId: 'fence-1' }));
+    attemptId: undefined, fenceRequestId: 'fence-1', historicalSession: false }));
   const recovery = response();
   await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion,
     attemptId: accepted.body.attemptId }), recovery);

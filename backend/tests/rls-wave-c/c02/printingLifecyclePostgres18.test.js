@@ -99,8 +99,12 @@ async function main() {
   const redisUrl = new URL(process.env.REDIS_URL || "");
   assert(["127.0.0.1", "localhost", "redis"].includes(redisUrl.hostname), "Printing worker certification requires disposable Redis");
   assert.equal(Number(psql(admin, "select current_setting('server_version_num')::int / 10000")), 18);
-  const upgradeBindingSql = readFileSync(path.join(__dirname,
-    "../../../src/rls-waves/session-c/c02/connectorUpgradeDeviceBinding.sql"), "utf8")
+  const bindingSource = readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/connectorUpgradeDeviceBinding.sql"), "utf8");
+  assert.equal(bindingSource, readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/connectorOfflineUpgradeDeviceBindingIncremental.sql"), "utf8"),
+    "the incremental production function must match the PostgreSQL-certified definition");
+  const upgradeBindingSql = bindingSource
     .replaceAll("{{APP_ROLE}}", "mscqr_rls_cert_app");
   psql(admin, `BEGIN;
     SET ROLE "mscqr_rls_cert_owner";
@@ -240,12 +244,13 @@ async function main() {
   denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   denied(app, `UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=100 WHERE id='${sessionA}'`);
   assert.equal(json(app, advance(sessionA, 1)).lastMessageSeq, 1);
-  const deviceBinding = (capability) => `SELECT app_rls.printing_upgrade_device_binding(
-    '${capability}','${requestId()}','${ids.discoveredPrinter}')`;
+  const deviceBinding = (capability, printerId = ids.discoveredPrinter) => `SELECT app_rls.printing_upgrade_device_binding(
+    '${capability}','${requestId()}','${printerId}')`;
   const trustedDevice = json(app, deviceBinding(caps.maker));
   assert.equal(trustedDevice.registrationId, ids.registration);
   assert.equal(trustedDevice.manufacturerId, ids.maker);
   assert.equal(trustedDevice.tenantId, ids.orgA);
+  assert.equal(trustedDevice.historicalSession, false);
   assert.equal(trustedDevice.publicKeyPem, signingPublicKey);
   assert.equal(trustedDevice.sourceVersion, "2026.11.19.1");
   denied(app, deviceBinding(caps.outsider), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
@@ -260,7 +265,7 @@ async function main() {
   const parallel = await Promise.all([psqlAsync(app, advance(sessionA, 2)), psqlAsync(app, advance(sessionA, 2))]);
   assert.deepEqual(parallel.map(result => result.status === 0).sort(), [false, true]);
   psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds' WHERE id='${sessionA}'`);
-  denied(app, deviceBinding(caps.maker), /query returned no rows|NO_DATA_FOUND/);
+  denied(app, deviceBinding(caps.maker), /PRINTING_BOUNDARY_DENIED|query returned no rows|NO_DATA_FOUND/);
   denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   assert.equal(json(app, advance(sessionA, 3)).lastMessageSeq, 3);
   assert.equal(json(app, sessionSql("CHECK", sessionA, {})).state, "CONNECTED");
@@ -1452,7 +1457,7 @@ async function main() {
       await redis.set(`connector-upgrade:attempt:${challenge.attemptId}`,
         JSON.stringify({...Object.fromEntries(['agentId','deviceFingerprint','manufacturerId','tenantId','printerId',
           'registrationId','sourceVersion','targetVersion'].map(key=>[key,challenge[key]])),
-          fenceRequestId:statement.binding.fenceRequestId}), 'PX',900000);
+          fenceRequestId:statement.binding.fenceRequestId,historicalSession:false}), 'PX',900000);
       await redis.set(`connector-upgrade:proof:${challengeId}`,JSON.stringify({challenge,proofSha256}),'PX',120000);
       const withProof={...statement,challengeId,deviceProofSha256:proofSha256};
       if(typeof statement.padding==='string') {
@@ -2337,6 +2342,23 @@ async function main() {
   assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${largePartialRun.jobId}' AND "customerVerifiableAt" IS NULL`), "800");
   assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${largePartialRun.jobId}'`), "SENT",
     "the partial job must not require or fabricate whole-batch release");
+
+  // A stopped legacy device has no fresh session. Only an already fenced,
+  // manufacturer-owned registration may recover its historical signed version.
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "connectionState"='DISCONNECTED',
+    "revokedAt"=now(),"selectedPrinterId"='${ids.printer}',
+    metadata=jsonb_set(metadata,'{connectorVersion}','"2026.11.6.2"'::jsonb)
+    WHERE "registrationId"='${ids.registration}'`);
+  denied(app,deviceBinding(caps.maker,ids.printer), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
+  assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST')).state,'DISPATCH_FENCED');
+  assert.equal(json(app,deviceBinding(caps.maker,ids.printer)).sourceVersion,'2026.11.6.2');
+  assert.equal(json(app,deviceBinding(caps.maker,ids.printer)).historicalSession,true);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET metadata=jsonb_set(metadata,'{connectorVersion}','"2026.11.9.1"'::jsonb)
+    WHERE "registrationId"='${ids.registration}'`);
+  assert.equal(json(app,deviceBinding(caps.maker,ids.printer)).sourceVersion,'2026.11.9.1',
+    'fenced historical binding is version agnostic; certified digest policy is enforced before authorization');
+  denied(app,deviceBinding(caps.outsider,ids.printer), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
+  denied(app,'SELECT "agentId" FROM public."PrinterAgentSession" LIMIT 1', /permission denied/);
 
   const rollback = readFileSync(
     path.resolve(__dirname, "../../../src/rls-waves/session-c/c02/printingLifecycleRollback.sql"),

@@ -13,8 +13,11 @@ try {
   $attemptBody = '{"journalVersion":2,"state":"PRE_DISPATCH_FAILURE"}'
   [IO.File]::WriteAllText((Join-Path $journal $reservation),$reservationBody)
   [IO.File]::WriteAllText((Join-Path $journal $attempt),$attemptBody)
+  for($i=1;$i -lt 12;$i++) {
+    [IO.File]::WriteAllText((Join-Path $journal (([string]$i).PadLeft(64,'0')+'.json')),$reservationBody)
+  }
   $snapshot = New-MscqrDispatchJournalBackup $journal $backup
-  if (@($snapshot.records).Count -ne 2) { throw 'Journal inventory was not backed up.' }
+  if (@($snapshot.records).Count -ne 13) { throw 'Twelve reserved attempts and the gateway journal were not backed up.' }
   Assert-MscqrDispatchJournalLive $snapshot
   $failed = $false
   try { New-MscqrDispatchJournalBackup $journal $backup | Out-Null } catch { $failed = $true }

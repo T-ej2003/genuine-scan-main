@@ -26,6 +26,10 @@ const connectorCapabilitiesSchema = z
 const connectorPlatformSchema = z.object({
   label: z.string().min(2),
   installationScope: z.enum(["fresh-install-only", "certified-upgrade"]).optional(),
+  certifiedUpgradeSources: z.array(z.object({
+    version: z.string().regex(/^\d+\.\d+\.\d+(?:\.\d+)?$/),
+    runtimeSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict()).default([]),
   installerKind: z.enum(["pkg", "zip", "exe", "msi"]),
   artifactType: z
     .enum(["macos-signed-package", "windows-signed-installer", "windows-unsigned-test-zip", "windows-legacy-installer"])
@@ -163,6 +167,7 @@ const toPublicPlatform = (
     platform: platformKey,
     label: platform.label,
     installationScope: platform.installationScope || null,
+    certifiedUpgradeSources: platform.installationScope === "certified-upgrade" ? platform.certifiedUpgradeSources : [],
     installerKind: platform.installerKind,
     artifactType: platform.artifactType || null,
     trustLevel,
@@ -270,6 +275,13 @@ export const getConnectorReleaseManifest = (baseUrl?: string | null, options: Pu
     setupGuidePath: manifest.setupGuidePath,
     releases: manifest.releases.map((release) => toPublicRelease(release, normalizedBase, options)),
   };
+};
+
+export const isCertifiedUpgradeSource = (targetVersion: string, sourceVersion: string, runtimeSha256: string) => {
+  const release = loadManifestInternal().releases.find((item) => item.version === targetVersion);
+  const windows = release?.platforms.windows;
+  return windows?.installationScope === "certified-upgrade" && isProductionSignedWindowsArtifact(windows) &&
+    windows.certifiedUpgradeSources.some((source) => source.version === sourceVersion && source.runtimeSha256 === runtimeSha256);
 };
 
 export const getLatestConnectorRelease = (baseUrl?: string | null, options: PublicReleaseOptions = {}) => {

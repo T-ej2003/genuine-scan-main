@@ -41,6 +41,7 @@ export const createLocalAgentPrintingApi = () => {
             agentVersion: String((data as any).agentVersion || "").trim() || null,
             protocolVersion: String((data as any).protocolVersion || "").trim() || null,
             buildVersion: String((data as any).buildVersion || "").trim() || null,
+            ...((data as any).upgradeMode === "OFFLINE_EXISTING_INSTALL" ? { upgradeMode: "OFFLINE_EXISTING_INSTALL" as const } : {}),
             transportDiagnosticsVersion: String((data as any).transportDiagnosticsVersion || "").trim() || null,
             capabilities:
               (data as any).capabilities && typeof (data as any).capabilities === "object"

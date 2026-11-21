@@ -56,6 +56,11 @@ const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERS
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const INVENTORY_TTL_MS = Math.max(1500, Number(String(process.env.PRINT_AGENT_INVENTORY_TTL_MS || "5000").trim()) || 5000);
 const cliArgs = new Set(process.argv.slice(2).map((arg) => String(arg || "").trim()));
+const offlineUpgrade = cliArgs.has("--offline-existing-install");
+const offlineSourceVersion = offlineUpgrade ? String(process.env.MSCQR_OFFLINE_SOURCE_VERSION || "") : "";
+if (offlineUpgrade && (cliArgs.size !== 1 || !/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(offlineSourceVersion))) {
+  throw new Error("Unsupported offline connector upgrade source.");
+}
 
 const resolveSingleInstanceLockPath = () => {
   const base =
@@ -320,6 +325,12 @@ app.use((req, res, next) => {
   }
   next();
 });
+if (offlineUpgrade) app.use((req, res, next) => {
+  if ((req.method === "GET" && req.path === "/status") ||
+      (req.method === "POST" && ["/maintenance/device-proof", "/maintenance/fence",
+        "/maintenance/checkpoint-evidence", "/maintenance/shutdown"].includes(req.path))) return next();
+  return res.status(403).json({ success: false, error: "Offline upgrade permits maintenance only." });
+});
 
 const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState; snapshot: AgentSnapshot }> => {
   if (!forceRefresh && inventoryCache && inventoryCache.expiresAt > Date.now()) {
@@ -459,6 +470,13 @@ const requirePrinter = async (printerId: string | null | undefined) => {
 
 app.get("/status", async (_req, res) => {
   try {
+    if (offlineUpgrade) {
+      const state = await loadAgentState({ initialize: false });
+      return res.json({ connected: false, agentId: state.agentId, deviceFingerprint: state.deviceFingerprint,
+        selectedPrinterId: state.selectedPrinterId, buildVersion: offlineSourceVersion,
+        protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION, upgradeMode: "OFFLINE_EXISTING_INSTALL",
+        websocket: getPersistentPrintSessionStatus() });
+    }
     const { snapshot } = await buildSnapshot();
     res.json(snapshot);
   } catch (error: any) {
@@ -510,11 +528,12 @@ app.post("/maintenance/device-proof", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
     const challenge = upgradeChallengeSchema.parse(req.body);
-    const state = await loadAgentState();
+    const state = await loadAgentState({ initialize: !offlineUpgrade });
     const now = Date.now();
     const expiresAt = Date.parse(challenge.expiresAt);
     if (challenge.agentId !== state.agentId || challenge.deviceFingerprint !== state.deviceFingerprint ||
-        challenge.currentVersion !== AGENT_BUILD_VERSION || expiresAt <= now - 180_000 ||
+        (offlineUpgrade && challenge.targetVersion !== AGENT_BUILD_VERSION) ||
+        challenge.currentVersion !== (offlineUpgrade ? offlineSourceVersion : AGENT_BUILD_VERSION) || expiresAt <= now - 180_000 ||
         expiresAt > now + 300_000) throw new Error("Device proof challenge rejected");
     return res.json({ success: true, attemptId: challenge.attemptId,
       signature: signUpgradeDeviceChallenge(state.privateKeyPem, challenge) });
@@ -527,9 +546,10 @@ app.post("/maintenance/checkpoint-evidence", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
     const challenge = upgradeChallengeSchema.parse(req.body);
-    const state = await loadAgentState();
+    const state = await loadAgentState({ initialize: !offlineUpgrade });
     if (challenge.agentId !== state.agentId || challenge.deviceFingerprint !== state.deviceFingerprint ||
-        challenge.currentVersion !== AGENT_BUILD_VERSION || Date.parse(challenge.expiresAt) <= Date.now() - 180_000 ||
+        (offlineUpgrade && challenge.targetVersion !== AGENT_BUILD_VERSION) ||
+        challenge.currentVersion !== (offlineUpgrade ? offlineSourceVersion : AGENT_BUILD_VERSION) || Date.parse(challenge.expiresAt) <= Date.now() - 180_000 ||
         Date.parse(challenge.expiresAt) > Date.now() + 300_000) throw new Error("Checkpoint challenge rejected");
     if (!maintenanceCheckpoint().fenced) throw new Error("Maintenance fence is absent");
     enterMaintenanceFence();
@@ -739,11 +759,17 @@ app.post("/print", async (_req, res) => {
 
 if (!cliArgs.has("--self-test") && !cliArgs.has("--validate-state") && !cliArgs.has("--initialize-state") &&
     !cliArgs.has("--sign-upgrade-challenge")) {
-  loadAgentState({ initialize: false }).then(() => {
+  loadAgentState({ initialize: false }).then(async () => {
+    if (offlineUpgrade) {
+      if (!maintenanceCheckpoint().fenced) throw new Error("Offline upgrade requires a persistent maintenance fence.");
+      await inspectDispatchJournal();
+    }
     app.listen(PORT, HOST, () => {
       console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
-      startGatewayWorker();
-      startDirectPrintWorker();
+      if (!offlineUpgrade) {
+        startGatewayWorker();
+        startDirectPrintWorker();
+      }
     });
   }).catch(() => { console.error("Existing connector identity is unavailable; startup refused."); process.exit(1); });
 }

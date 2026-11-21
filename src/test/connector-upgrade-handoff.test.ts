@@ -23,17 +23,24 @@ const ok = (data: unknown = {}) => ({ success: true, data });
 describe("automatic connector upgrade handoff", () => {
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
-  it.each([false, true])("binds proof to the installer pairing and recovers a lost release response: %s", async (lostReleaseResponse) => {
+  it.each([[false, false], [true, false], [false, true], [true, true]])(
+    "binds proof to the pairing, including a stopped connector: lost=%s offline=%s", async (lostReleaseResponse, offline) => {
     vi.useFakeTimers();
-    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue(ok({ ...binding, buildVersion: binding.sourceVersion }) as any);
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue(ok({ ...binding, buildVersion: binding.sourceVersion,
+      upgradeMode: offline ? "OFFLINE_EXISTING_INSTALL" : null }) as any);
     vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue(ok([{ id: printerId, agentId: binding.agentId,
       deviceFingerprint: binding.deviceFingerprint }]) as any);
-    vi.mocked(apiClient.getConnectorUpgradePairing).mockResolvedValue(ok({ binding }) as any);
+    const calls: string[] = [];
+    vi.mocked(apiClient.getConnectorUpgradePairing).mockImplementation(async () => {
+      calls.push("pairing");
+      return ok({ binding }) as any;
+    });
     vi.mocked(apiClient.connectorUpgradeChallenge).mockResolvedValue(ok({ challenge: { challengeId, attemptId: id,
       manufacturerId: "manufacturer", tenantId: null, printerId, registrationId: "registration" } }) as any);
     vi.mocked(apiClient.connectorUpgradeProof).mockResolvedValue(ok() as any);
     let authorizationResponses = 0;
     vi.mocked(apiClient.connectorMaintenance).mockImplementation(async (_printer, input: any) => {
+      if (input.action === "request") calls.push("fence");
       if (input.action === "authorize" && authorizationResponses++ === 0) throw new Error("authorization response lost");
       if (input.action === "release" && lostReleaseResponse) throw new Error("release response lost");
       return ok(input.action === "request" ? { requestId: id } : input.action === "authorize" ? { token } :
@@ -66,6 +73,7 @@ describe("automatic connector upgrade handoff", () => {
     expect(apiClient.connectorUpgradeReleaseStatus).toHaveBeenCalledTimes(lostReleaseResponse ? 1 : 0);
     expect(apiClient.completeConnectorUpgradePairing).toHaveBeenCalledTimes(2);
     expect(authorizationResponses).toBe(2);
+    expect(calls.slice(0, 2)).toEqual(offline ? ["fence", "pairing"] : ["pairing", "fence"]);
     vi.unstubAllGlobals();
   });
 });
