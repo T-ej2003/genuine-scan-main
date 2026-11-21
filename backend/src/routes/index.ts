@@ -1897,7 +1897,8 @@ protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/postinstall
   printMutationActorLimiter, requireCsrf, issueVerifiedPostInstallEvidence
 );
 protectedReadRouter.get("/manufacturer/printers/:id/maintenance/pairing/:pairingId",
-  authenticate, requireOpsUser, requireRecentSensitiveAuth, enforceTenantIsolation,
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter, printMutationActorLimiter,
   readConnectorUpgradePairing);
 protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/pairing",
   printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
