@@ -788,7 +788,11 @@ BEGIN
     JOIN public."PrintJob" j ON j.id=ps."printJobId"
     WHERE e.name !~ '\.gateway-attempt\.json$' AND e."gatewayId" IS NULL AND ps."printerRegistrationId"=registration_id AND
       j."manufacturerId"=current_setting('app.printing_user_id',true) AND
-      (e."attemptId" IS NOT DISTINCT FROM pi."dispatchMetadata"->>'attemptId');
+      (e."attemptId" IS NOT DISTINCT FROM pi."dispatchMetadata"->>'attemptId' OR
+        (e."attemptId" IS NOT NULL AND pi."dispatchMetadata"->>'lastUnsubmittedAttemptId'=e."attemptId" AND
+          pi."dispatchedAt" IS NULL AND pi."agentAckedAt" IS NULL AND
+          (pi.state='RESERVED' OR (pi.state='FROZEN' AND
+            pi."dispatchMetadata"->'upgradeNoReplay'->>'attemptId'=e."attemptId"))));
   IF (SELECT count(DISTINCT item->>'itemId') FROM jsonb_array_elements(matches) item)<>jsonb_array_length(matches)
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
   -- Governed reissue moves the same item to a replacement job. Its old

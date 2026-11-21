@@ -102,6 +102,13 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   assert.equal(snapshot.inventory.items.length,12,'twelve legacy reservations remain individually visible');
   const uncertain=snapshot.inventory.items.map((item,index)=>({name:`${hash(`upgrade-journal-${index}`)}.json`,
     sha256:hash(`upgrade-record-${index}`),printJobId:job,printItemId:item.id,attemptId:null,state:'ATTEMPT_RESERVED'}));
+  const latestRecoveredAttempt=randomUUID();
+  uncertain[2].attemptId=latestRecoveredAttempt;
+  psql(admin,`UPDATE public."PrintItem" SET state='RESERVED',"dispatchMetadata"=jsonb_build_object('lastUnsubmittedAttemptId','${latestRecoveredAttempt}',
+    'journalState','UNKNOWN','recoveredAt',now()) WHERE id='${uncertain[2].printItemId}';
+    INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+    VALUES('${randomUUID()}','${uncertain[2].printItemId}','RESUMED','ISSUED','RESERVED',
+      '{"attemptId":"${latestRecoveredAttempt}","reason":"no_backend_dispatch_intent"}'::jsonb,'${ids.maker}',now())`);
   psql(admin,`UPDATE public."PrintJob" SET "reprintOfJobId"='${historyJob}' WHERE id='${job}'`);
   const reissued={...uncertain[0],name:`${hash('governed-reissue-history')}.json`,
     sha256:hash('governed-reissue-record'),printJobId:historyJob};
