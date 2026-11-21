@@ -58,7 +58,7 @@ const INVENTORY_TTL_MS = Math.max(1500, Number(String(process.env.PRINT_AGENT_IN
 const cliArgs = new Set(process.argv.slice(2).map((arg) => String(arg || "").trim()));
 const offlineUpgrade = cliArgs.has("--offline-existing-install");
 const offlineSourceVersion = offlineUpgrade ? String(process.env.MSCQR_OFFLINE_SOURCE_VERSION || "") : "";
-if (offlineUpgrade && (cliArgs.size !== 1 || offlineSourceVersion !== "2026.11.6.2")) {
+if (offlineUpgrade && (cliArgs.size !== 1 || !/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(offlineSourceVersion))) {
   throw new Error("Unsupported offline connector upgrade source.");
 }
 

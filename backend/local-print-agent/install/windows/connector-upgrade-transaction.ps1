@@ -75,12 +75,41 @@ function Assert-MscqrStoppedInstallation {
     throw 'Offline upgrade requires the installed connector and its local listener to be stopped.'
   }
 }
-function Get-MscqrInstalledVersion([string]$Live) {
+function Get-MscqrInstalledVersion([string]$Live,[string]$Runtime,[string]$ExpectedVersion,[string]$ExpectedSha256) {
   $versions=@(Get-MscqrUninstallSnapshot $Live | Where-Object name -eq 'DisplayVersion')
-  if ($versions.Count -ne 1 -or $versions[0].value -cne '2026.11.6.2') {
-    throw 'This stopped connector version is not certified for offline upgrade.'
+  Assert-MscqrSignedFile $Runtime $ExpectedSha256
+  # --version exits before connector startup, lock acquisition or print workers.
+  $oldAgentVersion=$env:PRINT_AGENT_VERSION;$oldBuildVersion=$env:PRINT_AGENT_BUILD_VERSION
+  try {
+    $env:PRINT_AGENT_VERSION='';$env:PRINT_AGENT_BUILD_VERSION=''
+    $binaryVersion=Get-MscqrRuntimeVersion $Runtime
+  } finally {
+    $env:PRINT_AGENT_VERSION=$oldAgentVersion;$env:PRINT_AGENT_BUILD_VERSION=$oldBuildVersion
   }
-  return [string]$versions[0].value
+  if ($versions.Count -ne 1 -or $versions[0].value -cne $ExpectedVersion -or
+      $binaryVersion -cne $ExpectedVersion) {
+    throw 'Installed connector executable and AppId version do not match the certified source.'
+  }
+  return $ExpectedVersion
+}
+function Get-MscqrCertifiedSource([Uri]$Authority,[string]$TargetVersion,[string]$InstallerSha256,[string]$Runtime,[string]$Live) {
+  $manifest=Invoke-RestMethod -Uri ($Authority.GetLeftPart([UriPartial]::Authority)+'/api/public/connector/releases') -TimeoutSec 20 -MaximumRedirection 0
+  $releases=@($manifest.data.releases | Where-Object version -ceq $TargetVersion)
+  if($manifest.success -ne $true -or $releases.Count -ne 1 -or
+     $releases[0].productionSignedAvailable -ne $true -or
+     $releases[0].platforms.windows.installationScope -cne 'certified-upgrade' -or
+     $releases[0].platforms.windows.sha256 -cne $InstallerSha256) {
+    throw 'Target installer is not the certified upgrade release.'
+  }
+  $digest=(Get-FileHash -LiteralPath $Runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+  $sources=@($releases[0].platforms.windows.certifiedUpgradeSources | Where-Object runtimeSha256 -ceq $digest)
+  if($sources.Count -ne 1 -or $sources[0].version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
+    throw 'Installed executable does not match a certified offline upgrade source.'
+  }
+  if([version]$sources[0].version -ge [version]$TargetVersion) {
+    throw 'Installed connector is already current or newer than this installer.'
+  }
+  Get-MscqrInstalledVersion $Live $Runtime ([string]$sources[0].version) $digest
 }
 function Start-MscqrOfflineBridge([string]$Candidate,[string]$StateFile,[string]$SourceVersion) {
   Assert-MscqrStoppedInstallation
@@ -232,7 +261,11 @@ function Acquire-MscqrUpgradeAuthorization([string]$Live,[string]$Payload,[strin
      -not([IO.File]::ReadAllText((Join-Path $Live 'agent.env')) -match '(?im)^\s*"?PRINT_AGENT_STATE_FILE"?=')) {
     throw 'Legacy connector identity path is not bound to persistent startup configuration.'
   }
-  $sourceVersion=if($offline){Get-MscqrInstalledVersion $Live}else{Get-MscqrRuntimeVersion $runtime}
+  $authority=[Uri]$identity.backendUrl
+  if($authority.Scheme -cne 'https' -or $authority.UserInfo -or $authority.Query -or $authority.Fragment -or
+     $authority.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__') {throw 'Connector backend does not match the signed maintenance authority.'}
+  $installerSha256=(Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+  $sourceVersion=if($offline){Get-MscqrCertifiedSource $authority $Version $installerSha256 $runtime $Live}else{Get-MscqrRuntimeVersion $runtime}
   $startup=Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
   $bridge=$null
   if($offline) {
@@ -243,9 +276,6 @@ function Acquire-MscqrUpgradeAuthorization([string]$Live,[string]$Payload,[strin
   }
   try {
   $status=if($offline){$bridge.status}else{Assert-MscqrRuntime $runtime $sourceVersion $stateFile $startup (Get-FileHash -LiteralPath $startup -Algorithm SHA256).Hash}
-  $authority=[Uri]$identity.backendUrl
-  if($authority.Scheme -cne 'https' -or $authority.UserInfo -or $authority.Query -or $authority.Fragment -or
-     $authority.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__') {throw 'Connector backend does not match the signed maintenance authority.'}
   $binding=[ordered]@{
     agentId=[string]$identity.agentId; deviceFingerprint=[string]$identity.deviceFingerprint
     upgradeMode=$(if($offline){'OFFLINE_EXISTING_INSTALL'}else{'LIVE_MAINTENANCE'})
@@ -253,7 +283,7 @@ function Acquire-MscqrUpgradeAuthorization([string]$Live,[string]$Payload,[strin
     protocolVersion=[string]$status.protocolVersion; publicKeySha256=[string]$evidence.publicKeySha256
     sourceSha256=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
     targetSha256=(Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
-    installerSha256=(Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+    installerSha256=$installerSha256
     stateSha256=(Get-FileHash -LiteralPath $stateFile -Algorithm SHA256).Hash.ToLowerInvariant()
     stateDiscoverySha256=$discovery.sha256
     configurationSha256=(Get-FileHash -LiteralPath (Join-Path $Live 'agent.env') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -573,7 +603,7 @@ function Invoke-MscqrUpgradeTransaction {
       }
       $oldVersion = if($binding.upgradeMode -eq 'OFFLINE_EXISTING_INSTALL'){
         Assert-MscqrStoppedInstallation
-        Get-MscqrInstalledVersion $live
+        Get-MscqrInstalledVersion $live $runtime $binding.sourceVersion $binding.sourceSha256
       } else {Get-MscqrRuntimeVersion $runtime}
       if ($oldVersion -cne $binding.sourceVersion) { throw 'Previous runtime version mismatch.' }
       $identity = Read-MscqrJson $StateFile

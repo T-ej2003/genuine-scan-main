@@ -41,7 +41,7 @@ $uninstall=Get-MscqrUninstallSnapshot $live
 $version=[string](@($uninstall | Where-Object name -eq 'DisplayVersion')[0].value)
 if($Stage -eq 'Before') {
   Assert-MscqrStoppedInstallation
-  if($version -cne (Get-MscqrInstalledVersion $live)) {throw 'Installed version and AppId registration differ.'}
+  if($version -cne (Get-MscqrInstalledVersion $live $runtime $version ((Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash))) {throw 'Installed version and AppId registration differ.'}
 } elseif($version -cne (Get-MscqrRuntimeVersion $runtime)) {throw 'Installed version and AppId registration differ.'}
 $runtimeHash=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
 if(($Stage -eq 'Before' -and [version]$version -ge [version]$TargetVersion) -or

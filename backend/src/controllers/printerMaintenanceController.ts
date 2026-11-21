@@ -7,7 +7,7 @@ import { issueConnectorIsolationEvidence, verifyConnectorIsolationEvidence } fro
 import { MAX_MAINTENANCE_CHECKPOINT_CHARS, upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradePairingKey, upgradePairingResultKey, upgradeProofKey, verifyPostInstallStatement } from "../services/connectorUpgradeDeviceProof";
 import { verifyMaintenanceCheckpoint } from "../services/connectorUpgradeDeviceProof";
 import { trustedBinding } from "./connectorUpgradeDeviceProofController";
-import { getConnectorReleaseManifest } from "../services/connectorReleaseService";
+import { getConnectorReleaseManifest, isCertifiedUpgradeSource } from "../services/connectorReleaseService";
 import { getRedisClient } from "../services/redisService";
 import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { openCookieToken, sealCookieToken } from "../services/auth/cookieTokenProtectionService";
@@ -139,6 +139,7 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
         input.binding.attemptId !== challenge.attemptId || input.binding.sourceVersion !== challenge.sourceVersion ||
         input.binding.targetVersion !== challenge.targetVersion ||
         input.binding.installerSha256 !== release.platforms.windows.sha256 ||
+        !isCertifiedUpgradeSource(challenge.targetVersion, challenge.sourceVersion, String(input.binding.sourceSha256 || "")) ||
         input.binding.publicKeySha256 !== createHash("sha256").update(String(proof.publicKeyPem || "")).digest("hex") ||
         input.binding.protocolVersion !== LOCAL_AGENT_DIRECT_PROTOCOL_VERSION ||
         (attempt.fenceRequestId && input.binding.fenceRequestId !== attempt.fenceRequestId))
@@ -263,6 +264,8 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       if ((payload.evidence as any).binding?.protocolVersion !== LOCAL_AGENT_DIRECT_PROTOCOL_VERSION) throw new Error("MAINTENANCE_PROTOCOL_UNSUPPORTED");
       const evidence = payload.evidence as any;
       const binding = evidence.binding;
+      if (!isCertifiedUpgradeSource(binding.targetVersion, binding.sourceVersion, binding.sourceSha256))
+        throw new Error("CONNECTOR_UPGRADE_SOURCE_NOT_CERTIFIED");
       const redis = await getRedisClient();
       if (!redis || typeof binding?.attemptId !== "string" || typeof evidence.challengeId !== "string" ||
           !/^[a-f0-9]{64}$/.test(String(evidence.deviceProofSha256 || ""))) throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");

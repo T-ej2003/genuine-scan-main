@@ -99,8 +99,12 @@ async function main() {
   const redisUrl = new URL(process.env.REDIS_URL || "");
   assert(["127.0.0.1", "localhost", "redis"].includes(redisUrl.hostname), "Printing worker certification requires disposable Redis");
   assert.equal(Number(psql(admin, "select current_setting('server_version_num')::int / 10000")), 18);
-  const upgradeBindingSql = readFileSync(path.join(__dirname,
-    "../../../src/rls-waves/session-c/c02/connectorUpgradeDeviceBinding.sql"), "utf8")
+  const bindingSource = readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/connectorUpgradeDeviceBinding.sql"), "utf8");
+  assert.equal(bindingSource, readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/connectorOfflineUpgradeDeviceBindingIncremental.sql"), "utf8"),
+    "the incremental production function must match the PostgreSQL-certified definition");
+  const upgradeBindingSql = bindingSource
     .replaceAll("{{APP_ROLE}}", "mscqr_rls_cert_app");
   psql(admin, `BEGIN;
     SET ROLE "mscqr_rls_cert_owner";
@@ -2347,6 +2351,10 @@ async function main() {
   denied(app,deviceBinding(caps.maker,ids.printer), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
   assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST')).state,'DISPATCH_FENCED');
   assert.equal(json(app,deviceBinding(caps.maker,ids.printer)).sourceVersion,'2026.11.6.2');
+  psql(admin, `UPDATE public."PrinterAgentSession" SET metadata=jsonb_set(metadata,'{connectorVersion}','"2026.11.9.1"'::jsonb)
+    WHERE "registrationId"='${ids.registration}'`);
+  assert.equal(json(app,deviceBinding(caps.maker,ids.printer)).sourceVersion,'2026.11.9.1',
+    'fenced historical binding is version agnostic; certified digest policy is enforced before authorization');
   denied(app,deviceBinding(caps.outsider,ids.printer), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
   denied(app,'SELECT "agentId" FROM public."PrinterAgentSession" LIMIT 1', /permission denied/);
 

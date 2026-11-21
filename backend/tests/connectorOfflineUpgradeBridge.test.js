@@ -47,7 +47,7 @@ const origin = 'https://www.mscqr.com';
       'unknown journal content cannot be authorized');
     await fs.unlink(corrupt);
     assert.equal(spawnSync(process.execPath, [executable, '--offline-existing-install'],
-      { env: { ...env, MSCQR_OFFLINE_SOURCE_VERSION: '2026.11.1.1' } }).status, 1);
+      { env: { ...env, MSCQR_OFFLINE_SOURCE_VERSION: 'not-a-version' } }).status, 1);
     assert.equal(spawnSync(process.execPath, [executable, '--offline-existing-install'],
       { env: { ...env, PRINT_AGENT_STATE_FILE: path.join(root, 'missing.json') } }).status, 1);
     child = spawn(process.execPath, [executable, '--offline-existing-install'], { env, stdio: ['ignore', 'pipe', 'pipe'] });

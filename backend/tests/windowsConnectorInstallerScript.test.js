@@ -378,8 +378,9 @@ const run = async () => {
       !installerTemplate.includes('-ExecutionPolicy AllSigned -File'),
     "Upgrade execution must verify the signed transaction and sourced helper scripts before noninteractive launch"
   );
-  assert(upgradeTransaction.includes("Get-MscqrInstalledVersion $Live") &&
-    upgradeTransaction.includes("'2026.11.6.2'") &&
+  assert(upgradeTransaction.includes('Get-MscqrCertifiedSource $authority $Version $installerSha256 $runtime $Live') &&
+    upgradeTransaction.includes('certifiedUpgradeSources') &&
+    !upgradeTransaction.includes("'2026.11.6.2'") &&
     upgradeTransaction.includes("Start-MscqrOfflineBridge $candidate $stateFile $sourceVersion") &&
     upgradeTransaction.includes("upgradeMode=$(if($offline){'OFFLINE_EXISTING_INSTALL'}") &&
     upgradeTransaction.includes("Assert-MscqrStoppedInstallation") &&

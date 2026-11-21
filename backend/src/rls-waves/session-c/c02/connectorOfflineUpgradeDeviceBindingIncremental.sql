@@ -55,13 +55,13 @@ BEGIN
        WHERE active."registrationId"=registration_row.id AND active."connectionState"='CONNECTED'
          AND active."revokedAt" IS NULL AND active."expiresAt">transaction_timestamp())
   THEN
-    -- Only the certified stopped 2026.11.6.2 path may use a historical
-    -- signed session. A fresh challenge and registered-key proof remain required.
+    -- Offline eligibility is checked against certified source digests before
+    -- authorization; a historical signed session only binds the device.
     SELECT s.metadata->>'connectorVersion' AS "connectorVersion",s."agentId",s."deviceFingerprint",
       s."publicKeyFingerprint",s."selectedPrinterId"
       INTO session_row FROM public."PrinterAgentSession" s
       WHERE s."registrationId"=registration_row.id AND s."connectionState"='DISCONNECTED'
-        AND s.metadata->>'connectorVersion'='2026.11.6.2'
+        AND s.metadata->>'connectorVersion' ~ '^[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?$'
       ORDER BY s."lastSignedHeartbeatAt" DESC LIMIT 1;
   END IF;
   IF session_row."agentId" IS DISTINCT FROM registration_row."agentId" OR
