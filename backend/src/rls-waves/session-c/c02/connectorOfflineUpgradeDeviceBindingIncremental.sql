@@ -44,7 +44,7 @@ BEGIN
 
   PERFORM set_config('app.printing_registration_id',registration_row.id,true),
     set_config('app.printing_operation','printing-readiness',true);
-  SELECT s.metadata->>'connectorVersion' AS "connectorVersion",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",s."selectedPrinterId"
+  SELECT s.metadata->>'connectorVersion' AS "connectorVersion",s."connectionState",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",s."selectedPrinterId"
     INTO session_row FROM public."PrinterAgentSession" s
     WHERE s."registrationId"=registration_row.id AND s."connectionState"='CONNECTED'
       AND s."revokedAt" IS NULL AND s."expiresAt">transaction_timestamp()
@@ -57,7 +57,7 @@ BEGIN
   THEN
     -- Offline eligibility is checked against certified source digests before
     -- authorization; a historical signed session only binds the device.
-    SELECT s.metadata->>'connectorVersion' AS "connectorVersion",s."agentId",s."deviceFingerprint",
+    SELECT s.metadata->>'connectorVersion' AS "connectorVersion",s."connectionState",s."agentId",s."deviceFingerprint",
       s."publicKeyFingerprint",s."selectedPrinterId"
       INTO session_row FROM public."PrinterAgentSession" s
       WHERE s."registrationId"=registration_row.id AND s."connectionState"='DISCONNECTED'
@@ -77,7 +77,8 @@ BEGIN
     'deviceFingerprint',registration_row."deviceFingerprint",'manufacturerId',printer_row."assignedUserId",
     'tenantId',printer_row."orgId",'printerId',printer_row.id,
     'registrationId',registration_row.id,'publicKeyPem',registration_row."publicKeyPem",
-    'sourceVersion',session_row."connectorVersion");
+    'sourceVersion',session_row."connectorVersion",
+    'historicalSession',session_row."connectionState"='DISCONNECTED');
 END
 $fn$;
 REVOKE ALL ON FUNCTION app_rls.printing_upgrade_device_binding(text,text,text) FROM PUBLIC;

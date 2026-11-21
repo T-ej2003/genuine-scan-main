@@ -250,6 +250,7 @@ async function main() {
   assert.equal(trustedDevice.registrationId, ids.registration);
   assert.equal(trustedDevice.manufacturerId, ids.maker);
   assert.equal(trustedDevice.tenantId, ids.orgA);
+  assert.equal(trustedDevice.historicalSession, false);
   assert.equal(trustedDevice.publicKeyPem, signingPublicKey);
   assert.equal(trustedDevice.sourceVersion, "2026.11.19.1");
   denied(app, deviceBinding(caps.outsider), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
@@ -1456,7 +1457,7 @@ async function main() {
       await redis.set(`connector-upgrade:attempt:${challenge.attemptId}`,
         JSON.stringify({...Object.fromEntries(['agentId','deviceFingerprint','manufacturerId','tenantId','printerId',
           'registrationId','sourceVersion','targetVersion'].map(key=>[key,challenge[key]])),
-          fenceRequestId:statement.binding.fenceRequestId}), 'PX',900000);
+          fenceRequestId:statement.binding.fenceRequestId,historicalSession:false}), 'PX',900000);
       await redis.set(`connector-upgrade:proof:${challengeId}`,JSON.stringify({challenge,proofSha256}),'PX',120000);
       const withProof={...statement,challengeId,deviceProofSha256:proofSha256};
       if(typeof statement.padding==='string') {
@@ -2351,6 +2352,7 @@ async function main() {
   denied(app,deviceBinding(caps.maker,ids.printer), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
   assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST')).state,'DISPATCH_FENCED');
   assert.equal(json(app,deviceBinding(caps.maker,ids.printer)).sourceVersion,'2026.11.6.2');
+  assert.equal(json(app,deviceBinding(caps.maker,ids.printer)).historicalSession,true);
   psql(admin, `UPDATE public."PrinterAgentSession" SET metadata=jsonb_set(metadata,'{connectorVersion}','"2026.11.9.1"'::jsonb)
     WHERE "registrationId"='${ids.registration}'`);
   assert.equal(json(app,deviceBinding(caps.maker,ids.printer)).sourceVersion,'2026.11.9.1',

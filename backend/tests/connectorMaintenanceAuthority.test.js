@@ -23,7 +23,7 @@ const proofSha256 = hash('verified-device-proof');
 const records = new Map([
   [proofService.upgradeProofKey(challenge.challengeId), JSON.stringify({ challenge, proofSha256,
     publicKeyPem: device.publicKey.export({ type: 'spki', format: 'pem' }).toString() })],
-  [proofService.upgradeAttemptKey(challenge.attemptId), JSON.stringify(attempt)],
+  [proofService.upgradeAttemptKey(challenge.attemptId), JSON.stringify({ ...attempt, historicalSession: true })],
 ]);
 let unresolved = false;
 let protectedEntries = [];
