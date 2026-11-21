@@ -1530,7 +1530,7 @@ async function main() {
     await postMaintenance('maker',{action:'verify',token:expiredToken,binding},403);
     await postMaintenance('maker',{action:'verify',token,binding},200);
     assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${claim.printItemId}'`),'PRINT_CONFIRMED','authorization must not reset lifecycle records');
-    const releaseStatement={...statement,purpose:'mscqr-upgrade-verification-v1',runtime:{version:binding.targetVersion,sha256:binding.targetSha256,
+    const releaseStatement={...statement,purpose:'mscqr-upgrade-verification-v1',tokenHash:hash(token),runtime:{version:binding.targetVersion,sha256:binding.targetSha256,
       agentId:binding.agentId,deviceFingerprint:binding.deviceFingerprint,processCount:1,verificationSha256:hash('disposable-runtime-verification')}};
     await postMaintenance('maker',{action:'release',evidence:signedEvidence(statement)},409);
     await postMaintenance('maker',{action:'release',evidence:signedEvidence({...releaseStatement,runtime:{...releaseStatement.runtime,processCount:2}})},403);
