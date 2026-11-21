@@ -769,7 +769,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $fn$
 DECLARE snapshot jsonb; registration_id text; expected_count integer;
   matches jsonb; entry jsonb; item_row record; marker jsonb; added integer:=0;
-  settled integer:=0; diagnostic_count integer:=0; historical_count integer:=0; superseded_count integer:=0; prior_operation text; protected_ids jsonb:='[]'::jsonb;
+  settled integer:=0; diagnostic_count integer:=0; historical_count integer:=0; superseded_count integer:=0; gateway_guard_count integer:=0; prior_operation text; protected_ids jsonb:='[]'::jsonb;
 BEGIN
   IF session_user <> 'mscqr_prd_rls_phase2_app' OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
      p_fence_request_id IS NULL OR p_fence_request_id !~* '^[0-9a-f-]{36}$' OR
@@ -781,7 +781,8 @@ BEGIN
     SELECT 1 FROM jsonb_to_recordset(p_entries) AS e(name text,sha256 text,"printJobId" text,"printItemId" text,"attemptId" text,state text)
     WHERE e.name IS NULL OR e.sha256 IS NULL OR e.state IS NULL OR
       e.name !~ '^[a-f0-9]{64}(\.gateway-attempt)?\.json$' OR e.sha256 !~ '^[a-f0-9]{64}$' OR
-      e.state NOT IN ('ATTEMPT_RESERVED','PREPARING','PRE_DISPATCH_FAILURE','PRE_DISPATCH_REPORTED') OR
+      (e.name ~ '\.gateway-attempt\.json$' AND e.state NOT IN ('PREPARING','PRE_DISPATCH_FAILURE','PRE_DISPATCH_REPORTED')) OR
+      (e.name !~ '\.gateway-attempt\.json$' AND e.state<>'ATTEMPT_RESERVED') OR
       e."printJobId" IS NULL OR e."printItemId" IS NULL OR
       (e."attemptId" IS NOT NULL AND e."attemptId" !~* '^[0-9a-f-]{36}$')
   ) OR (SELECT count(DISTINCT e.name) FROM jsonb_to_recordset(p_entries) AS e(name text))<>expected_count
@@ -800,8 +801,8 @@ BEGIN
   PERFORM set_config('app.printing_operation','printing-connector-upgrade-protect',true),
     set_config('app.printing_printer_id',p_printer_id,true);
   SELECT count(*) INTO diagnostic_count FROM jsonb_to_recordset(p_entries)
-    AS e("printJobId" text,"printItemId" text)
-    WHERE e."printJobId"=e."printItemId" AND
+    AS e(name text,"printJobId" text,"printItemId" text)
+    WHERE e.name !~ '\.gateway-attempt\.json$' AND e."printJobId"=e."printItemId" AND
       e."printItemId" ~* '^diagnostic:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' AND
       EXISTS (SELECT 1 FROM public."AuditLog" a WHERE a."userId"=current_setting('app.printing_user_id',true)
         AND a."orgId" IS NOT DISTINCT FROM nullif(current_setting('app.printing_organization_id',true),'')
@@ -816,7 +817,7 @@ BEGIN
     JOIN public."PrintItem" pi ON pi.id=e."printItemId"
     JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" AND ps."printJobId"=e."printJobId"
     JOIN public."PrintJob" j ON j.id=ps."printJobId"
-    WHERE ps."printerRegistrationId"=registration_id AND
+    WHERE e.name !~ '\.gateway-attempt\.json$' AND ps."printerRegistrationId"=registration_id AND
       j."manufacturerId"=current_setting('app.printing_user_id',true) AND
       (e."attemptId" IS NOT DISTINCT FROM pi."dispatchMetadata"->>'attemptId');
   IF (SELECT count(DISTINCT item->>'itemId') FROM jsonb_array_elements(matches) item)<>jsonb_array_length(matches)
@@ -838,9 +839,9 @@ BEGIN
       AND parent."batchId"=l.batch_id AND parent."printerId"=l.printer_id
   )
   SELECT count(*) INTO historical_count FROM jsonb_to_recordset(p_entries)
-    AS e("printJobId" text,"printItemId" text)
+    AS e(name text,"printJobId" text,"printItemId" text)
     JOIN lineage l ON l.item_id=e."printItemId" AND l.job_id=e."printJobId" AND l.depth>0
-    WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(matches) current_item
+    WHERE e.name !~ '\.gateway-attempt\.json$' AND EXISTS (SELECT 1 FROM jsonb_array_elements(matches) current_item
       WHERE current_item->>'itemId'=e."printItemId");
   -- An ABORT before committed INTENT records a durable RESUMED event. Keep
   -- its old journal, but accept it only beside a protected current attempt.
@@ -858,9 +859,13 @@ BEGIN
           AND event."previousState"='ISSUED' AND event."nextState"='RESERVED'
           AND event.details->>'attemptId'=e."attemptId"
           AND event.details->>'dispatchEvidenceVersion'='1');
+  -- Gateway attempt files are preparation guards, not physical reservations.
+  -- Any physical gateway attempt has its own .json reservation in this journal.
+  SELECT count(*) INTO gateway_guard_count FROM jsonb_to_recordset(p_entries)
+    AS e(name text) WHERE e.name ~ '\.gateway-attempt\.json$';
   PERFORM set_config('app.printing_upgrade_item_ids','[]',true),
     set_config('app.printing_operation',prior_operation,true);
-  IF jsonb_array_length(matches)+diagnostic_count+historical_count+superseded_count<>expected_count
+  IF jsonb_array_length(matches)+diagnostic_count+historical_count+superseded_count+gateway_guard_count<>expected_count
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
   settled:=diagnostic_count;
 
@@ -904,8 +909,8 @@ BEGIN
       "pipelineState"='NEEDS_OPERATOR_ACTION',"failureReason"='physical_outcome_unconfirmed',"updatedAt"=clock_timestamp()
       WHERE j.id=entry->>'jobId';
   END LOOP;
-  RETURN jsonb_build_object('protected',expected_count-settled-historical_count-superseded_count,'settled',settled,
-    'historicalReissues',historical_count,'supersededUnsubmitted',superseded_count,
+  RETURN jsonb_build_object('protected',expected_count-settled-historical_count-superseded_count-gateway_guard_count,'settled',settled,
+    'historicalReissues',historical_count,'supersededUnsubmitted',superseded_count,'gatewayGuards',gateway_guard_count,
     'protectedItemIds',protected_ids,'newlyProtected',added,'journalSha256',p_journal_sha256);
 END
 $fn$;

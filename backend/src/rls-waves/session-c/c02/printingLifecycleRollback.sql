@@ -30,6 +30,8 @@ DROP POLICY IF EXISTS printing_lifecycle_printitem_select ON public."PrintItem";
 DROP POLICY IF EXISTS printing_lifecycle_printitem_update ON public."PrintItem";
 DROP POLICY IF EXISTS printing_lifecycle_printitemevent_insert ON public."PrintItemEvent";
 DROP POLICY IF EXISTS printing_lifecycle_printitemevent_select ON public."PrintItemEvent";
+DROP POLICY IF EXISTS printing_upgrade_printitemevent_select ON public."PrintItemEvent";
+REVOKE SELECT ("eventType","previousState","nextState",details) ON public."PrintItemEvent" FROM "mscqr_prd_rls_phase2_auth_owner";
 DROP POLICY IF EXISTS printing_lifecycle_printjobchunk_select ON public."PrintJobChunk";
 DROP POLICY IF EXISTS printing_lifecycle_printjob_insert ON public."PrintJob";
 DROP POLICY IF EXISTS printing_lifecycle_printjob_select ON public."PrintJob";

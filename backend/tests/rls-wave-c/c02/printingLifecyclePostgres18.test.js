@@ -2353,8 +2353,10 @@ async function main() {
     RESET ROLE;
     COMMIT;`);
   const remainingPrintingPolicies=psql(admin, `SELECT coalesce(string_agg(tablename||'.'||policyname,',' ORDER BY tablename,policyname),'')
-    FROM pg_policies WHERE schemaname='public' AND policyname LIKE 'printing_lifecycle_%'`);
+    FROM pg_policies WHERE schemaname='public' AND (policyname LIKE 'printing_lifecycle_%' OR policyname LIKE 'printing_upgrade_%')`);
   assert.equal(remainingPrintingPolicies, '', `printing rollback left policies: ${remainingPrintingPolicies}`);
+  assert.equal(psql(admin, `SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."PrintItemEvent"','details','SELECT')`), 'f',
+    'upgrade-only event privilege must be removed during lifecycle rollback');
   assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='app_rls' AND p.proname LIKE 'printing_%'`)), 0);
   assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE
     (n.nspname='app_auth' AND p.proname='require_authenticated_session')
