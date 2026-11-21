@@ -2341,7 +2341,7 @@ async function main() {
   const rollback = readFileSync(
     path.resolve(__dirname, "../../../src/rls-waves/session-c/c02/printingLifecycleRollback.sql"),
     "utf8"
-  );
+  ).replaceAll('"mscqr_prd_rls_phase2_auth_owner"', '"mscqr_rls_cert_auth_owner"');
   const functionRollbackAt = rollback.indexOf("REVOKE ALL ON FUNCTION");
   assert(functionRollbackAt > 0, "printing rollback must separate policy and function ownership phases");
   psql(admin, `BEGIN;
