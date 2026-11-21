@@ -471,6 +471,7 @@ const validateApplyPermissionsBoundary = () => {
   let hasMaximumAllow = false;
   let hasRegionDeny = false;
   let hasProductionTagDeny = false;
+  let hasProductionEcrLifecycleDeny = false;
   let hasBoundaryTamperingDeny = false;
   let hasOutsideStagingRoleDeny = false;
   let hasUnreviewedManagedPolicyAttachmentDeny = false;
@@ -530,6 +531,16 @@ const validateApplyPermissionsBoundary = () => {
       statement.Condition?.StringEquals?.["aws:ResourceTag/Environment"]?.includes("production")
     ) {
       hasProductionTagDeny = true;
+    }
+    if (
+      statement.Effect === "Deny" &&
+      actions.length === 1 && actions[0] === "ecr:PutLifecyclePolicy" &&
+      resources.length === 3 &&
+      ["mscqr-backend", "mscqr-web", "mscqr-worker"].every((name) =>
+        resources.includes(`arn:aws:ecr:eu-west-2:368992683803:repository/${name}`)) &&
+      !statement.Condition && notActions.length === 0 && notResources.length === 0
+    ) {
+      hasProductionEcrLifecycleDeny = true;
     }
     if (
       statement.Effect === "Deny" &&
@@ -622,6 +633,9 @@ const validateApplyPermissionsBoundary = () => {
   }
   if (!hasProductionTagDeny) {
     addFailure(`${applyBoundaryRelPath}: must deny prod/production tagged resources.`);
+  }
+  if (!hasProductionEcrLifecycleDeny) {
+    addFailure(`${applyBoundaryRelPath}: must deny lifecycle restoration on the three exact production ECR repositories.`);
   }
   if (!hasBoundaryTamperingDeny) {
     addFailure(`${applyBoundaryRelPath}: must deny boundary tampering and managed-policy version escalation.`);
