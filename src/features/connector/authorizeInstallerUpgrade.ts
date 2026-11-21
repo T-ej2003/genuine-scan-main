@@ -52,14 +52,14 @@ export async function authorizeInstallerUpgrade(pairingId: string, signal?: Abor
     throw new Error("Printing state could not be independently verified. Printing remains isolated.");
   let token = "";
   for (let retry = 0; retry < 3 && !token; retry += 1) {
-    const authorized = await apiClient.connectorMaintenance(printerId, { action: "authorize", evidence: signedEvidence });
-    if (authorized.success) token = String(authorized.data?.token || "");
+    const authorized = await apiClient.connectorMaintenance(printerId, { action: "authorize", evidence: signedEvidence }).catch(() => null);
+    if (authorized?.success) token = String(authorized.data?.token || "");
   }
   if (!/^[a-f0-9]{64}$/.test(token))
     throw new Error("Upgrade authorization could not be issued. Printing remains isolated.");
   let delivered = false;
   for (let retry = 0; retry < 3 && !delivered; retry += 1)
-    delivered = Boolean((await apiClient.completeConnectorUpgradePairing(printerId, pairingId, token)).success);
+    delivered = Boolean((await apiClient.completeConnectorUpgradePairing(printerId, pairingId, token).catch(() => null))?.success);
   if (!delivered) throw new Error("The installer could not receive authorization. Printing remains isolated.");
   for (let index = 0; index < 120; index += 1) {
     if (signal?.aborted) return;
@@ -71,8 +71,8 @@ export async function authorizeInstallerUpgrade(pairingId: string, signal?: Abor
     const releaseEvidence = (verifiedPostInstall as any).evidence;
     if (!verifiedPostInstall.success || !releaseEvidence)
       throw new Error("Post-install verification failed. The connector remains installed with printing paused.");
-    const released = await apiClient.connectorMaintenance(printerId, { action: "release", evidence: releaseEvidence });
-    if (!released.success || released.data?.authorized !== true || released.data?.dispatchFenced !== false) {
+    const released = await apiClient.connectorMaintenance(printerId, { action: "release", evidence: releaseEvidence }).catch(() => null);
+    if (!released?.success || released.data?.authorized !== true || released.data?.dispatchFenced !== false) {
       const receipt = await apiClient.connectorUpgradeReleaseStatus(token, binding);
       if (!receipt.success || receipt.data?.released !== true || receipt.data?.dispatchFenced !== false)
         throw new Error("Backend safety checks did not release printing. Uncertain attempts remain protected.");
