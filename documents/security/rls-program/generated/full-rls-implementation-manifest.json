@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97",
+  "sourceContractSha256": "984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -76,11 +76,11 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "159d305c044f1e941be608b431ea368ec37b7c82e6dc234a5859dc4226741ec8"
+      "sha256": "dc610e33aedf67547111fc09abe53708e5ef39e91414d601e1830035f0b593c9"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "20302f6272d5006a435f45b283c46c218413955168171e0606f8f35bfee7297a"
+      "sha256": "adff93af77760f7a1068188270cd137319adc44e5f2f33dc3acb9b90b4d840c7"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
@@ -108,7 +108,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "8d62b395f0f3565643d8f3aa63ce90ddb9a192424b1df825946b80edf6333c94"
+      "sha256": "909b93bd85c32d3689f46729277b6202d18caa11ee98761d1fde1c7b7cf5d01e"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -394,7 +394,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 390,
+    "generatedPolicies": 391,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 57,
     "prismaEnums": 58,
@@ -412,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

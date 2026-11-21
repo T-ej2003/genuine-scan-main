@@ -5,6 +5,7 @@ DO $$ BEGIN
 END $$;
 SET ROLE "mscqr_rls_cert_owner";
 GRANT USAGE,CREATE ON SCHEMA app_rls TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("eventType", "previousState", "nextState", "details") ON TABLE public."PrintItemEvent" TO "mscqr_rls_cert_auth_owner";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_auth_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_auth_owner'; END IF;

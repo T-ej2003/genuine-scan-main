@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 390,
+  "count": 391,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -7188,7 +7188,7 @@
         "release-fix-5-printing-lifecycle"
       ],
       "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND \"printItemId\" IN (SELECT pi.id FROM public.\"PrintItem\" pi WHERE pi.\"printSessionId\"=current_setting('app.printing_original_session_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND \"printItemId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb)))",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND \"printItemId\" IN (SELECT pi.id FROM public.\"PrintItem\" pi WHERE pi.\"printSessionId\"=current_setting('app.printing_original_session_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT",
@@ -7196,6 +7196,30 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-item-event",
+      "table": "PrintItemEvent",
+      "policyName": "printing_upgrade_printitemevent_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "connector-upgrade-no-replay"
+      ],
+      "scopeType": "verified-upgrade-item-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND \"printItemId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItemEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Connector upgrade no-replay evidence",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

@@ -13,6 +13,12 @@ SET ROLE "mscqr_prd_rls_phase2_owner";
 GRANT UPDATE ("frozenAt") ON public."PrintItem" TO "mscqr_prd_rls_phase2_auth_owner";
 GRANT UPDATE ("frozenItems") ON public."PrintSession" TO "mscqr_prd_rls_phase2_auth_owner";
 GRANT SELECT ("userId","orgId","licenseeId",action,"entityType","entityId",details) ON public."AuditLog" TO "mscqr_prd_rls_phase2_auth_owner";
+GRANT SELECT ("eventType","previousState","nextState",details) ON public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";
+CREATE POLICY printing_upgrade_printitemevent_select ON public."PrintItemEvent" AS PERMISSIVE FOR SELECT TO "mscqr_prd_rls_phase2_auth_owner"
+  USING (current_user='mscqr_prd_rls_phase2_auth_owner' AND session_user='mscqr_prd_rls_phase2_app'
+    AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect'
+    AND "printItemId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb)));
+COMMENT ON POLICY printing_upgrade_printitemevent_select ON public."PrintItemEvent" IS '{"boundary":"connector-upgrade-no-replay","ownerIdentity":"identity-auth-function-owner","scope":"verified upgrade item IDs under the exact connector maintenance operation"}';
 DROP POLICY IF EXISTS printing_lifecycle_auditlog_select ON public."AuditLog";
 CREATE POLICY printing_lifecycle_auditlog_select ON public."AuditLog" AS PERMISSIVE FOR SELECT TO "mscqr_prd_rls_phase2_auth_owner"
   USING (current_user='mscqr_prd_rls_phase2_auth_owner' AND session_user='mscqr_prd_rls_phase2_app'

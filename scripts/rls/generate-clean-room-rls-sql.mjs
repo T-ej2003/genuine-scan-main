@@ -356,8 +356,11 @@ const printingLifecycleUpgradeSource = readContractSources(printingLifecycleUpgr
 const printingLifecycleAppSignatures = printingLifecycleBaseContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleUpgradeAppSignatures = printingLifecycleUpgradeContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleWorkerSignatures = printingLifecycleBaseContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const printingLifecycleBaseOwnerPrivileges = [...new Map(printingLifecycleBaseContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const printingLifecycleOwnerPrivileges = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
-const printingLifecycleOwnerPolicies = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const printingUpgradeOwnerPrivileges = printingLifecycleOwnerPrivileges.filter((entry) => !printingLifecycleBaseOwnerPrivileges.some((base) => JSON.stringify(base) === JSON.stringify(entry)));
+const printingLifecycleOwnerPolicies = [...new Map(printingLifecycleBaseContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
+const printingUpgradeOwnerPolicies = [...new Map(printingLifecycleUpgradeContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()].filter((entry) => !printingLifecycleOwnerPolicies.some((base) => JSON.stringify(base) === JSON.stringify(entry)));
 const publicVerificationFunctionSource = publicVerificationContracts.length
   ? fs.readFileSync(path.join(repoRoot, publicVerificationContracts[0].definitionLocation), "utf8")
   : "";
@@ -485,11 +488,13 @@ const administrationOwnerGrantSql = administrationOwnerPrivileges.map(([table, c
 const qrSystemOwnerGrantSql = qrSystemOwnerPrivileges.map(([table, command, columns]) => command === "DELETE"
   ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
   : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
-const printingLifecycleOwnerGrantSql = printingLifecycleOwnerPrivileges.map(([table, command, columns]) =>
+const printingLifecycleOwnerGrantSql = printingLifecycleBaseOwnerPrivileges.map(([table, command, columns]) =>
   command === "DELETE"
     ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
     : `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
 ).join("\n");
+const printingUpgradeOwnerGrantSql = printingUpgradeOwnerPrivileges.map(([table, command, columns]) =>
+  `GRANT ${command} (${columns.map(q).join(", ")}) ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`).join("\n");
 const publicVerificationOwnerGrantSql = publicVerificationOwnerPrivileges.map(([table, command, columns]) =>
   command === "DELETE"
     ? `GRANT DELETE ON TABLE public.${q(table)} TO ${q(roleNames.authOwner)};`
@@ -2116,6 +2121,12 @@ for (const [table, command, rawPredicate] of printingLifecycleOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "release-fix-5-printing-lifecycle", ownerIdentity: "identity-auth-function-owner", scope: "verified session or exact connector/worker operation plus row-local printing selector" }))};`);
 }
+for (const [table, command, rawPredicate] of printingUpgradeOwnerPolicies) {
+  const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app));
+  const policyName = shortName("printing_upgrade", table, command);
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} USING (${predicate});`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "connector-upgrade-no-replay", ownerIdentity: "identity-auth-function-owner", scope: "verified upgrade item IDs under the exact connector maintenance operation" }))};`);
+}
 for (const [table, command, rawPredicate] of publicVerificationOwnerPolicies) {
   const predicate = rawPredicate
     .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
@@ -2526,6 +2537,23 @@ const policyInventory = [
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
+  ...printingUpgradeOwnerPolicies.map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("printing_upgrade", table, command),
+    command,
+    actors: ["manufacturer"],
+    assurance: "source-rule-specific",
+    purpose: ["connector-upgrade-no-replay"],
+    scopeType: "verified-upgrade-item-ids",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(printingLifecycleUpgradeContracts, table, command),
+    workflowId: null,
+    route: "Connector upgrade no-replay evidence",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
   ...publicVerificationOwnerPolicies.map(([table, command, rawPredicate]) => ({
     tableId: tables.find((entry) => entry.physicalTable === table)?.id,
     table,
@@ -2869,6 +2897,7 @@ const files = new Map([
   ["22-printing-upgrade.sql", transactionalPhase(`\\set ON_ERROR_STOP on
 ${setRole(roleNames.owner)}
 GRANT USAGE,CREATE ON SCHEMA app_rls TO ${q(roleNames.authOwner)};
+${printingUpgradeOwnerGrantSql}
 ${resetRole}
 ${setRole(roleNames.authOwner)}
 ${printingLifecycleUpgradeSource}

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97",
+  "sourceContractSha256": "984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -62,11 +62,11 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "159d305c044f1e941be608b431ea368ec37b7c82e6dc234a5859dc4226741ec8"
+      "sha256": "dc610e33aedf67547111fc09abe53708e5ef39e91414d601e1830035f0b593c9"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "20302f6272d5006a435f45b283c46c218413955168171e0606f8f35bfee7297a"
+      "sha256": "adff93af77760f7a1068188270cd137319adc44e5f2f33dc3acb9b90b4d840c7"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
@@ -94,7 +94,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "8d62b395f0f3565643d8f3aa63ce90ddb9a192424b1df825946b80edf6333c94"
+      "sha256": "909b93bd85c32d3689f46729277b6202d18caa11ee98761d1fde1c7b7cf5d01e"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -8549,7 +8549,7 @@
         "release-fix-5-printing-lifecycle"
       ],
       "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND \"printItemId\" IN (SELECT pi.id FROM public.\"PrintItem\" pi WHERE pi.\"printSessionId\"=current_setting('app.printing_original_session_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND \"printItemId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb)))",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND \"printItemId\" IN (SELECT pi.id FROM public.\"PrintItem\" pi WHERE pi.\"printSessionId\"=current_setting('app.printing_original_session_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT",
@@ -8557,6 +8557,30 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-item-event",
+      "table": "PrintItemEvent",
+      "policyName": "printing_upgrade_printitemevent_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "connector-upgrade-no-replay"
+      ],
+      "scopeType": "verified-upgrade-item-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND \"printItemId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItemEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Connector upgrade no-replay evidence",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -12994,55 +13018,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:06b170fb5b93dc096e60da89811be0bd4220074e153e3b72c613b5869733fd97"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     }
   ]
 }

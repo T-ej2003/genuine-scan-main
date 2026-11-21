@@ -921,7 +921,7 @@ const printingOwnerPrivileges = [
   ["PrintItem","SELECT",["id","printSessionId","qrCodeId","code","state","pipelineState","issueSequence","attemptCount","currentRenderTokenHash","deviceJobRef","dispatchMetadata","confirmationEvidence","issuedAt","dispatchedAt","agentAckedAt","confirmationDeadlineAt","printConfirmedAt","closedAt","frozenAt","failedAt","failureReason","deadLetterReason","createdAt","updatedAt"]],
   ["PrintItem","INSERT",["id","printSessionId","qrCodeId","code","state","pipelineState","issueSequence","createdAt","updatedAt"]],
   ["PrintItem","UPDATE",["printSessionId","state","pipelineState","issueSequence","attemptCount","deviceJobRef","dispatchMetadata","confirmationEvidence","issuedAt","dispatchedAt","agentAckedAt","confirmationDeadlineAt","printConfirmedAt","frozenAt","failedAt","failureReason","updatedAt"]],
-  ["PrintItemEvent","SELECT",["printItemId","eventType","previousState","nextState","details"]],
+  ["PrintItemEvent","SELECT",["printItemId"]],
   ["PrintItemEvent","INSERT",["id","printItemId","eventType","previousState","nextState","details","actorUserId","createdAt"]],
   ["PrintJobChunk","SELECT",["printJobId","printSessionId"]],
   ["PrintAuditEvent","SELECT",["id","batchId","printJobId","qrCodeId","eventType","actorId","metadata","createdAt"]],
@@ -971,7 +971,7 @@ const printingOwnerPolicies = [
   ["PrintItem","SELECT",`(${printingSession} AND ${printingOperation} IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printerId" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_printers',true),'')::jsonb)))) OR (${printingSession} AND ${printingOperation}='printing-printer-admin-diagnostic_lease' AND "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printerId"=${printingPrinterId})) OR (${printingSession} AND (${printingOperation}='printing-readiness' OR "printSessionId"=${printingSessionRowId} OR (${printingOperation}='printing-reissue' AND "printSessionId"=current_setting('app.printing_original_session_id',true)))) OR (${printingConnector} AND (${printingOperation}='printing-connector-gateway-claim' AND "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printerId"=${printingPrinterId}) OR "printSessionId"=${printingSessionRowId})) OR ${printingWorker}`],
   ["PrintItem","INSERT",`${printingSession} AND ${printingOperation}='printing-create-job' AND "printSessionId"=${printingSessionRowId}`],
   ["PrintItem","UPDATE",`(${printingSession} AND ${printingOperation}='printing-job-control' AND "printSessionId"=${printingSessionRowId}) OR (${printingSession} AND ${printingOperation}='printing-reissue' AND "printSessionId" IN (current_setting('app.printing_original_session_id',true),${printingSessionRowId})) OR (${printingConnector} AND "printSessionId"=${printingSessionRowId}) OR ${printingWorker}`],
-  ["PrintItemEvent","SELECT",`(${printingSession} AND ${printingOperation}='printing-reissue' AND "printItemId" IN (SELECT pi.id FROM public."PrintItem" pi WHERE pi."printSessionId"=current_setting('app.printing_original_session_id',true))) OR (${printingConnector} AND ${printingOperation}='printing-connector-upgrade-protect' AND "printItemId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb)))`],
+  ["PrintItemEvent","SELECT",`${printingSession} AND ${printingOperation}='printing-reissue' AND "printItemId" IN (SELECT pi.id FROM public."PrintItem" pi WHERE pi."printSessionId"=current_setting('app.printing_original_session_id',true))`],
   ["PrintItemEvent","INSERT",`(${printingConnector} OR (${printingWorker} AND ${printingOperation}='printing-worker-recover_unsubmitted')) AND "printItemId"=${printingItemId}`],
   ["PrintJobChunk","SELECT",`${printingSession} AND ${printingOperation}='printing-reissue' AND ("printJobId"=${printingJobId} OR "printSessionId"=current_setting('app.printing_original_session_id',true))`],
   ["PrintAuditEvent","SELECT",`${printingSession} AND "batchId"=${printingBatchId}`],
@@ -1015,6 +1015,11 @@ const printingLifecycleSecurity = Object.freeze({
   functionSource:printingLifecycleSource,rollbackDefinition:printingLifecycleRollback,
   deploymentPhase:"release-fix-5-printing-lifecycle",
   ownerPrivileges:printingOwnerPrivileges,ownerPolicies:printingOwnerPolicies,
+});
+const printingUpgradeSecurity = Object.freeze({
+  ...printingLifecycleSecurity,
+  ownerPrivileges:[...printingOwnerPrivileges,["PrintItemEvent","SELECT",["eventType","previousState","nextState","details"]]],
+  ownerPolicies:[...printingOwnerPolicies,["PrintItemEvent","SELECT",`${printingConnector} AND ${printingOperation}='printing-connector-upgrade-protect' AND "printItemId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb))`]],
 });
 const publicOperation = `current_setting('app.public_verification_operation',true)`;
 const publicOwner = `current_user={{AUTH_OWNER}} AND session_user={{PREAUTH_ROLE}} AND ${publicOperation} LIKE 'public-verification-%'`;
@@ -1446,7 +1451,7 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     id:`release-fix-5-${id}`,schema:"app_rls",name,signature,returnType,identityArguments,
     definitionLocation:["printing_printer_administration","printing_reissue_request","printing_upgrade_protect_unknown","printing_upgrade_handoff"].includes(name)
       ? printingUpgradeNoReplaySource : printingLifecycleSource,definitionKind:"checked-in-production-package",
-    definitionStatus:"production-reviewed",security:printingLifecycleSecurity,tableCommands,
+    definitionStatus:"production-reviewed",security:name==="printing_upgrade_protect_unknown" ? printingUpgradeSecurity : printingLifecycleSecurity,tableCommands,
     context:"Uses the authenticated database-session capability or the exact connector evidence boundary, derives live tenant and manufacturer scope, and validates one fixed printing lifecycle operation under FORCE RLS.",
     canonicalWorkflowIds:[`workflow-release-fix-5-${id}`],repositoryCallers,
     inputAuthority:"database-verified session or reviewed connector evidence; record identifiers are selectors only",
