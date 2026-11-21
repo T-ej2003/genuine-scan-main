@@ -49,6 +49,9 @@ function Assert-MscqrRuntime {
   if ($script:processes -ne 1) { throw 'fixture process cardinality invalid' }
   return [pscustomobject]@{protocolVersion='1';buildVersion=$Version}
 }
+function Get-MscqrRuntimeProcesses {
+  if($script:processes -eq 1) {return [pscustomobject]@{ExecutablePath=$script:runtime;ProcessId=1234}}
+}
 function Stop-MscqrVerifiedRuntime {
   param($Runtime,$Hash)
   if ($script:injection -eq 'stop') { throw 'fixture stop failed' }
@@ -56,7 +59,7 @@ function Stop-MscqrVerifiedRuntime {
 }
 function Start-MscqrVerifiedRuntime {
   param($Wrapper)
-  if($script:failCommitStart) {$script:failCommitStart=$false; throw 'fixture post-release restart failed'}
+  if($script:failCommitStarts -gt 0) {$script:failCommitStarts-=1; throw 'fixture post-release restart failed'}
   if($script:injection -eq 'start' -and [IO.File]::ReadAllText((Join-Path ([IO.Path]::GetDirectoryName($Wrapper)) 'mscqr-local-print-agent.exe')).StartsWith('replacement')) {throw 'fixture replacement startup failed'}
   $script:processes++; if ($script:processes -ne 1) { throw 'duplicate start' }
   if($script:injection -eq 'partial-unverified') {return 10}
@@ -79,11 +82,12 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid
 Protect-MscqrDirectory $fixture
 try {
   foreach ($scenario in @('success','commit-after-pending-deletion','commit-restart-failure','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','backup-flush','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
-    $script:injection=$scenario; $script:consumed=$false; $script:processes=1; $script:backendReleased=$false; $script:failCommitStart=$false
+    $script:injection=$scenario; $script:consumed=$false; $script:processes=1; $script:backendReleased=$false; $script:failCommitStarts=0
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
     New-Item -ItemType Directory -Path "$live\bin","$payload\bin" -Force | Out-Null
     $runtime="$live\bin\mscqr-local-print-agent.exe"; $state="$case\state.json"; $startup="$case\startup.vbs"; $auth="$case\auth.json"; $installer="$case\setup.exe"
+    $script:runtime=$runtime
     if($scenario -like 'legacy-*'){New-Item -ItemType Directory "$case\.authenticqr"|Out-Null;$state="$case\.authenticqr\local-print-agent-state.json"}
     [IO.File]::WriteAllText($runtime,'previous verified runtime fixture')
     [IO.File]::WriteAllText("$payload\bin\mscqr-local-print-agent.exe",'replacement verified runtime fixture')
@@ -198,9 +202,12 @@ try {
         if($failed){throw 'successful activation failed'}
         if($scenario -eq 'commit-restart-failure') {
           [IO.File]::WriteAllText((Join-Path ([IO.Path]::GetDirectoryName($state)) 'maintenance-fence.json'),'{"version":1,"state":"FENCED"}')
-          $script:backendReleased=$true; $script:failCommitStart=$true
+          $script:backendReleased=$true; $script:failCommitStarts=2
         }
-        Invoke-MscqrUpgradeTransaction -Phase Commit @args
+        if($scenario -eq 'commit-restart-failure') {
+          try {Invoke-MscqrUpgradeTransaction -Phase Commit @args; throw 'restart failure was accepted'}
+          catch {if($_.Exception.Message -eq 'restart failure was accepted'){throw}}
+        } else {Invoke-MscqrUpgradeTransaction -Phase Commit @args}
         $record=Get-Content $journal -Raw|ConvertFrom-Json
         if($record.phase -ne 'COMMITTED_FENCED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256 -or
            ($scenario -eq 'commit-restart-failure' -and $record.localReleaseStarted -ne $true)){throw 'commit invalid'}

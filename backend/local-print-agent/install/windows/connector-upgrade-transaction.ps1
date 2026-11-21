@@ -267,7 +267,7 @@ function Wait-MscqrBackendRelease($Auth,$Binding,[int]$Attempts=8) {
         if($matches) {return $true}
       }
     } catch { }
-    Start-Sleep -Seconds 15
+    if($index -lt $Attempts-1) {Start-Sleep -Seconds 15}
   }
   return $false
 }
@@ -606,6 +606,13 @@ function Invoke-MscqrUpgradeTransaction {
           if ((Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Conflicting maintenance fences require review.'}
           Remove-Item -LiteralPath $pending -Force -ErrorAction Stop
         } else {[IO.File]::Move($pending,$marker)}
+        Start-MscqrVerifiedRuntime $journal.wrapper
+      }
+      if (@(Get-MscqrRuntimeProcesses).Count -eq 0) {
+        Assert-MscqrSignedFile $journal.runtime $journal.binding.targetSha256
+        if (Test-Path -LiteralPath $marker) {
+          if ((Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Recovery maintenance fence is invalid.'}
+        } elseif ($journal.localReleaseStarted -ne $true) {throw 'Unfenced recovery lacks a committed release transition.'}
         Start-MscqrVerifiedRuntime $journal.wrapper
       }
       Wait-MscqrTrustedSession $journal | Out-Null
