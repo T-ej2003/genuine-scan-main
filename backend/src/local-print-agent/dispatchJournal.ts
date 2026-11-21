@@ -15,6 +15,7 @@ export const inspectDispatchJournal = async () => {
   if (!(await fs.lstat(root)).isDirectory()) throw dispatchReconciliationError();
   if (names.length > 10_000) throw dispatchReconciliationError();
   let bytes = 0;
+  const origins = new Map<string, { printerId?: string; gatewayId?: string }>();
   const entries: { name: string; sha256: string; printJobId: string; printItemId: string; attemptId: string | null; state: string; gatewayId?: string }[] = [];
   for (const name of names) {
     if (!/^[a-f0-9]{64}(\.gateway-attempt)?\.json$/.test(name)) throw dispatchReconciliationError();
@@ -35,11 +36,24 @@ export const inspectDispatchJournal = async () => {
           record.testJobId ? `diagnostic:${record.testJobId}` : record.printItemId,
           record.journalVersion === 3 ? record.attemptId : undefined)}${name.endsWith(".gateway-attempt.json") ? ".gateway-attempt" : ""}.json`)
       throw dispatchReconciliationError();
-    const gatewayId = process.env.PRINT_GATEWAY_ID;
+    origins.set(name, { printerId: record.printerId, gatewayId: record.gatewayId });
     entries.push({ name, sha256: createHash("sha256").update(content).digest("hex"),
       printJobId: record.printJobId, printItemId: record.printItemId,
-      attemptId: typeof record.attemptId === "string" ? record.attemptId : null, state: record.state,
-      ...(gatewayId && (name.endsWith(".gateway-attempt.json") ? record.gatewayId : record.printerId) === gatewayId ? { gatewayId } : {}) });
+      attemptId: typeof record.attemptId === "string" ? record.attemptId : null, state: record.state });
+  }
+  for (const entry of entries) {
+    const origin = origins.get(entry.name)!;
+    if (entry.name.endsWith(".gateway-attempt.json")) {
+      if (typeof origin.gatewayId !== "string" || !origin.gatewayId) throw dispatchReconciliationError();
+      entry.gatewayId = origin.gatewayId;
+      continue;
+    }
+    const guard = origins.get(entry.name.replace(/\.json$/, ".gateway-attempt.json"));
+    if (origin.gatewayId !== undefined &&
+        (typeof origin.gatewayId !== "string" || origin.gatewayId !== origin.printerId ||
+          guard?.gatewayId !== origin.gatewayId)) throw dispatchReconciliationError();
+    if (guard && typeof guard.gatewayId === "string" && guard.gatewayId === origin.printerId)
+      entry.gatewayId = guard.gatewayId;
   }
   return { count: entries.length, sha256: createHash("sha256").update(JSON.stringify(entries.map(({ name, sha256 }) => [name, sha256]))).digest("hex"), entries };
 };
@@ -76,7 +90,7 @@ export const priorDispatchExists = async (input: {printJobId:string;printItemId:
 // the process dies before it can establish whether the printer received bytes.
 // Reissue must use a newly governed job, not delete this evidence.
 export const reserveAutomaticDispatch = async (input: {
-  printJobId: string; printItemId: string; printerId: string; payloadHash: string; attemptId?: string;
+  printJobId: string; printItemId: string; printerId: string; payloadHash: string; attemptId?: string; gatewayId?: string;
 }): Promise<boolean> => {
   if (!input.printJobId || !input.printItemId || !input.printerId || !input.payloadHash) {
     throw new Error("Automatic dispatch identity is incomplete.");

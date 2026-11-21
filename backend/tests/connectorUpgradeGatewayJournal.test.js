@@ -15,12 +15,17 @@ const write = (job, item, record, suffix = '') => {
 (async () => {
   try {
     write('local-job', 'local-item', { printerId: 'selected-local-printer', state: 'ATTEMPT_RESERVED' });
-    write('gateway-job', 'gateway-item', { printerId: 'gateway-fixture', state: 'ATTEMPT_RESERVED' });
+    write('gateway-job', 'gateway-item', { printerId: 'gateway-fixture', gatewayId: 'gateway-fixture', state: 'ATTEMPT_RESERVED' });
     write('gateway-job', 'gateway-item', { gatewayId: 'gateway-fixture', state: 'PREPARING' }, '.gateway-attempt');
+    write('historical-gateway-job', 'historical-gateway-item', { printerId: 'gateway-fixture', state: 'ATTEMPT_RESERVED' });
+    write('historical-gateway-job', 'historical-gateway-item', { gatewayId: 'gateway-fixture', state: 'PREPARING' }, '.gateway-attempt');
+    process.env.PRINT_GATEWAY_ID = 'replacement-gateway';
     const journal = await inspectDispatchJournal();
-    assert.equal(journal.count, 3);
-    assert.equal(journal.entries.filter(entry => entry.gatewayId === 'gateway-fixture').length, 2);
+    assert.equal(journal.count, 5);
+    assert.equal(journal.entries.filter(entry => entry.gatewayId === 'gateway-fixture').length, 4);
     assert.equal(journal.entries.filter(entry => entry.gatewayId === undefined).length, 1);
+    write('forged-job', 'forged-item', { printerId: 'selected-local-printer', gatewayId: 'gateway-fixture', state: 'ATTEMPT_RESERVED' });
+    await assert.rejects(inspectDispatchJournal(), /reconciliation/i);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
