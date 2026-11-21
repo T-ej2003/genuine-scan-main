@@ -44,15 +44,19 @@ describe("automatic connector upgrade handoff", () => {
       .mockResolvedValue(ok() as any);
     vi.mocked(apiClient.connectorPostInstallEvidence).mockResolvedValue({ success: true, evidence: { statement: "postinstall", signature: "signed" } } as any);
     vi.mocked(apiClient.connectorUpgradeReleaseStatus).mockResolvedValue(ok({ released: true, dispatchFenced: false }) as any);
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => ({ success: true,
+    let postInstallAttempts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.endsWith("postinstall-proof") && postInstallAttempts++ < (lostReleaseResponse ? 130 : 0))
+        throw new Error("replacement connector is still starting");
+      return { ok: true, json: async () => ({ success: true,
       ...(url.endsWith("device-proof") ? { signature: "device-proof" } : {}),
       ...(url.endsWith("checkpoint-evidence") ? { evidence: { statement: "checkpoint", signature: "signed" } } : {}),
       ...(url.endsWith("postinstall-proof") ? { proof: { statement: "runtime", signature: "signed" } } : {}),
-    }) })));
+    }) }; }));
     const completion = authorizeInstallerUpgrade(id);
     await vi.waitFor(() => expect(apiClient.completeConnectorUpgradePairing).toHaveBeenCalledWith(printerId, id, token));
     expect(authorizeInstallerUpgrade(id)).toBe(completion);
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync((lostReleaseResponse ? 131 : 1) * 2000);
     await completion;
     expect(apiClient.connectorUpgradeProof).toHaveBeenCalledWith(printerId, challengeId, "device-proof");
     expect(apiClient.connectorMaintenanceEvidence).toHaveBeenCalledWith(printerId,

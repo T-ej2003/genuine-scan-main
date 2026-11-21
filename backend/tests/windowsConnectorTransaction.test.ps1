@@ -199,10 +199,12 @@ try {
         if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED_FENCED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256){throw 'commit invalid'}
         if(-not(Test-Path -LiteralPath $auth)) {throw 'Fenced commit discarded its recovery credential'}
         if($scenario -eq 'success') {
-          [IO.File]::WriteAllText((Join-Path ([IO.Path]::GetDirectoryName($state)) 'maintenance-fence.json'),'{"version":1,"state":"FENCED"}')
+          $pendingFence=Join-Path ([IO.Path]::GetDirectoryName($state)) 'maintenance-fence.json.release-pending'
+          [IO.File]::WriteAllText($pendingFence,'{"version":1,"state":"FENCED"}')
           $script:backendReleased=$true
           Invoke-MscqrUpgradeTransaction -Phase Recover @args
-          if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED' -or (Test-Path -LiteralPath $auth)) {
+          if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED' -or
+             (Test-Path -LiteralPath $auth) -or (Test-Path -LiteralPath $pendingFence)) {
             throw 'Fenced commit did not resume safely after backend release'
           }
         }

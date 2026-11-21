@@ -418,7 +418,9 @@ function Invoke-MscqrUpgradeTransaction {
       if($journal.binding.statePath -ine $journal.stateFile -or $journal.stateDiscovery.sha256 -cne $journal.binding.stateDiscoverySha256) {throw 'Journal state discovery binding mismatch.'}
       if ($journal.runtime -ine (Join-Path $live 'bin\mscqr-local-print-agent.exe') -or $journal.stateFile -ine $StateFile -or $journal.startup -ine $StartupFile) { throw 'Upgrade journal ownership mismatch.' }
       if ($Phase -eq 'Recover') {
-        if ($journal.phase -eq 'COMMITTED_FENCED') { $Phase = 'Commit' }
+        $pendingFence=Join-Path ([IO.Path]::GetDirectoryName($journal.stateFile)) 'maintenance-fence.json.release-pending'
+        if ($journal.phase -eq 'COMMITTED_FENCED' -or
+            ($journal.phase -eq 'VERIFIED' -and (Test-Path -LiteralPath $pendingFence))) { $Phase = 'Commit' }
         else {
           if ($journal.phase -notin @('AUTHORIZED','STAGED','ABORTED','COMMITTED','RESTORATION_VERIFIED')) {
             $auth = Read-MscqrAuthorization $AuthFile
@@ -593,6 +595,18 @@ function Invoke-MscqrUpgradeTransaction {
       if ($journal.phase -notin @('VERIFIED','COMMITTED_FENCED')) { throw 'Unverified upgrade cannot commit.' }
       Assert-MscqrJournalBinding $journal $journalPath
       Assert-MscqrDispatchJournalLive $journal.dispatchJournal
+      $marker=Join-Path ([IO.Path]::GetDirectoryName($journal.stateFile)) 'maintenance-fence.json'
+      $pending="$marker.release-pending"
+      if (Test-Path -LiteralPath $pending) {
+        Assert-MscqrPlainPath $pending
+        if ((Read-MscqrJson $pending).state -cne 'FENCED') {throw 'Interrupted local fence transition is invalid.'}
+        if (@(Get-MscqrRuntimeProcesses).Count) {Stop-MscqrVerifiedRuntime $journal.runtime $journal.binding.targetSha256}
+        if (Test-Path -LiteralPath $marker) {
+          if ((Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Conflicting maintenance fences require review.'}
+          Remove-Item -LiteralPath $pending -Force -ErrorAction Stop
+        } else {[IO.File]::Move($pending,$marker)}
+        Start-MscqrVerifiedRuntime $journal.wrapper
+      }
       Wait-MscqrTrustedSession $journal | Out-Null
       Assert-MscqrStateDiscovery $journal.stateDiscovery
       $uninstall=Get-MscqrUninstallSnapshot $live
@@ -606,8 +620,6 @@ function Invoke-MscqrUpgradeTransaction {
         catch {if(-not(Wait-MscqrBackendRelease $auth $journal.binding 3)) {throw};$released=$true}
       }
       if($released) {
-        $marker=Join-Path ([IO.Path]::GetDirectoryName($journal.stateFile)) 'maintenance-fence.json'
-        $pending="$marker.release-pending"
         Assert-MscqrPlainPath $marker
         Assert-MscqrPlainPath $pending
         if(-not(Test-Path -LiteralPath $marker -PathType Leaf) -or (Test-Path -LiteralPath $pending) -or
@@ -651,6 +663,7 @@ if ($MyInvocation.InvocationName -ne '.') {
       throw 'Previous connector installation directory requires separate compatibility verification.'
     }
     $discovery=$null
+    $recoveringFencedCommit=$false
     if($Operation -eq 'Acquire') {
       Acquire-MscqrUpgradeAuthorization $live $PayloadDirectory $InstallerFile $AuthorizationFile $TargetVersion
       exit 0
@@ -666,10 +679,13 @@ if ($MyInvocation.InvocationName -ne '.') {
       $journalFile=Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade\transaction.json'
       Assert-MscqrPrivatePath $journalFile
       $existing=Read-MscqrJson $journalFile
+      $recoveringFencedCommit=$Operation -eq 'Recover' -and $existing.phase -eq 'COMMITTED_FENCED'
       $selected=[string]$existing.stateFile
     }
     Invoke-MscqrUpgradeTransaction -Phase $Operation -LiveDirectory $live -Payload $PayloadDirectory -Installer $InstallerFile -AuthFile $AuthorizationFile -Version $TargetVersion -StateFile $selected -StateDiscovery $discovery -StartupFile (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs')
-    if($Operation -eq 'Commit' -and (Read-MscqrJson (Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade\transaction.json')).phase -eq 'COMMITTED_FENCED') {exit 10}
+    $resultPhase=(Read-MscqrJson (Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade\transaction.json')).phase
+    if($recoveringFencedCommit -and $resultPhase -eq 'COMMITTED') {exit 11}
+    if($Operation -in @('Commit','Recover') -and $resultPhase -eq 'COMMITTED_FENCED') {exit 10}
     exit 0
   } catch { Write-Error $_; exit 1 }
 }

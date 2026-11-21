@@ -359,6 +359,12 @@ const run = async () => {
     "Interactive failures must show a failed Finished page while upgrade recovery still runs at setup exit"
   );
   assert(
+    installerTemplate.includes("FileExists(ExpandConstant('{localappdata}\\MSCQR\\connector-upgrade\\transaction.json'))") &&
+      installerTemplate.indexOf("if not RunUpgrade('Recover') then begin") < installerTemplate.indexOf("if not RunUpgrade('Acquire') then") &&
+      installerTemplate.includes('if RecoveryCompleted then begin'),
+    "Double-clicking the installer must resume a fenced prior upgrade before creating another attempt"
+  );
+  assert(
     installerTemplate.includes('function VerifyUpgradePayloadSignatures: Boolean;') &&
       installerTemplate.includes('Result := VerifyUpgradePayloadSignatures;') &&
       installerTemplate.includes("$runtime.Status -ne ''Valid''") &&

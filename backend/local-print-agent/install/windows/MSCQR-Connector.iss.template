@@ -40,7 +40,7 @@ Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: ru
 
 [Code]
 var
-  UpgradeMode, UpgradePrepared, SetupCommitted, InitializationFailed, PrintingPaused: Boolean;
+  UpgradeMode, UpgradePrepared, SetupCommitted, InitializationFailed, PrintingPaused, RecoveryCompleted: Boolean;
 
 function GetCustomSetupExitCode: Integer;
 begin
@@ -105,7 +105,9 @@ begin
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
     ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);
   if (Operation = 'Commit') and (Code = 10) then PrintingPaused := True;
-  Result := Result and ((Code = 0) or ((Operation = 'Commit') and (Code = 10)));
+  if (Operation = 'Recover') and (Code = 11) then RecoveryCompleted := True;
+  Result := Result and ((Code = 0) or ((Operation = 'Commit') and (Code = 10)) or
+    ((Operation = 'Recover') and (Code = 11)));
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -130,6 +132,16 @@ begin
       else
         Result := 'Interrupted upgrade restoration could not be verified. Keep dispatch fenced and inspect the durable journal.';
       exit;
+    end;
+    if FileExists(ExpandConstant('{localappdata}\MSCQR\connector-upgrade\transaction.json')) then begin
+      if not RunUpgrade('Recover') then begin
+        Result := 'The previous connector upgrade remains safely paused. Retry when backend verification is available.';
+        exit;
+      end;
+      if RecoveryCompleted then begin
+        Result := 'The previous connector upgrade is verified and printing restrictions were safely restored. No further installation is needed.';
+        exit;
+      end;
     end;
     if not RunUpgrade('Acquire') then
       Result := 'Upgrade authorization could not be verified. The existing installation is unchanged.'
