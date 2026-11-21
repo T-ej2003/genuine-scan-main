@@ -62,6 +62,7 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
   protectedJournalSha = input.journalSha256;
   return { protected: protectedEntries.length, settled: input.entries.filter(entry => entry.printItemId === 'settled-item').length,
     historicalReissues: input.entries.filter(entry => entry.printJobId === 'old-job').length,
+    supersededUnsubmitted: 0,
     protectedItemIds: protectedEntries.map(entry => entry.printItemId) };
 }, administerPrintingPrinter: async input => {
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',

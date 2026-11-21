@@ -724,7 +724,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $fn$
 DECLARE snapshot jsonb; registration_id text; expected_count integer;
   matches jsonb; entry jsonb; item_row record; marker jsonb; added integer:=0;
-  settled integer:=0; diagnostic_count integer:=0; historical_count integer:=0; prior_operation text; protected_ids jsonb:='[]'::jsonb;
+  settled integer:=0; diagnostic_count integer:=0; historical_count integer:=0; superseded_count integer:=0; prior_operation text; protected_ids jsonb:='[]'::jsonb;
 BEGIN
   IF session_user <> {{APP_ROLE}} OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
      p_fence_request_id IS NULL OR p_fence_request_id !~* '^[0-9a-f-]{36}$' OR
@@ -797,7 +797,20 @@ BEGIN
     JOIN lineage l ON l.item_id=e."printItemId" AND l.job_id=e."printJobId" AND l.depth>0
     WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(matches) current_item
       WHERE current_item->>'itemId'=e."printItemId");
-  IF jsonb_array_length(matches)+diagnostic_count+historical_count<>expected_count
+  -- An ABORT before committed INTENT records a durable RESUMED event. Keep
+  -- its old journal, but accept it only beside a protected current attempt.
+  SELECT count(*) INTO superseded_count FROM jsonb_to_recordset(p_entries)
+    AS e(name text,"printJobId" text,"printItemId" text,"attemptId" text)
+    WHERE e."attemptId" IS NOT NULL AND e.name !~ '\.gateway-attempt\.json$'
+      AND EXISTS (SELECT 1 FROM jsonb_array_elements(matches) current_item
+        WHERE current_item->>'itemId'=e."printItemId" AND current_item->>'jobId'=e."printJobId"
+          AND current_item->>'attemptId' IS DISTINCT FROM e."attemptId")
+      AND EXISTS (SELECT 1 FROM public."PrintItemEvent" event
+        WHERE event."printItemId"=e."printItemId" AND event."eventType"='RESUMED'
+          AND event."previousState"='ISSUED' AND event."nextState"='RESERVED'
+          AND event.details->>'attemptId'=e."attemptId"
+          AND event.details->>'dispatchEvidenceVersion'='1');
+  IF jsonb_array_length(matches)+diagnostic_count+historical_count+superseded_count<>expected_count
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
   settled:=diagnostic_count;
 
@@ -841,8 +854,8 @@ BEGIN
       "pipelineState"='NEEDS_OPERATOR_ACTION',"failureReason"='physical_outcome_unconfirmed',"updatedAt"=clock_timestamp()
       WHERE j.id=entry->>'jobId';
   END LOOP;
-  RETURN jsonb_build_object('protected',expected_count-settled-historical_count,'settled',settled,
-    'historicalReissues',historical_count,
+  RETURN jsonb_build_object('protected',expected_count-settled-historical_count-superseded_count,'settled',settled,
+    'historicalReissues',historical_count,'supersededUnsubmitted',superseded_count,
     'protectedItemIds',protected_ids,'newlyProtected',added,'journalSha256',p_journal_sha256);
 END
 $fn$;

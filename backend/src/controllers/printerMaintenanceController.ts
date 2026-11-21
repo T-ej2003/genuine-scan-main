@@ -66,7 +66,8 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
         entries: checkpoint.journal.entries });
       if (!Array.isArray(protectedResult.protectedItemIds) ||
           protectedResult.protectedItemIds.length !== protectedResult.protected ||
-          protectedResult.protected + protectedResult.settled + protectedResult.historicalReissues !== checkpoint.journal.count)
+          protectedResult.protected + protectedResult.settled + protectedResult.historicalReissues +
+            protectedResult.supersededUnsubmitted !== checkpoint.journal.count)
         throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
       protectedItemIds = protectedResult.protectedItemIds;
       snapshot = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),

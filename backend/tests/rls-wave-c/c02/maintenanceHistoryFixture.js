@@ -120,6 +120,17 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
     SELECT '${randomUUID()}',"assignedUserId","orgId","licenseeId",'PRINTER_TEST_LABEL_CONFIRMED','Printer',id,
       jsonb_build_object('testJobId','${diagnosticId}') FROM public."Printer" WHERE id='${printer}'`);
   journalEntries.push(diagnostic);
+  const abortedAttempt=randomUUID();
+  const superseded={...uncertain[0],name:`${hash('superseded-unsubmitted')}.json`,
+    sha256:hash('superseded-unsubmitted-record'),attemptId:abortedAttempt};
+  psql(admin,`INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+    VALUES('${randomUUID()}','${uncertain[0].printItemId}','RESUMED','ISSUED','RESERVED',
+      '{"attemptId":"${abortedAttempt}","dispatchEvidenceVersion":"1","journalState":"ATTEMPT_RESERVED"}'::jsonb,'${ids.maker}',now())`);
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('unverified-abort')}',
+    '${JSON.stringify([...journalEntries,{...superseded,attemptId:randomUUID()}])}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_MISMATCH/,'a stale attempt without a durable unsubmitted abort remains fenced');
+  journalEntries.push(superseded);
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${hash('unrelated-reissue')}',
     '${JSON.stringify([...journalEntries,{...reissued,name:`${hash('unrelated-history')}.json`,printJobId:templateJobId}])}'::jsonb)`,true),
@@ -142,6 +153,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   assert.equal(protectedResult.protected,12,'uncertain attempts must be durably protected');
   assert.equal(protectedResult.settled,2,'confirmed print and diagnostic history must be verified without freezing them');
   assert.equal(protectedResult.historicalReissues,1,'governed reissue history remains retained without claiming physical completion');
+  assert.equal(protectedResult.supersededUnsubmitted,1,'durably aborted pre-submission attempt remains retained without being mistaken for physical output');
   assert.equal(protectedResult.protectedItemIds.length,12);
   assert.equal(protectedResult.newlyProtected,12,'nullable dispatch metadata must not skip the first protection write');
   assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');
