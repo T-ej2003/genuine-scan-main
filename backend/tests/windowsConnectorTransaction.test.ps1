@@ -56,6 +56,7 @@ function Stop-MscqrVerifiedRuntime {
 }
 function Start-MscqrVerifiedRuntime {
   param($Wrapper)
+  if($script:failCommitStart) {$script:failCommitStart=$false; throw 'fixture post-release restart failed'}
   if($script:injection -eq 'start' -and [IO.File]::ReadAllText((Join-Path ([IO.Path]::GetDirectoryName($Wrapper)) 'mscqr-local-print-agent.exe')).StartsWith('replacement')) {throw 'fixture replacement startup failed'}
   $script:processes++; if ($script:processes -ne 1) { throw 'duplicate start' }
   if($script:injection -eq 'partial-unverified') {return 10}
@@ -77,8 +78,8 @@ function Wait-MscqrBackendRelease {param($Auth,$Binding,$Attempts=12) return $sc
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
-  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','backup-flush','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
-    $script:injection=$scenario; $script:consumed=$false; $script:processes=1; $script:backendReleased=$false
+  foreach ($scenario in @('success','commit-after-pending-deletion','commit-restart-failure','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','backup-flush','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
+    $script:injection=$scenario; $script:consumed=$false; $script:processes=1; $script:backendReleased=$false; $script:failCommitStart=$false
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
     New-Item -ItemType Directory -Path "$live\bin","$payload\bin" -Force | Out-Null
@@ -193,14 +194,25 @@ try {
         if(-not $failed -or $script:processes -ne 0 -or (Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_FAILED'){throw 'failed restoration was not left stopped'}
         Write-Host 'PASS transaction failed-restoration stayed stopped and fenced'
         continue
-      } elseif($scenario -in @('success','legacy-success')) {
+      } elseif($scenario -in @('success','commit-after-pending-deletion','commit-restart-failure','legacy-success')) {
         if($failed){throw 'successful activation failed'}
+        if($scenario -eq 'commit-restart-failure') {
+          [IO.File]::WriteAllText((Join-Path ([IO.Path]::GetDirectoryName($state)) 'maintenance-fence.json'),'{"version":1,"state":"FENCED"}')
+          $script:backendReleased=$true; $script:failCommitStart=$true
+        }
         Invoke-MscqrUpgradeTransaction -Phase Commit @args
-        if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED_FENCED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256){throw 'commit invalid'}
+        $record=Get-Content $journal -Raw|ConvertFrom-Json
+        if($record.phase -ne 'COMMITTED_FENCED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256 -or
+           ($scenario -eq 'commit-restart-failure' -and $record.localReleaseStarted -ne $true)){throw 'commit invalid'}
         if(-not(Test-Path -LiteralPath $auth)) {throw 'Fenced commit discarded its recovery credential'}
-        if($scenario -eq 'success') {
+        if($scenario -in @('success','commit-after-pending-deletion','commit-restart-failure')) {
           $pendingFence=Join-Path ([IO.Path]::GetDirectoryName($state)) 'maintenance-fence.json.release-pending'
-          [IO.File]::WriteAllText($pendingFence,'{"version":1,"state":"FENCED"}')
+          if($scenario -eq 'success') {[IO.File]::WriteAllText($pendingFence,'{"version":1,"state":"FENCED"}')}
+          elseif($scenario -eq 'commit-after-pending-deletion') {
+            $record=Get-Content $journal -Raw|ConvertFrom-Json
+            $record.localReleaseStarted=$true
+            Write-MscqrTransaction $journal $record 'COMMITTED_FENCED'
+          }
           $script:backendReleased=$true
           Invoke-MscqrUpgradeTransaction -Phase Recover @args
           if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED' -or
@@ -210,7 +222,7 @@ try {
         }
       } elseif(-not $failed) {throw 'verification failure did not fail upgrade'}
     }
-    if($scenario -notin @('success','legacy-success') -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}
+    if($scenario -notin @('success','commit-after-pending-deletion','commit-restart-failure','legacy-success') -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}
     if($scenario -like 'legacy-*' -and (Test-Path -LiteralPath "$case\.mscqr\local-print-agent-state.json")){throw 'Legacy identity was silently migrated'}
     if($script:processes -ne 1 -or (Get-FileHash $state).Hash -ne $binding.stateSha256 -or [IO.File]::ReadAllText("$live\unknown-pending.json") -ne 'preserve uncertain evidence' -or [IO.File]::ReadAllText("$journal.next") -ne 'unrelated recovery evidence') {throw 'identity, pending evidence or cardinality lost'}
     Write-Host "PASS transaction $scenario (external boundaries simulated)"

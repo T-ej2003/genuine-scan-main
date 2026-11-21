@@ -420,7 +420,8 @@ function Invoke-MscqrUpgradeTransaction {
       if ($Phase -eq 'Recover') {
         $pendingFence=Join-Path ([IO.Path]::GetDirectoryName($journal.stateFile)) 'maintenance-fence.json.release-pending'
         if ($journal.phase -eq 'COMMITTED_FENCED' -or
-            ($journal.phase -eq 'VERIFIED' -and (Test-Path -LiteralPath $pendingFence))) { $Phase = 'Commit' }
+            ($journal.phase -eq 'VERIFIED' -and ((Test-Path -LiteralPath $pendingFence) -or
+              (Wait-MscqrBackendRelease (Read-MscqrAuthorization $AuthFile) $journal.binding 1)))) { $Phase = 'Commit' }
         else {
           if ($journal.phase -notin @('AUTHORIZED','STAGED','ABORTED','COMMITTED','RESTORATION_VERIFIED')) {
             $auth = Read-MscqrAuthorization $AuthFile
@@ -516,7 +517,7 @@ function Invoke-MscqrUpgradeTransaction {
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe')).Hash -ine $binding.uninstallerSha256 -or
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.dat')).Hash -ine $binding.uninstallDataSha256) {throw 'Previous uninstaller ownership binding mismatch.'}
       Invoke-MscqrMaintenance $auth 'consume' $binding
-      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); dispatchJournal=$null; staged=''; protocol=$status.protocolVersion; uninstall=$uninstall }
+      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); dispatchJournal=$null; staged=''; protocol=$status.protocolVersion; uninstall=$uninstall; localReleaseStarted=$false }
       Write-MscqrTransaction $journalPath $journal 'AUTHORIZED'
       $stage = Join-Path $root 'stage'
       Protect-MscqrDirectory $stage
@@ -622,28 +623,35 @@ function Invoke-MscqrUpgradeTransaction {
       if($released) {
         Assert-MscqrPlainPath $marker
         Assert-MscqrPlainPath $pending
-        if(-not(Test-Path -LiteralPath $marker -PathType Leaf) -or (Test-Path -LiteralPath $pending) -or
-           (Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Local maintenance fence could not be released safely.'}
-        try {
-          Stop-MscqrVerifiedRuntime $journal.runtime $journal.binding.targetSha256
-          [IO.File]::Move($marker,$pending)
-          Start-MscqrVerifiedRuntime $journal.wrapper
-          Wait-MscqrTrustedSession $journal | Out-Null
-          Remove-Item -LiteralPath $pending -Force -ErrorAction Stop
+        if ($journal.localReleaseStarted -eq $true -and -not(Test-Path -LiteralPath $marker) -and
+            -not(Test-Path -LiteralPath $pending)) {
           Write-MscqrTransaction $journalPath $journal 'COMMITTED'
-        } catch {
-          # If restart or verification fails, preserve the local fence even
-          # though the backend released it. Frozen unknown items remain blocked.
-          if(Test-Path -LiteralPath $pending) {
-            if(@(Get-MscqrRuntimeProcesses).Count) {Stop-MscqrVerifiedRuntime $journal.runtime $journal.binding.targetSha256}
-            if(-not(Test-Path -LiteralPath $marker)) {[IO.File]::Move($pending,$marker)}
-            else {Remove-Item -LiteralPath $pending -Force}
-          }
-          if(@(Get-MscqrRuntimeProcesses).Count -eq 0) {
-            Start-MscqrVerifiedRuntime $journal.wrapper
-            Wait-MscqrRuntime $journal | Out-Null
-          }
+        } else {
+          if(-not(Test-Path -LiteralPath $marker -PathType Leaf) -or (Test-Path -LiteralPath $pending) -or
+             (Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Local maintenance fence could not be released safely.'}
+          $journal.localReleaseStarted=$true
           Write-MscqrTransaction $journalPath $journal 'COMMITTED_FENCED'
+          try {
+            Stop-MscqrVerifiedRuntime $journal.runtime $journal.binding.targetSha256
+            [IO.File]::Move($marker,$pending)
+            Start-MscqrVerifiedRuntime $journal.wrapper
+            Wait-MscqrTrustedSession $journal | Out-Null
+            Remove-Item -LiteralPath $pending -Force -ErrorAction Stop
+            Write-MscqrTransaction $journalPath $journal 'COMMITTED'
+          } catch {
+            # If restart or verification fails, preserve the local fence even
+            # though the backend released it. Frozen unknown items remain blocked.
+            if(Test-Path -LiteralPath $pending) {
+              if(@(Get-MscqrRuntimeProcesses).Count) {Stop-MscqrVerifiedRuntime $journal.runtime $journal.binding.targetSha256}
+              if(-not(Test-Path -LiteralPath $marker)) {[IO.File]::Move($pending,$marker)}
+              else {Remove-Item -LiteralPath $pending -Force}
+            }
+            if(@(Get-MscqrRuntimeProcesses).Count -eq 0) {
+              Start-MscqrVerifiedRuntime $journal.wrapper
+              Wait-MscqrRuntime $journal | Out-Null
+            }
+            Write-MscqrTransaction $journalPath $journal 'COMMITTED_FENCED'
+          }
         }
       } else {
         Write-MscqrTransaction $journalPath $journal 'COMMITTED_FENCED'
@@ -680,8 +688,7 @@ if ($MyInvocation.InvocationName -ne '.') {
       Assert-MscqrPrivatePath $journalFile
       $existing=Read-MscqrJson $journalFile
       $selected=[string]$existing.stateFile
-      $recoveringFencedCommit=$Operation -eq 'Recover' -and ($existing.phase -eq 'COMMITTED_FENCED' -or
-        ($existing.phase -eq 'VERIFIED' -and (Test-Path -LiteralPath (Join-Path ([IO.Path]::GetDirectoryName($selected)) 'maintenance-fence.json.release-pending'))))
+      $recoveringFencedCommit=$Operation -eq 'Recover' -and $existing.phase -in @('COMMITTED_FENCED','VERIFIED')
     }
     Invoke-MscqrUpgradeTransaction -Phase $Operation -LiveDirectory $live -Payload $PayloadDirectory -Installer $InstallerFile -AuthFile $AuthorizationFile -Version $TargetVersion -StateFile $selected -StateDiscovery $discovery -StartupFile (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs')
     $resultPhase=(Read-MscqrJson (Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade\transaction.json')).phase
