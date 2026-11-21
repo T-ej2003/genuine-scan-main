@@ -319,7 +319,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
         consume: "MAINTENANCE_CONSUME", verify: "MAINTENANCE_VERIFY", release: "MAINTENANCE_RELEASE" } as const)[input.action], printerId: String(req.params.id), payload });
     if (input.action === "release") {
       const released = payload.evidence as { tokenHash?: string; binding?: Record<string, string> };
-      if (data?.state !== "ACTIVE" || data?.reconciliationRequired !== false ||
+      if (data?.authorized !== true || data?.dispatchFenced !== false ||
           !/^[a-f0-9]{64}$/.test(String(released.tokenHash || ""))) throw new Error("POSTINSTALL_RELEASE_UNVERIFIED");
       const redis = await getRedisClient();
       if (!redis || await redis.set(upgradeReleaseKey(released.tokenHash!),

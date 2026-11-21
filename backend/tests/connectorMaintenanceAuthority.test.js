@@ -67,7 +67,7 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
     supersededUnsubmitted: 0,
     protectedItemIds: protectedEntries.map(entry => entry.printItemId) };
 }, administerPrintingPrinter: async input => {
-  if (input.operation === 'MAINTENANCE_RELEASE') return { state: 'ACTIVE', reconciliationRequired: false };
+  if (input.operation === 'MAINTENANCE_RELEASE') return { authorized: true, dispatchFenced: false, binding: input.payload.evidence.binding };
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
     workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : protectedEntries.map(entry => ({
       id: entry.printItemId, state: 'FROZEN', pipelineState: 'NEEDS_OPERATOR_ACTION',
