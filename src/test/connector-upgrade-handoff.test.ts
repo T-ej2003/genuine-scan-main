@@ -23,7 +23,7 @@ const ok = (data: unknown = {}) => ({ success: true, data });
 describe("automatic connector upgrade handoff", () => {
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
-  it("binds fresh proof and maintenance evidence to the private installer pairing, then releases only after post-install proof", async () => {
+  it.each([false, true])("binds proof to the installer pairing and recovers a lost release response: %s", async (lostReleaseResponse) => {
     vi.useFakeTimers();
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue(ok({ ...binding, buildVersion: binding.sourceVersion }) as any);
     vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue(ok([{ id: printerId, agentId: binding.agentId,
@@ -35,11 +35,14 @@ describe("automatic connector upgrade handoff", () => {
     let authorizationResponses = 0;
     vi.mocked(apiClient.connectorMaintenance).mockImplementation(async (_printer, input: any) => {
       if (input.action === "authorize" && authorizationResponses++ === 0) return { success: false, unknownOutcome: true } as any;
-      return ok(input.action === "request" ? { requestId: id } : input.action === "authorize" ? { token } : { state: "ACTIVE" }) as any;
+      if (input.action === "release" && lostReleaseResponse) return { success: false } as any;
+      return ok(input.action === "request" ? { requestId: id } : input.action === "authorize" ? { token } :
+        { authorized: true, dispatchFenced: false }) as any;
     });
     vi.mocked(apiClient.connectorMaintenanceEvidence).mockResolvedValue({ success: true, evidence: { statement: "preinstall", signature: "signed" } } as any);
     vi.mocked(apiClient.completeConnectorUpgradePairing).mockResolvedValue(ok() as any);
     vi.mocked(apiClient.connectorPostInstallEvidence).mockResolvedValue({ success: true, evidence: { statement: "postinstall", signature: "signed" } } as any);
+    vi.mocked(apiClient.connectorUpgradeReleaseStatus).mockResolvedValue(ok({ released: true, dispatchFenced: false }) as any);
     vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => ({ success: true,
       ...(url.endsWith("device-proof") ? { signature: "device-proof" } : {}),
       ...(url.endsWith("checkpoint-evidence") ? { evidence: { statement: "checkpoint", signature: "signed" } } : {}),
@@ -54,6 +57,7 @@ describe("automatic connector upgrade handoff", () => {
       expect.objectContaining({ binding: expect.objectContaining({ attemptId: id, fenceRequestId: id }) }));
     expect(apiClient.connectorMaintenance).toHaveBeenCalledWith(printerId,
       { action: "release", evidence: { statement: "postinstall", signature: "signed" } });
+    expect(apiClient.connectorUpgradeReleaseStatus).toHaveBeenCalledTimes(lostReleaseResponse ? 1 : 0);
     expect(authorizationResponses).toBe(2);
     vi.unstubAllGlobals();
   });

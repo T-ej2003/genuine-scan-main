@@ -72,7 +72,7 @@ export async function authorizeInstallerUpgrade(pairingId: string, signal?: Abor
     if (!verifiedPostInstall.success || !releaseEvidence)
       throw new Error("Post-install verification failed. The connector remains installed with printing paused.");
     const released = await apiClient.connectorMaintenance(printerId, { action: "release", evidence: releaseEvidence });
-    if (!released.success || released.data?.state !== "ACTIVE") {
+    if (!released.success || released.data?.authorized !== true || released.data?.dispatchFenced !== false) {
       const receipt = await apiClient.connectorUpgradeReleaseStatus(token, binding);
       if (!receipt.success || receipt.data?.released !== true || receipt.data?.dispatchFenced !== false)
         throw new Error("Backend safety checks did not release printing. Uncertain attempts remain protected.");
