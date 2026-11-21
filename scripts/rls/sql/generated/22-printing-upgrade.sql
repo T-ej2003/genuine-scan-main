@@ -881,9 +881,9 @@ CREATE OR REPLACE FUNCTION app_rls.printing_upgrade_handoff(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $fn$
-DECLARE scope text; checkpoint_key text; checkpoint jsonb; actor_id text;
+DECLARE scope text; checkpoint_key text; checkpoint jsonb; actor_id text; receipt jsonb;
 BEGIN
-  IF session_user <> 'mscqr_rls_cert_app' OR p_operation NOT IN ('CONSUME','VERIFY','REVOKE') OR
+  IF session_user <> 'mscqr_rls_cert_app' OR p_operation NOT IN ('CONSUME','VERIFY','REVOKE','RELEASE_STATUS') OR
      coalesce(p_token_hash,'') !~ '^[a-f0-9]{64}$' OR jsonb_typeof(p_binding) IS DISTINCT FROM 'object' OR
      coalesce(p_binding->>'registrationId','') !~* '^[0-9a-f-]{36}$' OR
      coalesce(p_binding->>'attemptId','') !~* '^[0-9a-f-]{36}$' OR
@@ -896,6 +896,19 @@ BEGIN
   PERFORM set_config('app.printing_maintenance_key',checkpoint_key,true);
   PERFORM pg_advisory_xact_lock(hashtextextended(checkpoint_key,0));
   SELECT value INTO STRICT checkpoint FROM public."SystemCheckpoint" WHERE key=checkpoint_key FOR UPDATE;
+  IF p_operation='RELEASE_STATUS' THEN
+    IF checkpoint->>'state' IS DISTINCT FROM 'ACTIVE' OR jsonb_typeof(checkpoint->'history') IS DISTINCT FROM 'array' OR
+       jsonb_array_length(checkpoint->'history')=0
+    THEN RAISE EXCEPTION 'UPGRADE_HANDOFF_DENIED' USING ERRCODE='42501'; END IF;
+    receipt:=checkpoint->'history'->(jsonb_array_length(checkpoint->'history')-1);
+    IF receipt->'releaseEvidence'->>'tokenHash' IS DISTINCT FROM p_token_hash OR
+       receipt->'releaseEvidence'->'binding' IS DISTINCT FROM p_binding OR
+       receipt->'maintenance'->'upgrade'->>'tokenHash' IS DISTINCT FROM p_token_hash OR
+       receipt->'maintenance'->'upgrade'->'binding' IS DISTINCT FROM p_binding OR
+       receipt->>'releasedBy' IS DISTINCT FROM actor_id
+    THEN RAISE EXCEPTION 'UPGRADE_HANDOFF_DENIED' USING ERRCODE='42501'; END IF;
+    RETURN jsonb_build_object('released',true,'dispatchFenced',false,'binding',p_binding);
+  END IF;
   IF checkpoint->>'state' IS DISTINCT FROM 'DISPATCH_FENCED' OR
      checkpoint->'upgrade'->>'actor' IS DISTINCT FROM actor_id OR
      checkpoint->'upgrade'->>'tokenHash' IS DISTINCT FROM p_token_hash OR
