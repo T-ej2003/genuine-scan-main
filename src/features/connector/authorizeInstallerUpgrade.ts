@@ -26,12 +26,19 @@ async function runInstallerUpgrade(pairingId: string) {
   const local = await apiClient.getLocalPrintAgentStatus();
   const roster = await apiClient.listRegisteredPrinters(true);
   if (!local.success || !local.data || !roster.success || !Array.isArray(roster.data))
-    throw new Error("Sign in on the printer computer and keep the existing connector running.");
-  const status = local.data as { agentId?: string | null; deviceFingerprint?: string | null; buildVersion?: string | null };
+    throw new Error("Sign in on the printer computer and keep the installer open.");
+  const status = local.data as { agentId?: string | null; deviceFingerprint?: string | null; buildVersion?: string | null;
+    upgradeMode?: string | null };
   const matches = (roster.data as Array<{ id?: string; agentId?: string; deviceFingerprint?: string }>).filter(printer =>
     printer.agentId === status.agentId && printer.deviceFingerprint === status.deviceFingerprint);
   if (matches.length !== 1 || !matches[0].id) throw new Error("The registered connector and printer could not be matched uniquely.");
   const printerId = matches[0].id;
+  // The stopped 2026.11.6.2 path has no fresh signed session. Fence the
+  // backend before asking its registered-key boundary for a new challenge.
+  const offline = status.upgradeMode === "OFFLINE_EXISTING_INSTALL";
+  const earlyFence = offline ? await apiClient.connectorMaintenance(printerId, { action: "request" }) : null;
+  if (offline && (!earlyFence?.success || !earlyFence.data?.requestId))
+    throw new Error("Backend printing isolation could not be established.");
   const paired = await apiClient.getConnectorUpgradePairing(printerId, pairingId);
   if (!paired.success || !paired.data?.binding) throw new Error("The installer pairing is unavailable.");
   const candidate = paired.data.binding;
@@ -46,7 +53,7 @@ async function runInstallerUpgrade(pairingId: string) {
   const proof = await localPost("/maintenance/device-proof", challenge);
   const verified = await apiClient.connectorUpgradeProof(printerId, challengeId, String(proof.signature || ""));
   if (!verified.success) throw new Error("Device identity could not be verified.");
-  const requested = await apiClient.connectorMaintenance(printerId, { action: "request" });
+  const requested = earlyFence || await apiClient.connectorMaintenance(printerId, { action: "request" });
   const fenceRequestId = String(requested.data?.requestId || "");
   if (!requested.success || !fenceRequestId) throw new Error("Backend printing isolation could not be established.");
   await localPost("/maintenance/fence", {});

@@ -69,6 +69,86 @@ function Get-MscqrRuntimeVersion([string]$Runtime) {
   if ($LASTEXITCODE -ne 0) { throw 'Runtime version command failed.' }
   return $value
 }
+function Assert-MscqrStoppedInstallation {
+  if (@(Get-MscqrRuntimeProcesses).Count -ne 0 -or
+      @(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction SilentlyContinue).Count -ne 0) {
+    throw 'Offline upgrade requires the installed connector and its local listener to be stopped.'
+  }
+}
+function Get-MscqrInstalledVersion([string]$Live) {
+  $versions=@(Get-MscqrUninstallSnapshot $Live | Where-Object name -eq 'DisplayVersion')
+  if ($versions.Count -ne 1 -or $versions[0].value -cne '2026.11.6.2') {
+    throw 'This stopped connector version is not certified for offline upgrade.'
+  }
+  return [string]$versions[0].value
+}
+function Start-MscqrOfflineBridge([string]$Candidate,[string]$StateFile,[string]$SourceVersion) {
+  Assert-MscqrStoppedInstallation
+  $marker=Join-Path ([IO.Path]::GetDirectoryName($StateFile)) 'maintenance-fence.json'
+  Assert-MscqrPlainPath $marker
+  if(Test-Path -LiteralPath $marker) {
+    if((Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Existing maintenance fence is invalid.'}
+  } else {
+    $file=[IO.File]::Open($marker,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try {
+      $bytes=[Text.Encoding]::UTF8.GetBytes((@{version=1;state='FENCED';createdAt=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress))
+      $file.Write($bytes,0,$bytes.Length);$file.Flush($true)
+    } finally {$file.Dispose()}
+    $acl=New-Object System.Security.AccessControl.FileSecurity
+    $acl.SetAccessRuleProtection($true,$false)
+    foreach($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User,(New-Object Security.Principal.SecurityIdentifier('S-1-5-18')))) {
+      $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','Allow')))
+    }
+    Set-Acl -LiteralPath $marker -AclObject $acl
+  }
+  Assert-MscqrPrivatePath $marker
+  $oldState=$env:PRINT_AGENT_STATE_FILE;$oldVersion=$env:MSCQR_OFFLINE_SOURCE_VERSION
+  $oldAgentVersion=$env:PRINT_AGENT_VERSION;$oldBuildVersion=$env:PRINT_AGENT_BUILD_VERSION
+  $oldHost=$env:PRINT_AGENT_HOST;$oldPort=$env:PRINT_AGENT_PORT
+  try {
+    $env:PRINT_AGENT_STATE_FILE=$StateFile;$env:MSCQR_OFFLINE_SOURCE_VERSION=$SourceVersion
+    $env:PRINT_AGENT_VERSION='';$env:PRINT_AGENT_BUILD_VERSION=''
+    $env:PRINT_AGENT_HOST='127.0.0.1';$env:PRINT_AGENT_PORT='17866'
+    $process=Start-Process -FilePath $Candidate -ArgumentList '--offline-existing-install' -PassThru -WindowStyle Hidden
+  } finally {
+    $env:PRINT_AGENT_STATE_FILE=$oldState;$env:MSCQR_OFFLINE_SOURCE_VERSION=$oldVersion
+    $env:PRINT_AGENT_VERSION=$oldAgentVersion;$env:PRINT_AGENT_BUILD_VERSION=$oldBuildVersion
+    $env:PRINT_AGENT_HOST=$oldHost;$env:PRINT_AGENT_PORT=$oldPort
+  }
+  try {
+  for($attempt=0;$attempt -lt 30;$attempt++) {
+    if($process.HasExited) {throw 'The offline authorization bridge exited before verification.'}
+    $listeners=@(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction SilentlyContinue)
+    if($listeners.Count -eq 1 -and $listeners[0].OwningProcess -eq $process.Id -and
+       $listeners[0].LocalAddress -in @('127.0.0.1','::1')) {
+      $status=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/status' -TimeoutSec 5
+      $identity=Read-MscqrJson $StateFile
+      if($status.buildVersion -cne $SourceVersion -or $status.agentId -cne $identity.agentId -or
+         $status.deviceFingerprint -cne $identity.deviceFingerprint -or
+         $status.selectedPrinterId -cne $identity.selectedPrinterId -or
+         [string]::IsNullOrWhiteSpace($status.protocolVersion)) {throw 'Offline device identity or printer differs from installed state.'}
+      return [pscustomobject]@{process=$process;status=$status}
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  throw 'Offline authorization bridge did not bind the expected local listener.'
+  } catch {
+    if(-not $process.HasExited) {$process.Kill();$process.WaitForExit()}
+    throw
+  }
+}
+function Stop-MscqrOfflineBridge($Bridge) {
+  if($null -eq $Bridge) {return}
+  if(-not $Bridge.process.HasExited) {
+    $listeners=@(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction Stop)
+    if($listeners.Count -ne 1 -or $listeners[0].OwningProcess -ne $Bridge.process.Id) {
+      throw 'Offline bridge listener ownership changed; refusing installer continuation.'
+    }
+    $reply=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Post -TimeoutSec 5
+    if($reply.success -ne $true -or -not $Bridge.process.WaitForExit(15000)) {throw 'Offline authorization bridge did not stop.'}
+  }
+  Assert-MscqrStoppedInstallation
+}
 function Assert-MscqrExistingIdentity([string]$Candidate,[string]$StateFile,$Binding) {
   $previous=$env:PRINT_AGENT_STATE_FILE
   try {
@@ -147,14 +227,28 @@ function Acquire-MscqrUpgradeAuthorization([string]$Live,[string]$Payload,[strin
   $stateFile=$discovery.selectedPath
   $identity=Read-MscqrJson $stateFile
   $evidence=Get-MscqrIdentityEvidence $candidate $stateFile
-  $sourceVersion=Get-MscqrRuntimeVersion $runtime
+  $offline=@(Get-MscqrRuntimeProcesses).Count -eq 0
+  if($offline -and $stateFile -ine [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')) -and
+     -not([IO.File]::ReadAllText((Join-Path $Live 'agent.env')) -match '(?im)^\s*"?PRINT_AGENT_STATE_FILE"?=')) {
+    throw 'Legacy connector identity path is not bound to persistent startup configuration.'
+  }
+  $sourceVersion=if($offline){Get-MscqrInstalledVersion $Live}else{Get-MscqrRuntimeVersion $runtime}
   $startup=Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
-  $status=Assert-MscqrRuntime $runtime $sourceVersion $stateFile $startup (Get-FileHash -LiteralPath $startup -Algorithm SHA256).Hash
+  $bridge=$null
+  if($offline) {
+    Assert-MscqrSignedFile $Installer (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash
+    Assert-MscqrSignedFile $candidate (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash
+    Assert-MscqrSignedFile $runtime (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash
+    $bridge=Start-MscqrOfflineBridge $candidate $stateFile $sourceVersion
+  }
+  try {
+  $status=if($offline){$bridge.status}else{Assert-MscqrRuntime $runtime $sourceVersion $stateFile $startup (Get-FileHash -LiteralPath $startup -Algorithm SHA256).Hash}
   $authority=[Uri]$identity.backendUrl
   if($authority.Scheme -cne 'https' -or $authority.UserInfo -or $authority.Query -or $authority.Fragment -or
      $authority.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__') {throw 'Connector backend does not match the signed maintenance authority.'}
   $binding=[ordered]@{
     agentId=[string]$identity.agentId; deviceFingerprint=[string]$identity.deviceFingerprint
+    upgradeMode=$(if($offline){'OFFLINE_EXISTING_INSTALL'}else{'LIVE_MAINTENANCE'})
     sourceVersion=$sourceVersion; targetVersion=$Version; statePath=$stateFile
     protocolVersion=[string]$status.protocolVersion; publicKeySha256=[string]$evidence.publicKeySha256
     sourceSha256=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -205,6 +299,7 @@ function Acquire-MscqrUpgradeAuthorization([string]$Live,[string]$Payload,[strin
   if(Test-Path -LiteralPath $AuthFile) {[IO.File]::Replace($next,$AuthFile,"$AuthFile.previous")}
   else {[IO.File]::Move($next,$AuthFile)}
   Assert-MscqrPrivatePath $AuthFile
+  } finally {Stop-MscqrOfflineBridge $bridge}
 }
 function Assert-MscqrRuntime([string]$Runtime, [string]$Version, [string]$StateFile, [string]$Startup, [string]$StartupHash) {
   $processes = @(Get-MscqrRuntimeProcesses)
@@ -356,7 +451,8 @@ function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
     Assert-MscqrStateDiscovery $Journal.stateDiscovery
     foreach($record in $Journal.records) {if((Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256){throw 'Previously restored installation changed.'}}
     $Journal.expectedVersion=$Journal.binding.sourceVersion
-    Wait-MscqrRuntime $Journal | Out-Null
+    if($Journal.binding.upgradeMode -eq 'OFFLINE_EXISTING_INSTALL') {Assert-MscqrStoppedInstallation}
+    else {Wait-MscqrRuntime $Journal | Out-Null}
     return
   }
   Write-MscqrTransaction $JournalPath $Journal 'ROLLBACK'
@@ -384,8 +480,10 @@ function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
   Write-MscqrTransaction $JournalPath $Journal 'RESTORED'
   $Journal.expectedVersion = $Journal.binding.sourceVersion
   try {
-    Start-MscqrVerifiedRuntime $Journal.wrapper
-    Wait-MscqrRuntime $Journal | Out-Null
+    if($Journal.binding.upgradeMode -ne 'OFFLINE_EXISTING_INSTALL') {
+      Start-MscqrVerifiedRuntime $Journal.wrapper
+      Wait-MscqrRuntime $Journal | Out-Null
+    } else {Assert-MscqrStoppedInstallation}
     if((Get-MscqrUninstallSnapshot ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Journal.runtime))) | Sort-Object name | ConvertTo-Json -Depth 20 -Compress) -cne ($Journal.uninstall | Sort-Object name | ConvertTo-Json -Depth 20 -Compress)) {throw 'Uninstall restoration was not verified.'}
     foreach ($record in $Journal.records | Where-Object { $_.name -ne 'runtime' }) {
       if ((Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256) { throw 'Restored persistent state changed during verification.' }
@@ -473,7 +571,10 @@ function Invoke-MscqrUpgradeTransaction {
         if($name.EndsWith('.ps1')) {Assert-MscqrSignedFile (Join-Path $Payload $name) (Get-FileHash -LiteralPath (Join-Path $Payload $name)).Hash}
         if(-not (Test-Path -LiteralPath (Join-Path $live $name) -PathType Leaf)) {throw 'Unsupported incomplete legacy setup files; preserve and reconcile.'}
       }
-      $oldVersion = Get-MscqrRuntimeVersion $runtime
+      $oldVersion = if($binding.upgradeMode -eq 'OFFLINE_EXISTING_INSTALL'){
+        Assert-MscqrStoppedInstallation
+        Get-MscqrInstalledVersion $live
+      } else {Get-MscqrRuntimeVersion $runtime}
       if ($oldVersion -cne $binding.sourceVersion) { throw 'Previous runtime version mismatch.' }
       $identity = Read-MscqrJson $StateFile
       if ([string]::IsNullOrWhiteSpace($identity.backendUrl) -or
@@ -509,15 +610,24 @@ function Invoke-MscqrUpgradeTransaction {
       $startupHash = (Get-FileHash -LiteralPath $StartupFile -Algorithm SHA256).Hash
       if ($startupHash -ine $binding.startupSha256 -or
           (Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash -ine $binding.wrapperSha256) { throw 'Startup binding mismatch.' }
-      $status = Assert-MscqrRuntime $runtime $oldVersion $StateFile $StartupFile $startupHash
-      if($status.protocolVersion -cne $binding.protocolVersion) {throw 'Authorized connector protocol mismatch.'}
+      $protocol=if($binding.upgradeMode -eq 'OFFLINE_EXISTING_INSTALL'){
+        $marker=Join-Path ([IO.Path]::GetDirectoryName($StateFile)) 'maintenance-fence.json'
+        if(-not(Test-Path -LiteralPath $marker -PathType Leaf) -or (Read-MscqrJson $marker).state -cne 'FENCED') {
+          throw 'Offline maintenance fence is missing.'
+        }
+        [string]$binding.protocolVersion
+      } else {
+        $status = Assert-MscqrRuntime $runtime $oldVersion $StateFile $StartupFile $startupHash
+        if($status.protocolVersion -cne $binding.protocolVersion) {throw 'Authorized connector protocol mismatch.'}
+        [string]$status.protocolVersion
+      }
       $uninstall = Get-MscqrUninstallSnapshot $live
       if(($uninstall | Where-Object name -eq 'DisplayVersion').value -cne $binding.sourceVersion) {throw 'Previous uninstall version mismatch.'}
       if((Get-MscqrUninstallDigest $uninstall) -cne $binding.uninstallRegistrationSha256 -or
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe')).Hash -ine $binding.uninstallerSha256 -or
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.dat')).Hash -ine $binding.uninstallDataSha256) {throw 'Previous uninstaller ownership binding mismatch.'}
       Invoke-MscqrMaintenance $auth 'consume' $binding
-      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); dispatchJournal=$null; staged=''; protocol=$status.protocolVersion; uninstall=$uninstall; localReleaseStarted=$false }
+      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); dispatchJournal=$null; staged=''; protocol=$protocol; uninstall=$uninstall; localReleaseStarted=$false }
       Write-MscqrTransaction $journalPath $journal 'AUTHORIZED'
       $stage = Join-Path $root 'stage'
       Protect-MscqrDirectory $stage

@@ -10,13 +10,14 @@ DECLARE
   printer_row record;
   registration_row record;
   session_row record;
+  maintenance_status jsonb;
 BEGIN
   IF session_user <> '{{APP_ROLE}}' OR p_printer_id !~* '^[0-9a-f-]{36}$'
   THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
 
   -- The existing function validates the capability, actor and manufacturer
   -- scope, and establishes the transaction-local printing RLS context.
-  PERFORM app_rls.printing_printer_administration(
+  maintenance_status:=app_rls.printing_printer_administration(
     p_capability,'printing-printer-admin',p_request_id,'MAINTENANCE_STATUS',p_printer_id,'{}'::jsonb);
   IF current_setting('app.printing_role',true)<>'MANUFACTURER_ADMIN'
   THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
@@ -44,11 +45,25 @@ BEGIN
   PERFORM set_config('app.printing_registration_id',registration_row.id,true),
     set_config('app.printing_operation','printing-readiness',true);
   SELECT s.metadata->>'connectorVersion' AS "connectorVersion",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",s."selectedPrinterId"
-    INTO STRICT session_row FROM public."PrinterAgentSession" s
+    INTO session_row FROM public."PrinterAgentSession" s
     WHERE s."registrationId"=registration_row.id AND s."connectionState"='CONNECTED'
       AND s."revokedAt" IS NULL AND s."expiresAt">transaction_timestamp()
       AND s."lastSignedHeartbeatAt">transaction_timestamp()-interval '35 seconds'
     ORDER BY s."lastSignedHeartbeatAt" DESC LIMIT 1;
+  IF session_row."connectorVersion" IS NULL AND maintenance_status->>'state'='DISPATCH_FENCED' AND
+     NOT EXISTS (SELECT 1 FROM public."PrinterAgentSession" active
+       WHERE active."registrationId"=registration_row.id AND active."connectionState"='CONNECTED'
+         AND active."revokedAt" IS NULL AND active."expiresAt">transaction_timestamp())
+  THEN
+    -- Only the certified stopped 2026.11.6.2 path may use a historical
+    -- signed session. A fresh challenge and registered-key proof remain required.
+    SELECT s.metadata->>'connectorVersion' AS "connectorVersion",s."agentId",s."deviceFingerprint",
+      s."publicKeyFingerprint",s."selectedPrinterId"
+      INTO session_row FROM public."PrinterAgentSession" s
+      WHERE s."registrationId"=registration_row.id AND s."connectionState"='DISCONNECTED'
+        AND s.metadata->>'connectorVersion'='2026.11.6.2'
+      ORDER BY s."lastSignedHeartbeatAt" DESC LIMIT 1;
+  END IF;
   IF session_row."agentId" IS DISTINCT FROM registration_row."agentId" OR
      session_row."deviceFingerprint" IS DISTINCT FROM registration_row."deviceFingerprint" OR
      session_row."publicKeyFingerprint" IS DISTINCT FROM encode(sha256(convert_to(registration_row."publicKeyPem",'UTF8')),'hex') OR
