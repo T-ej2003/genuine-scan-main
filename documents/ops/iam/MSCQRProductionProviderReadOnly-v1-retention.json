@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "kind": "BOUNDED_PROVIDER_READONLY_RETENTION_POLICY_NOT_EXECUTION_AUTHORIZATION",
+  "policyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+  "retireVersionId": "v1",
+  "retainNativeVersions": ["v2", "v3", "v4", "v5"],
+  "preserveDefaultVersionId": "v5",
+  "versionDocumentSha256": {
+    "v1": "a4e547a9882a2bd64c4f68db9643512a1e4eeea5bab9034b0b28c447ac496a95",
+    "v2": "25a4868558c2f31aa47b82f702aa7a97d263b3e3c9e3736581ccda63d6c5514a",
+    "v3": "ed51435f3133d201486671a582552c6f2f9dffd5e7de7b222420d67f4781a32e",
+    "v4": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade",
+    "v5": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+  },
+  "evidenceRunId": "41515673270",
+  "evidenceArtifactSha256": "28d102e7c4008f753bb73c2b7353cd7b303d84e45385b31c97fba96f6bb6e8b5",
+  "retentionDecision": "Owner approved bounded v1 retirement policy after authenticated export; no IAM execution authorized.",
+  "archiveBeforeDeletion": "All five complete native version documents and metadata; protected write-once journal and exact readback required.",
+  "historicalReceipts": "Preserve original immutable bytes and inventories; never rewrite historical completion evidence.",
+  "rollback": "Archive reconstruction requires a separately reviewed and authorized new version; deleted version IDs cannot be restored.",
+  "executionAuthorization": "Fresh exact-source preparation, production approval, one-use reservation and verified executor installation required. This document authorizes no writes."
+}

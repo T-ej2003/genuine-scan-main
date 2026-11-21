@@ -210,6 +210,7 @@ const PROVIDER_READONLY_RECONCILIATION_CAPABILITIES = Object.freeze([
   ["provider-readonly-reconciliation-list-journal-absence", "s3:ListBucket", [`arn:aws:s3:::${PROVIDER_READONLY_RECONCILIATION.journalBucket}`], false],
   ["provider-readonly-reconciliation-write-journal", "s3:PutObject", [`arn:aws:s3:::${PROVIDER_READONLY_RECONCILIATION.journalBucket}/${PROVIDER_READONLY_RECONCILIATION.journalPrefix}*`], true],
   ["provider-readonly-reconciliation-create-policy-version", "iam:CreatePolicyVersion", [PROVIDER_READONLY_RECONCILIATION.policyArn], true],
+  ["provider-readonly-retire-exact-v1", "iam:DeletePolicyVersion", [PROVIDER_READONLY_RECONCILIATION.policyArn], true],
 ]);
 
 const WORKSPACE_STATE_RECONCILIATION_CAPABILITIES = Object.freeze([
@@ -639,7 +640,7 @@ export function discoverAwsCliActions() {
       } else if (sourceFile === "scripts/aws/production-provider-readonly-policy-reconciliation.mjs") {
         throw new Error("ProviderReadOnly reconciliation core must not issue AWS commands outside its target-locked runner.");
       } else if (sourceFile === "scripts/aws/reconcile-production-provider-readonly-policy.mjs") {
-        const id = ({ "sts:GetCallerIdentity": "provider-readonly-reconciliation-identify", "iam:GetPolicy": "provider-readonly-reconciliation-read-policy", "iam:GetPolicyVersion": "provider-readonly-reconciliation-read-policy-version", "iam:ListPolicyVersions": "provider-readonly-reconciliation-list-policy-versions", "iam:ListEntitiesForPolicy": "provider-readonly-reconciliation-list-policy-entities", "s3:GetObject": "provider-readonly-reconciliation-read-journal", "s3:ListBucket": "provider-readonly-reconciliation-list-journal-absence", "s3:PutObject": "provider-readonly-reconciliation-write-journal", "iam:CreatePolicyVersion": "provider-readonly-reconciliation-create-policy-version" })[action];
+        const id = ({ "sts:GetCallerIdentity": "provider-readonly-reconciliation-identify", "iam:GetPolicy": "provider-readonly-reconciliation-read-policy", "iam:GetPolicyVersion": "provider-readonly-reconciliation-read-policy-version", "iam:ListPolicyVersions": "provider-readonly-reconciliation-list-policy-versions", "iam:ListEntitiesForPolicy": "provider-readonly-reconciliation-list-policy-entities", "s3:GetObject": "provider-readonly-reconciliation-read-journal", "s3:ListBucket": "provider-readonly-reconciliation-list-journal-absence", "s3:PutObject": "provider-readonly-reconciliation-write-journal", "iam:CreatePolicyVersion": "provider-readonly-reconciliation-create-policy-version", "iam:DeletePolicyVersion": "provider-readonly-retire-exact-v1" })[action];
         if (!id) throw new Error("ProviderReadOnly reconciliation uses an unreviewed AWS action.");
         const capability = PROVIDER_READONLY_RECONCILIATION_CAPABILITIES.find(([candidate]) => candidate === id);
         const executorCall = { sourceFile, sourceFunction: id, phase: "provider-readonly-policy-reconciliation", identity: "INITIAL_ACTIVATION_RECONCILER", action, resources: capability[2], capabilityId: id };

@@ -170,6 +170,7 @@ export function createProviderReadonlyPreparation({ sourceSha, liveState, desire
 }
 
 export function assertProviderReadonlyPreparation(value, { sourceSha, desired = readProviderReadonlyDesiredPolicy(), now = new Date(), allowExpired = false } = {}) {
+  if (value?.operation === PROVIDER_READONLY_RETIREMENT_OPERATION) return assertProviderReadonlyRetirementPreparation(value, {sourceSha, desired, now, allowExpired});
   assertCanonicalDesired(desired);
   const semanticDelta = transitionDelta(desired, value?.currentDefaultDocumentSha256);
   exactKeys(value, PREPARATION_FIELDS, "ProviderReadOnly preparation");
@@ -190,7 +191,7 @@ export function createProviderReadonlyAuthorization({ preparation, protectedEnvi
   assertProductionEnvironmentApprovalFreshness(protectedEnvironmentApprovalEvidence, { now });
   if (protectedEnvironmentApprovalEvidence.schemaVersion !== 3 || protectedEnvironmentApprovalEvidence.workflowRef !== PROVIDER_READONLY_RECONCILIATION.workflowRef) throw new Error("ProviderReadOnly authorization requires its dedicated protected workflow.");
   const approvedBy = assertProductionEnvironmentActualReviewer(protectedEnvironmentApprovalEvidence, { sourceSha: checked.sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, executionActor: protectedEnvironmentApprovalEvidence.executionActor });
-  const body = { schemaVersion: 1, kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_AUTHORIZATION", operation: checked.operation, operationId: checked.operationId, sourceSha: checked.sourceSha, account: checked.account, targetPolicyArn: checked.targetPolicyArn, sourcePolicySha256: checked.sourcePolicySha256, currentDefaultVersionId: checked.currentDefaultVersionId, currentDefaultDocumentSha256: checked.currentDefaultDocumentSha256, desiredDocumentSha256: checked.desiredDocumentSha256, semanticDeltaSha256: checked.semanticDeltaSha256, versionInventorySha256: checked.versionInventorySha256, deletionRequired: false, deletionCandidate: null, attachmentTopologySha256: checked.attachmentTopologySha256, expectedWritePlanSha256: checked.expectedWritePlanSha256, preparationSha256: checked.preparationSha256, expiresAt: checked.expiresAt, approvedBy, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256, authorizationConsumed: false };
+  const body = { schemaVersion: 1, kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_AUTHORIZATION", operation: checked.operation, operationId: checked.operationId, sourceSha: checked.sourceSha, account: checked.account, targetPolicyArn: checked.targetPolicyArn, sourcePolicySha256: checked.sourcePolicySha256, currentDefaultVersionId: checked.currentDefaultVersionId, currentDefaultDocumentSha256: checked.currentDefaultDocumentSha256, desiredDocumentSha256: checked.desiredDocumentSha256, semanticDeltaSha256: checked.semanticDeltaSha256, versionInventorySha256: checked.versionInventorySha256, deletionRequired: checked.deletionRequired, deletionCandidate: checked.deletionCandidate, attachmentTopologySha256: checked.attachmentTopologySha256, expectedWritePlanSha256: checked.expectedWritePlanSha256, preparationSha256: checked.preparationSha256, expiresAt: checked.expiresAt, approvedBy, protectedEnvironmentApprovalEvidence, protectedEnvironmentApprovalEvidenceSha256: protectedEnvironmentApprovalEvidence.evidenceSha256, authorizationConsumed: false };
   return Object.freeze({ ...body, authorizationSha256: sha256(body) });
 }
 
@@ -198,7 +199,7 @@ export function assertProviderReadonlyAuthorization(value, preparation, { source
   exactKeys(value, AUTHORIZATION_FIELDS, "ProviderReadOnly authorization");
   const checked = assertProviderReadonlyPreparation(preparation, { sourceSha, now, allowExpired });
   const body = { ...value }; delete body.authorizationSha256;
-  if (!value || value.schemaVersion !== 1 || value.kind !== "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_AUTHORIZATION" || value.operation !== checked.operation || value.operationId !== checked.operationId || value.sourceSha !== checked.sourceSha || value.account !== checked.account || value.targetPolicyArn !== checked.targetPolicyArn || value.sourcePolicySha256 !== checked.sourcePolicySha256 || value.currentDefaultVersionId !== checked.currentDefaultVersionId || value.currentDefaultDocumentSha256 !== checked.currentDefaultDocumentSha256 || value.desiredDocumentSha256 !== checked.desiredDocumentSha256 || value.semanticDeltaSha256 !== checked.semanticDeltaSha256 || value.versionInventorySha256 !== checked.versionInventorySha256 || value.deletionRequired !== false || value.deletionCandidate !== null || value.attachmentTopologySha256 !== checked.attachmentTopologySha256 || value.expectedWritePlanSha256 !== checked.expectedWritePlanSha256 || value.preparationSha256 !== checked.preparationSha256 || value.expiresAt !== checked.expiresAt || value.authorizationConsumed !== false || !SHA256.test(value.authorizationSha256 || "") || value.authorizationSha256 !== sha256(body)) throw new Error("ProviderReadOnly authorization binding is invalid.");
+  if (!value || value.schemaVersion !== 1 || value.kind !== "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_AUTHORIZATION" || value.operation !== checked.operation || value.operationId !== checked.operationId || value.sourceSha !== checked.sourceSha || value.account !== checked.account || value.targetPolicyArn !== checked.targetPolicyArn || value.sourcePolicySha256 !== checked.sourcePolicySha256 || value.currentDefaultVersionId !== checked.currentDefaultVersionId || value.currentDefaultDocumentSha256 !== checked.currentDefaultDocumentSha256 || value.desiredDocumentSha256 !== checked.desiredDocumentSha256 || value.semanticDeltaSha256 !== checked.semanticDeltaSha256 || value.versionInventorySha256 !== checked.versionInventorySha256 || value.deletionRequired !== checked.deletionRequired || canonicalJson(value.deletionCandidate) !== canonicalJson(checked.deletionCandidate) || value.attachmentTopologySha256 !== checked.attachmentTopologySha256 || value.expectedWritePlanSha256 !== checked.expectedWritePlanSha256 || value.preparationSha256 !== checked.preparationSha256 || value.expiresAt !== checked.expiresAt || value.authorizationConsumed !== false || !SHA256.test(value.authorizationSha256 || "") || value.authorizationSha256 !== sha256(body)) throw new Error("ProviderReadOnly authorization binding is invalid.");
   assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository });
   if (!allowExpired) assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
   if (value.protectedEnvironmentApprovalEvidence.workflowRef !== PROVIDER_READONLY_RECONCILIATION.workflowRef || value.protectedEnvironmentApprovalEvidenceSha256 !== value.protectedEnvironmentApprovalEvidence.evidenceSha256 || value.approvedBy !== value.protectedEnvironmentApprovalEvidence.actualApproval?.userLogin) throw new Error("ProviderReadOnly approval provenance binding is invalid.");
@@ -239,7 +240,7 @@ export function assertProviderReadonlyAuthorizationProvenance(value, { authoriza
 }
 
 export const providerReadonlyJournalKey = (operationId, record) => {
-  if (!SHA256.test(operationId || "") || !["reservation.json", "write-attempt.json", "terminal.json"].includes(record)) throw new Error("ProviderReadOnly journal key is invalid.");
+  if (!SHA256.test(operationId || "") || !["reservation.json", "write-attempt.json", "terminal.json", "version-archive.json"].includes(record)) throw new Error("ProviderReadOnly journal key is invalid.");
   return `${PROVIDER_READONLY_RECONCILIATION.journalPrefix}${operationId}/${record}`;
 };
 
@@ -317,6 +318,7 @@ const classifyProviderReadonlyConvergence = (observed, preparation, expectedVers
 };
 
 export async function executeProviderReadonlyReconciliation({ sourceSha, preparation, authorization, provenance, readLiveState, createPolicyVersion, journal, reauthenticateSource, now = () => new Date(), sleep = providerReadonlyProductionSleep } = {}) {
+  if (preparation?.operation === PROVIDER_READONLY_RETIREMENT_OPERATION) throw new Error("Retirement cannot enter the CreatePolicyVersion executor.");
   if (![readLiveState, createPolicyVersion, reauthenticateSource, sleep].every((value) => typeof value === "function") || !journal) throw new Error("ProviderReadOnly executor adapters are required.");
   const clock = typeof now === "function" ? now : () => now;
   assertProviderReadonlyAuthorization(authorization, preparation, { sourceSha, now: clock(), allowExpired: true });
@@ -388,4 +390,99 @@ export async function executeProviderReadonlyReconciliation({ sourceSha, prepara
   const completed = await journal.create(authorization, "terminal.json", terminalBody);
   if (!completed) throw new Error("ProviderReadOnly terminal consumption raced another executor.");
   return Object.freeze({ status: "COMPLETED", transactionState: "COMPLETED", reservationMatch, iamWriteCount: 1, postState: post, terminal: completed });
+}
+
+export const PROVIDER_READONLY_RETIREMENT_OPERATION = 'PRODUCTION_PROVIDER_READONLY_RETIRE_V1';
+export function readProviderReadonlyRetentionPolicy() {
+  return JSON.parse(fs.readFileSync(path.join(root,'documents/ops/iam/MSCQRProductionProviderReadOnly-v1-retention.json'),'utf8'));
+}
+export function authenticateProviderReadonlyVersionArchive(archive) {
+  const policy=readProviderReadonlyRetentionPolicy();
+  exactKeys(archive,['policyArn','versions'],'Policy version archive');
+  if(archive.policyArn!==PROVIDER_READONLY_RECONCILIATION.policyArn || !Array.isArray(archive.versions) || archive.versions.length!==5)throw new Error('Retirement requires all five version documents.');
+  if(canonicalJson(archive.versions.map(v=>v.versionId))!==canonicalJson(Object.keys(policy.versionDocumentSha256)))throw new Error('Retirement inventory is not exact v1-v5.');
+  for(const v of archive.versions){
+    exactKeys(v,['versionId','isDefault','createDate','document'],'Archived version');
+    iso(v.createDate,'Version creation date');
+    if(v.isDefault!==(v.versionId==='v5') || sha256(normalizeIamPolicyDocument(v.document,'Archived policy'))!==policy.versionDocumentSha256[v.versionId])throw new Error('Archived policy version or default changed.');
+  }
+  return archive;
+}
+const retirementBody=({sourceSha,state,archiveSha256,preparedAt,desired})=>{
+  const body=preparationBody({sourceSha,state,desired,preparedAt});
+  const policy=readProviderReadonlyRetentionPolicy();
+  const candidate={versionId:'v1',documentSha256:policy.versionDocumentSha256.v1,archiveSha256,retentionPolicySha256:sha256(policy)};
+  const write=[{action:'iam:DeletePolicyVersion',policyArn:PROVIDER_READONLY_RECONCILIATION.policyArn,versionId:'v1',documentSha256:candidate.documentSha256,archiveSha256}];
+  return {...body,operation:PROVIDER_READONLY_RETIREMENT_OPERATION,operationId:sha256({operation:PROVIDER_READONLY_RETIREMENT_OPERATION,predecessorOperationId:body.operationId,candidate}),desiredDocumentSha256:state.documentSha256,semanticDelta:{retireVersion:candidate},semanticDeltaSha256:sha256({retireVersion:candidate}),deletionRequired:true,deletionCandidate:candidate,deletionPolicySource:'EXACT_V1_ARCHIVE_BEFORE_DELETE',expectedWritePlan:write,expectedWritePlanSha256:sha256(write)};
+};
+export function createProviderReadonlyRetirementPreparation({sourceSha,liveState,archive,desired=readProviderReadonlyDesiredPolicy(),preparedAt=new Date().toISOString()}={}) {
+  if(!SHA40.test(sourceSha||''))throw new Error('Retirement source is invalid.');
+  const state=authenticateProviderReadonlyLiveState(liveState,{desired,allowPostState:false});
+  authenticateProviderReadonlyVersionArchive(archive);
+  if(state.defaultVersionId!=='v5'||state.documentSha256!==readProviderReadonlyRetentionPolicy().versionDocumentSha256.v5||canonicalJson(state.versions)!==canonicalJson(archive.versions.map(({versionId,isDefault})=>({versionId,isDefault}))))throw new Error('Retirement native inventory changed.');
+  const body=retirementBody({sourceSha,state,archiveSha256:sha256(archive),preparedAt,desired});
+  return Object.freeze({...body,preparationSha256:sha256(body)});
+}
+export function assertProviderReadonlyRetirementPreparation(value,{sourceSha,desired=readProviderReadonlyDesiredPolicy(),now=new Date(),allowExpired=false}={}) {
+  assertCanonicalDesired(desired); exactKeys(value,PREPARATION_FIELDS,'Retirement preparation');
+  exactKeys(value.deletionCandidate,['versionId','documentSha256','archiveSha256','retentionPolicySha256'],'Retirement candidate');
+  const policy=readProviderReadonlyRetentionPolicy();
+  if(!SHA40.test(sourceSha||'')||!SHA256.test(value.deletionCandidate.archiveSha256||'')||value.currentDefaultVersionId!=='v5'||value.currentDefaultDocumentSha256!==policy.versionDocumentSha256.v5)throw new Error('Retirement source/default binding invalid.');
+  const state=authenticateProviderReadonlyLiveState({policyArn:value.targetPolicyArn,defaultVersionId:'v5',document:desired.stagedPredecessorDocument,versions:value.versionInventory,attachedRoles:value.attachmentTopology.roles,attachedUsers:value.attachmentTopology.users,attachedGroups:value.attachmentTopology.groups,permissionsBoundaryUsageCount:value.attachmentTopology.permissionsBoundaryUsageCount},{desired,allowPostState:false});
+  if(canonicalJson(state.versions)!==canonicalJson(Object.keys(policy.versionDocumentSha256).map(versionId=>({versionId,isDefault:versionId==='v5'}))))throw new Error('Retirement version inventory is invalid.');
+  const body=retirementBody({sourceSha,state,archiveSha256:value.deletionCandidate.archiveSha256,preparedAt:value.createdAt,desired});
+  if(canonicalJson(value)!==canonicalJson({...body,preparationSha256:sha256(body)}))throw new Error('Retirement preparation binding invalid.');
+  const current=new Date(now),created=iso(value.createdAt,'Retirement creation'),expires=iso(value.expiresAt,'Retirement expiry');
+  if(!Number.isFinite(current.getTime())||current<created||(!allowExpired&&current>expires))throw new Error('Retirement preparation expired.');
+  return value;
+}
+export async function executeProviderReadonlyRetirement({sourceSha,preparation,authorization,provenance,readLiveState,readVersionArchive,deletePolicyVersion,journal,reauthenticateSource,now=()=>new Date(),sleep=providerReadonlyProductionSleep}={}) {
+  if(preparation?.operation!==PROVIDER_READONLY_RETIREMENT_OPERATION||![readLiveState,readVersionArchive,deletePolicyVersion,reauthenticateSource,sleep].every(v=>typeof v==='function')||!journal)throw new Error('Retirement requires its isolated adapters.');
+  const clock=()=>typeof now==='function'?now():now;
+  assertProviderReadonlyAuthorization(authorization,preparation,{sourceSha,now:clock(),allowExpired:true});assertProviderReadonlyAuthorizationProvenance(provenance,{authorization,sourceSha});
+  const desired=readProviderReadonlyDesiredPolicy();
+  const live=async(post=false)=>{
+    reauthenticateSource();const s=authenticateProviderReadonlyLiveState(await readLiveState(),{desired,allowPostState:false});
+    const expected=preparation.versionInventory.filter(v=>!post||v.versionId!=='v1');
+    if(s.defaultVersionId!=='v5'||s.documentSha256!==preparation.currentDefaultDocumentSha256||canonicalJson(s.versions)!==canonicalJson(expected)||s.attachmentTopologySha256!==preparation.attachmentTopologySha256)throw new Error('Retirement native state is not the exact approved inventory.');
+    return s;
+  };
+  const identity=kind=>journalIdentity({kind,authorization,provenance,preparation,createdAt:preparation.createdAt});
+  const validateRecord=(record,expected)=>{const {recordSha256,...body}=record||{};if(recordSha256!==sha256(body)||canonicalJson(body)!==canonicalJson(expected))throw new Error('Retirement durable evidence mismatch.');};
+  const archiveExpected=archive=>({schemaVersion:1,kind:'PRODUCTION_PROVIDER_READONLY_VERSION_ARCHIVE',operationId:preparation.operationId,sourceSha,archiveSha256:preparation.deletionCandidate.archiveSha256,archive});
+  let archiveRecord=await journal.read(authorization,'version-archive.json');
+  if(archiveRecord){authenticateProviderReadonlyVersionArchive(archiveRecord.archive);if(sha256(archiveRecord.archive)!==preparation.deletionCandidate.archiveSha256)throw new Error('Archive checksum changed.');validateRecord(archiveRecord,archiveExpected(archiveRecord.archive));}
+  const finish=async()=>{
+    if(!archiveRecord)throw new Error('Verified durable archive is missing.');
+    const post=await live(true);
+    const body={...identity('PRODUCTION_PROVIDER_READONLY_RETIREMENT_TERMINAL'),retiredVersionId:'v1',archiveSha256:preparation.deletionCandidate.archiveSha256,postDefaultVersionId:'v5',postVersionInventorySha256:post.versionInventorySha256,status:'COMPLETED',authorizationConsumed:true};
+    const old=await journal.read(authorization,'terminal.json');
+    if(old){validateRecord(old,body);return {status:'CONSUMED',iamWriteCount:0,retiredVersionId:'v1',defaultVersionId:'v5'};}
+    if(!await journal.create(authorization,'terminal.json',body))throw new Error('Retirement completion raced another executor.');
+    return {status:'COMPLETED',iamWriteCount:0,retiredVersionId:'v1',defaultVersionId:'v5',archiveSha256:preparation.deletionCandidate.archiveSha256};
+  };
+  const attempt=await journal.read(authorization,'write-attempt.json');
+  if(attempt){validateRecord(attempt,identity('PRODUCTION_PROVIDER_READONLY_RETIREMENT_WRITE_ATTEMPT'));try{return await finish();}catch(cause){throw Object.assign(new Error('Retirement outcome uncertain: read-only investigation required; DeletePolicyVersion will not be retried.',{cause}),{mutationOutcome:'DELETE_OUTCOME_AMBIGUOUS'});}}
+  if(await journal.read(authorization,'terminal.json'))throw new Error('Retirement completion without write-attempt.');
+  const fresh=()=>{reauthenticateSource();assertProviderReadonlyAuthorization(authorization,preparation,{sourceSha,now:clock()});};
+  fresh();await live();
+  const reservation=identity('PRODUCTION_PROVIDER_READONLY_RETIREMENT_RESERVATION');const saved=await journal.read(authorization,'reservation.json');
+  if(saved)assertJournalRecord(saved,reservation,reservation.kind,{allowRefreshedEvidence:true});else if(!await journal.create(authorization,'reservation.json',reservation))throw new Error('Retirement reservation raced another executor.');
+  if(!archiveRecord){
+    const archive=authenticateProviderReadonlyVersionArchive(await readVersionArchive());
+    if(sha256(archive)!==preparation.deletionCandidate.archiveSha256)throw new Error('Live archive differs from approved preparation.');
+    fresh();if(!await journal.create(authorization,'version-archive.json',archiveExpected(archive)))throw new Error('Retirement archive reservation raced another executor.');
+    archiveRecord=await journal.read(authorization,'version-archive.json');validateRecord(archiveRecord,archiveExpected(archive));
+  }
+  fresh();await live();
+  if(sha256(authenticateProviderReadonlyVersionArchive(await readVersionArchive()))!==preparation.deletionCandidate.archiveSha256)throw new Error('Native version documents changed before deletion.');
+  fresh();if(!await journal.create(authorization,'write-attempt.json',identity('PRODUCTION_PROVIDER_READONLY_RETIREMENT_WRITE_ATTEMPT')))throw new Error('Retirement write attempt raced another executor.');
+  fresh();await live();fresh();
+  // No retries: a lost response is reconciled only from exact retained state.
+  let failure;try{await deletePolicyVersion({PolicyArn:PROVIDER_READONLY_RECONCILIATION.policyArn,VersionId:'v1'});}catch(error){failure=error;}
+  for(let index=0;index<6;index++){
+    try{const result=await finish();return {...result,iamWriteCount:1};}catch(error){failure=error;}
+    if(index<5)await sleep(PROVIDER_READONLY_RECONCILIATION.postWriteReadDelaysMs[index]);
+  }
+  throw Object.assign(new Error('Retirement outcome uncertain; preserve archive and attempt, investigate without retrying deletion.',{cause:failure}),{mutationOutcome:'DELETE_OUTCOME_AMBIGUOUS'});
 }

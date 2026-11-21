@@ -113,6 +113,12 @@
       "Effect": "Allow",
       "Action": "iam:PutRolePolicy",
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+    },
+    {
+      "Sid": "RetireExactProviderReadOnlyPolicyVersion",
+      "Effect": "Allow",
+      "Action": "iam:DeletePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
     }
   ]
 }
