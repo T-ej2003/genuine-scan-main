@@ -13,13 +13,12 @@ export function InstallerUpgradeStatus({ pairingId }: { pairingId: string | null
     if (!pairingId) return;
     if (!/^[0-9a-f-]{36}$/i.test(pairingId)) { setState("Invalid installer pairing."); return; }
     let cancelled = false;
-    const abort = new AbortController();
-    void authorizeInstallerUpgrade(pairingId, abort.signal).then(() => {
+    void authorizeInstallerUpgrade(pairingId).then(() => {
       if (!cancelled) setState(success);
     }).catch((error: Error) => {
       if (!cancelled) setState(error.message || "Upgrade authorization failed. Your existing installation is unchanged.");
     });
-    return () => { cancelled = true; abort.abort(); };
+    return () => { cancelled = true; };
   }, [pairingId]);
   if (!pairingId) return null;
   return <Alert>

@@ -77,7 +77,7 @@ export const protectUpgradeUnknownAttempts = (input: {
 `);
 
 export const redeemPrintingUpgradeHandoff = (input: {
-  operation: "CONSUME" | "VERIFY" | "REVOKE"; tokenHash: string;
+  operation: "CONSUME" | "VERIFY" | "REVOKE" | "RELEASE_STATUS"; tokenHash: string;
   binding: Record<string, string | null>;
 }) => oneJson(prisma, Prisma.sql`
   SELECT app_rls.printing_upgrade_handoff(

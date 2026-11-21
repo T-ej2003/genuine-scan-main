@@ -29,6 +29,7 @@ let unresolved = false;
 let protectedEntries = [];
 let protectedJournalSha;
 let failHandoffStore = false;
+let redisAvailable = true;
 let authorizations = 0;
 let authorizedTokenHash;
 let runtimeVersion = attempt.sourceVersion;
@@ -37,7 +38,7 @@ const redis = { get: async key => records.get(key) || null,
     if (nx === 'NX' && records.has(key)) return null;
     records.set(key, value); return 'OK'; },
   eval: async (_script, _count, key) => { const value = records.get(key) || null; records.delete(key); return value; } };
-mock('services/redisService.js', { getRedisClient: async () => redis });
+mock('services/redisService.js', { getRedisClient: async () => redisAvailable ? redis : null });
 mock('services/auth/cookieTokenProtectionService.js', { sealCookieToken: value => `sealed:${value}`,
   openCookieToken: value => value.startsWith('sealed:') ? value.slice(7) : null });
 mock('services/connectorReleaseService.js', { getConnectorReleaseManifest: () => ({ releases: [{ version: attempt.targetVersion,
@@ -49,8 +50,14 @@ mock('controllers/connectorUpgradeDeviceProofController.js', { trustedBinding: a
   publicKeyPem: publicPem, sourceVersion: runtimeVersion,
 }) });
 let consumed = false;
+let released = false;
 let revoked = false;
 mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingUpgradeHandoff: async input => {
+  if (input.operation === 'RELEASE_STATUS') {
+    if (!released || input.tokenHash !== authorizedTokenHash || JSON.stringify(input.binding) !== JSON.stringify(binding))
+      throw new Error('UPGRADE_HANDOFF_DENIED');
+    return { released: true, dispatchFenced: false, binding: input.binding };
+  }
   if (revoked || input.tokenHash !== authorizedTokenHash || JSON.stringify(input.binding) !== JSON.stringify(binding))
     throw new Error('UPGRADE_HANDOFF_DENIED');
   if (input.operation === 'REVOKE') { revoked = true; return { revoked: true, dispatchFenced: true }; }
@@ -67,7 +74,10 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
     supersededUnsubmitted: 0,
     protectedItemIds: protectedEntries.map(entry => entry.printItemId) };
 }, administerPrintingPrinter: async input => {
-  if (input.operation === 'MAINTENANCE_RELEASE') return { authorized: true, dispatchFenced: false, binding: input.payload.evidence.binding };
+  if (input.operation === 'MAINTENANCE_RELEASE') {
+    released = true;
+    return { authorized: true, dispatchFenced: false, binding: input.payload.evidence.binding };
+  }
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
     workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : protectedEntries.map(entry => ({
       id: entry.printItemId, state: 'FROZEN', pipelineState: 'NEEDS_OPERATOR_ACTION',
@@ -272,10 +282,12 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const release = response();
     await controller.requestConnectorMaintenance(request({ action: 'release', evidence: postInstall.body.evidence }), release);
     assert.equal(release.code, 200);
+    redisAvailable = false;
     const releaseStatus = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'release-status', token, binding }), releaseStatus);
     assert.equal(releaseStatus.code, 200);
     assert.equal(releaseStatus.body.data.dispatchFenced, false);
+    redisAvailable = true;
     const afterConsumption = response();
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), afterConsumption);
     assert.equal(afterConsumption.code, 409, 'consumed authorization cannot be reissued');

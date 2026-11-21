@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
 import { administerPrintingPrinter, protectUpgradeUnknownAttempts, redeemPrintingUpgradeHandoff } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { issueConnectorIsolationEvidence, verifyConnectorIsolationEvidence } from "../services/connectorMaintenanceEvidence";
-import { MAX_MAINTENANCE_CHECKPOINT_CHARS, upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradePairingKey, upgradePairingResultKey, upgradeProofKey, upgradeReleaseKey, verifyPostInstallStatement } from "../services/connectorUpgradeDeviceProof";
+import { MAX_MAINTENANCE_CHECKPOINT_CHARS, upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradePairingKey, upgradePairingResultKey, upgradeProofKey, verifyPostInstallStatement } from "../services/connectorUpgradeDeviceProof";
 import { verifyMaintenanceCheckpoint } from "../services/connectorUpgradeDeviceProof";
 import { trustedBinding } from "./connectorUpgradeDeviceProofController";
 import { getConnectorReleaseManifest } from "../services/connectorReleaseService";
@@ -321,9 +321,6 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       const released = payload.evidence as { tokenHash?: string; binding?: Record<string, string> };
       if (data?.authorized !== true || data?.dispatchFenced !== false ||
           !/^[a-f0-9]{64}$/.test(String(released.tokenHash || ""))) throw new Error("POSTINSTALL_RELEASE_UNVERIFIED");
-      const redis = await getRedisClient();
-      if (!redis || await redis.set(upgradeReleaseKey(released.tokenHash!),
-        JSON.stringify({ binding: released.binding }), "PX", 900_000) !== "OK") throw new Error("POSTINSTALL_RELEASE_RECEIPT_UNAVAILABLE");
     }
     res.setHeader("Cache-Control", "no-store");
     return res.json({ success: true, data: { ...data, ...(token ? { token } : {}) } });
@@ -347,16 +344,15 @@ export const redeemConnectorMaintenanceHandoff = async (req: AuthRequest, res: R
     const input = z.object({ action: z.enum(["consume", "verify", "revoke", "release-status"]), token: z.string().regex(/^[a-f0-9]{64}$/),
       binding: maintenanceBinding }).strict().parse(req.body);
     const tokenHash = createHash("sha256").update(input.token).digest("hex");
-    const redis = await getRedisClient();
-    if (!redis) throw new Error("CONNECTOR_UPGRADE_HANDOFF_INVALID");
     if (input.action === "release-status") {
-      const receipt = await redis.get(upgradeReleaseKey(tokenHash));
-      const released = receipt && JSON.parse(receipt);
-      if (!released?.binding || Object.keys(released.binding).length !== Object.keys(input.binding).length ||
-          Object.entries(released.binding).some(([key, value]) => input.binding[key] !== value))
+      const released = await redeemPrintingUpgradeHandoff({ operation: "RELEASE_STATUS", tokenHash, binding: input.binding });
+      if (released?.released !== true || released?.dispatchFenced !== false ||
+          Object.keys(released.binding || {}).length !== Object.keys(input.binding).length ||
+          Object.entries(released.binding || {}).some(([key, value]) => input.binding[key] !== value))
         throw new Error("POSTINSTALL_RELEASE_NOT_CONFIRMED");
-      return res.json({ success: true, data: { released: true, dispatchFenced: false, binding: released.binding } });
+      return res.json({ success: true, data: released });
     }
+    const redis = await getRedisClient();
     const raw = redis && await redis.get(upgradeHandoffKey(tokenHash));
     if (!raw) throw new Error("CONNECTOR_UPGRADE_HANDOFF_INVALID");
     const stored = JSON.parse(raw);

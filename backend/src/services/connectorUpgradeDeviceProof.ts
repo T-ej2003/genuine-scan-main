@@ -26,7 +26,6 @@ export const upgradeHandoffKey = (tokenHash: string) => `connector-upgrade:hando
 export const upgradeAuthorizationKey = (evidenceSha256: string) => `connector-upgrade:authorization:${evidenceSha256}`;
 export const upgradePairingKey = (id: string) => `connector-upgrade:pairing:${id}`;
 export const upgradePairingResultKey = (id: string) => `connector-upgrade:pairing-result:${id}`;
-export const upgradeReleaseKey = (tokenHash: string) => `connector-upgrade:released:${tokenHash}`;
 
 export const createUpgradeDeviceChallenge = (binding: Omit<UpgradeDeviceChallenge, "purpose" | "challengeId" | "nonce" | "expiresAt">, now = Date.now()): UpgradeDeviceChallenge =>
   upgradeChallengeSchema.parse({ ...binding, purpose, challengeId: randomUUID(), nonce: randomBytes(32).toString("base64url"),

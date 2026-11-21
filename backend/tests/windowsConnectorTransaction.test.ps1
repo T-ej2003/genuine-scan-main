@@ -72,13 +72,13 @@ function Wait-MscqrTrustedSession {
   if($script:injection -eq 'backend-session') {throw 'fixture backend session unavailable'}
   return [pscustomobject]@{websocket=[pscustomobject]@{connected=$true;registrationId=$Journal.binding.registrationId}}
 }
-function Wait-MscqrBackendRelease {param($Auth,$Binding,$Attempts=12) return $false}
+function Wait-MscqrBackendRelease {param($Auth,$Binding,$Attempts=12) return $script:backendReleased}
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
   foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','backup-flush','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
-    $script:injection=$scenario; $script:consumed=$false; $script:processes=1
+    $script:injection=$scenario; $script:consumed=$false; $script:processes=1; $script:backendReleased=$false
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
     New-Item -ItemType Directory -Path "$live\bin","$payload\bin" -Force | Out-Null
@@ -197,6 +197,15 @@ try {
         if($failed){throw 'successful activation failed'}
         Invoke-MscqrUpgradeTransaction -Phase Commit @args
         if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED_FENCED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256){throw 'commit invalid'}
+        if(-not(Test-Path -LiteralPath $auth)) {throw 'Fenced commit discarded its recovery credential'}
+        if($scenario -eq 'success') {
+          [IO.File]::WriteAllText((Join-Path ([IO.Path]::GetDirectoryName($state)) 'maintenance-fence.json'),'{"version":1,"state":"FENCED"}')
+          $script:backendReleased=$true
+          Invoke-MscqrUpgradeTransaction -Phase Recover @args
+          if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED' -or (Test-Path -LiteralPath $auth)) {
+            throw 'Fenced commit did not resume safely after backend release'
+          }
+        }
       } elseif(-not $failed) {throw 'verification failure did not fail upgrade'}
     }
     if($scenario -notin @('success','legacy-success') -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}

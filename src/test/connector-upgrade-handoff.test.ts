@@ -51,6 +51,7 @@ describe("automatic connector upgrade handoff", () => {
     }) })));
     const completion = authorizeInstallerUpgrade(id);
     await vi.waitFor(() => expect(apiClient.completeConnectorUpgradePairing).toHaveBeenCalledWith(printerId, id, token));
+    expect(authorizeInstallerUpgrade(id)).toBe(completion);
     await vi.advanceTimersByTimeAsync(2000);
     await completion;
     expect(apiClient.connectorUpgradeProof).toHaveBeenCalledWith(printerId, challengeId, "device-proof");

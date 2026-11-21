@@ -418,16 +418,19 @@ function Invoke-MscqrUpgradeTransaction {
       if($journal.binding.statePath -ine $journal.stateFile -or $journal.stateDiscovery.sha256 -cne $journal.binding.stateDiscoverySha256) {throw 'Journal state discovery binding mismatch.'}
       if ($journal.runtime -ine (Join-Path $live 'bin\mscqr-local-print-agent.exe') -or $journal.stateFile -ine $StateFile -or $journal.startup -ine $StartupFile) { throw 'Upgrade journal ownership mismatch.' }
       if ($Phase -eq 'Recover') {
-        if ($journal.phase -notin @('AUTHORIZED','STAGED','ABORTED','COMMITTED','COMMITTED_FENCED','RESTORATION_VERIFIED')) {
-          $auth = Read-MscqrAuthorization $AuthFile
-          # A fresh, independently evidenced renewal can recover an expired
-          # interrupted attempt. It retains exactly the same immutable binding.
-          try { Invoke-MscqrMaintenance $auth 'verify' $journal.binding } catch {
-            Invoke-MscqrMaintenance $auth 'consume' $journal.binding
-            Invoke-MscqrMaintenance $auth 'verify' $journal.binding
+        if ($journal.phase -eq 'COMMITTED_FENCED') { $Phase = 'Commit' }
+        else {
+          if ($journal.phase -notin @('AUTHORIZED','STAGED','ABORTED','COMMITTED','RESTORATION_VERIFIED')) {
+            $auth = Read-MscqrAuthorization $AuthFile
+            # A fresh, independently evidenced renewal can recover an expired
+            # interrupted attempt. It retains exactly the same immutable binding.
+            try { Invoke-MscqrMaintenance $auth 'verify' $journal.binding } catch {
+              Invoke-MscqrMaintenance $auth 'consume' $journal.binding
+              Invoke-MscqrMaintenance $auth 'verify' $journal.binding
+            }
           }
+          Restore-MscqrTransaction $journal $journalPath; return
         }
-        Restore-MscqrTransaction $journal $journalPath; return
       }
       if ($Phase -eq 'Prepare') {
         if($journal.phase -notin @('COMMITTED','COMMITTED_FENCED','RESTORATION_VERIFIED','ABORTED')) {throw 'Interrupted upgrade requires reviewed recovery before a new attempt.'}
@@ -587,7 +590,7 @@ function Invoke-MscqrUpgradeTransaction {
         throw "Upgrade failed; previous runtime restoration verified. Dispatch remains fenced. $($failure.Exception.Message)"
       }
     } elseif ($Phase -eq 'Commit') {
-      if ($journal.phase -cne 'VERIFIED') { throw 'Unverified upgrade cannot commit.' }
+      if ($journal.phase -notin @('VERIFIED','COMMITTED_FENCED')) { throw 'Unverified upgrade cannot commit.' }
       Assert-MscqrJournalBinding $journal $journalPath
       Assert-MscqrDispatchJournalLive $journal.dispatchJournal
       Wait-MscqrTrustedSession $journal | Out-Null
@@ -633,8 +636,10 @@ function Invoke-MscqrUpgradeTransaction {
       } else {
         Write-MscqrTransaction $journalPath $journal 'COMMITTED_FENCED'
       }
-      Remove-Item -LiteralPath $AuthFile -Force -ErrorAction Stop
-      Remove-Item -LiteralPath "$AuthFile.previous" -Force -ErrorAction SilentlyContinue
+      if ($journal.phase -eq 'COMMITTED') {
+        Remove-Item -LiteralPath $AuthFile -Force -ErrorAction Stop
+        Remove-Item -LiteralPath "$AuthFile.previous" -Force -ErrorAction SilentlyContinue
+      }
     }
   } finally { $lock.Dispose() }
 }

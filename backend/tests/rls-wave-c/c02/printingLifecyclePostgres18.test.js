@@ -1534,9 +1534,13 @@ async function main() {
       agentId:binding.agentId,deviceFingerprint:binding.deviceFingerprint,processCount:1,verificationSha256:hash('disposable-runtime-verification')}};
     await postMaintenance('maker',{action:'release',evidence:signedEvidence(statement)},409);
     await postMaintenance('maker',{action:'release',evidence:signedEvidence({...releaseStatement,runtime:{...releaseStatement.runtime,processCount:2}})},403);
+    const releaseStatusSql=bound=>`SELECT app_rls.printing_upgrade_handoff('RELEASE_STATUS','${hash(token)}','${JSON.stringify(bound)}'::jsonb)`;
+    denied(app,releaseStatusSql(binding),/UPGRADE_HANDOFF_DENIED/);
     const released=await postMaintenance('maker',{action:'release',evidence:signedEvidence(releaseStatement)},200);
     assert.equal(released.data.dispatchFenced,false);
     assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_STATUS')).state,'ACTIVE');
+    assert.deepEqual(json(app,releaseStatusSql(binding)),{released:true,dispatchFenced:false,binding});
+    denied(app,releaseStatusSql({...binding,printerId:randomUUID()}),/UPGRADE_HANDOFF_DENIED/);
     await require('./maintenanceHistoryFixture')({admin,app,psql,psqlAsync,ids,capability:caps.maker,templateJobId:created.job.id,postMaintenance,binding,statement,signedEvidence,hash});
   } finally {
     await new Promise(resolve=>maintenanceServer.close(resolve));

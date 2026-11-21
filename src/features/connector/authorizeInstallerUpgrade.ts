@@ -12,7 +12,17 @@ const localPost = async (path: string, body: unknown) => {
   return result;
 };
 
-export async function authorizeInstallerUpgrade(pairingId: string, signal?: AbortSignal) {
+const activeUpgrades = new Map<string, Promise<void>>();
+
+export function authorizeInstallerUpgrade(pairingId: string): Promise<void> {
+  const existing = activeUpgrades.get(pairingId);
+  if (existing) return existing;
+  const task = runInstallerUpgrade(pairingId).finally(() => activeUpgrades.delete(pairingId));
+  activeUpgrades.set(pairingId, task);
+  return task;
+}
+
+async function runInstallerUpgrade(pairingId: string) {
   const local = await apiClient.getLocalPrintAgentStatus();
   const roster = await apiClient.listRegisteredPrinters(true);
   if (!local.success || !local.data || !roster.success || !Array.isArray(roster.data))
@@ -61,8 +71,7 @@ export async function authorizeInstallerUpgrade(pairingId: string, signal?: Abor
   for (let retry = 0; retry < 3 && !delivered; retry += 1)
     delivered = Boolean((await apiClient.completeConnectorUpgradePairing(printerId, pairingId, token).catch(() => null))?.success);
   if (!delivered) throw new Error("The installer could not receive authorization. Printing remains isolated.");
-  for (let index = 0; index < 120; index += 1) {
-    if (signal?.aborted) return;
+  for (let index = 0; index < 420; index += 1) {
     await new Promise(resolve => window.setTimeout(resolve, 2000));
     let postInstall;
     try { postInstall = await localPost("/maintenance/postinstall-proof", { attemptId: binding["attemptId"] }); }
