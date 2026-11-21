@@ -1869,12 +1869,7 @@ protectedMutationRouter.post(
   requireCsrf,
   requestConnectorMaintenance
 );
-for (const [path, handler] of [
-  ["/manufacturer/printers/:id/maintenance/challenge", issueConnectorUpgradeChallenge],
-  ["/manufacturer/printers/:id/maintenance/device-proof", verifyConnectorUpgradeProof],
-  ["/manufacturer/printers/:id/maintenance/evidence", issueVerifiedConnectorMaintenanceEvidence],
-  ["/manufacturer/printers/:id/maintenance/postinstall", issueVerifiedPostInstallEvidence],
-] as const) protectedMutationRouter.post(path,
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/challenge",
   printMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
@@ -1884,7 +1879,22 @@ for (const [path, handler] of [
   printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
-  handler
+  issueConnectorUpgradeChallenge
+);
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/device-proof",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter,
+  printMutationActorLimiter, requireCsrf, verifyConnectorUpgradeProof
+);
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/evidence",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter,
+  printMutationActorLimiter, requireCsrf, issueVerifiedConnectorMaintenanceEvidence
+);
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/postinstall",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter,
+  printMutationActorLimiter, requireCsrf, issueVerifiedPostInstallEvidence
 );
 protectedReadRouter.get("/manufacturer/printers/:id/maintenance/pairing/:pairingId",
   authenticate, requireOpsUser, requireRecentSensitiveAuth, enforceTenantIsolation,

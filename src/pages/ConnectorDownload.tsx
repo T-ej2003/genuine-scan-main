@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LegalFooter } from "@/components/trust/LegalFooter";
 import { ConnectorReleaseDiagnostics } from "@/features/connector/ConnectorReleaseDiagnostics";
-import { authorizeInstallerUpgrade } from "@/features/connector/authorizeInstallerUpgrade";
+import { InstallerUpgradeStatus } from "@/features/connector/InstallerUpgradeStatus";
 import { evaluateConnectorCompatibility } from "@/features/connector/connectorCompatibility";
 import { cn } from "@/lib/utils";
 import apiClient from "@/lib/api-client";
@@ -281,8 +281,6 @@ const automaticBehaviors = [
 export default function ConnectorDownload() {
   const [params] = useSearchParams();
   const inviteToken = useMemo(() => String(params.get("inviteToken") || "").trim(), [params]);
-  const upgradePairing = useMemo(() => String(params.get("upgradePairing") || "").trim(), [params]);
-  const [upgradeState, setUpgradeState] = useState<string | null>(null);
   const showInternalArtifacts = useMemo(() => ["1", "true"].includes(String(params.get("internal") || "").trim().toLowerCase()), [params]);
   const [release, setRelease] = useState<LatestConnectorRelease | null>(null);
   const [loading, setLoading] = useState(true);
@@ -297,19 +295,6 @@ export default function ConnectorDownload() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [localConnector, setLocalConnector] = useState<LocalConnectorStatus | null>(null);
   const detectedPlatform = useMemo(() => detectPlatform(), []);
-  useEffect(() => {
-    if (!upgradePairing) return;
-    if (!/^[0-9a-f-]{36}$/i.test(upgradePairing)) { setUpgradeState("Invalid installer pairing."); return; }
-    let cancelled = false;
-    const abort = new AbortController();
-    setUpgradeState("Authorizing the signed connector upgrade…");
-    void authorizeInstallerUpgrade(upgradePairing, abort.signal).then(() => {
-      if (!cancelled) setUpgradeState("Upgrade verified. Eligible printing can resume; uncertain attempts remain protected.");
-    }).catch((error: Error) => {
-      if (!cancelled) setUpgradeState(error.message || "Upgrade authorization failed. Your existing installation is unchanged.");
-    });
-    return () => { cancelled = true; abort.abort(); };
-  }, [upgradePairing]);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -453,14 +438,7 @@ export default function ConnectorDownload() {
               </div>
             </div>
           </div>
-          <div className="space-y-6 px-5 py-5 sm:px-8 sm:py-8 lg:space-y-8">
-            {upgradeState ? <Alert><ShieldCheck className="h-4 w-4" /><AlertTitle>Connector upgrade</AlertTitle>
-              <AlertDescription>{upgradeState}
-                {upgradeState !== "Upgrade verified. Eligible printing can resume; uncertain attempts remain protected." &&
-                  !upgradeState.startsWith("Authorizing") ? <Button asChild size="sm" className="ml-3">
-                    <Link to={`/login?returnTo=${encodeURIComponent(`/connector-download?upgradePairing=${upgradePairing}`)}`}>Sign in to continue</Link>
-                  </Button> : null}
-              </AlertDescription></Alert> : null}
+          <div className="space-y-6 px-5 py-5 sm:px-8 sm:py-8 lg:space-y-8"><InstallerUpgradeStatus pairingId={params.get("upgradePairing")} />
             {loading ? (
               <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <Loader2 className="h-4 w-4 animate-spin" />
