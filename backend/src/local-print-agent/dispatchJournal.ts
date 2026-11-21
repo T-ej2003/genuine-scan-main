@@ -15,7 +15,7 @@ export const inspectDispatchJournal = async () => {
   if (!(await fs.lstat(root)).isDirectory()) throw dispatchReconciliationError();
   if (names.length > 10_000) throw dispatchReconciliationError();
   let bytes = 0;
-  const entries: { name: string; sha256: string; printJobId: string; printItemId: string; attemptId: string | null; state: string }[] = [];
+  const entries: { name: string; sha256: string; printJobId: string; printItemId: string; attemptId: string | null; state: string; gatewayId?: string }[] = [];
   for (const name of names) {
     if (!/^[a-f0-9]{64}(\.gateway-attempt)?\.json$/.test(name)) throw dispatchReconciliationError();
     const file = path.join(root, name);
@@ -35,9 +35,11 @@ export const inspectDispatchJournal = async () => {
           record.testJobId ? `diagnostic:${record.testJobId}` : record.printItemId,
           record.journalVersion === 3 ? record.attemptId : undefined)}${name.endsWith(".gateway-attempt.json") ? ".gateway-attempt" : ""}.json`)
       throw dispatchReconciliationError();
+    const gatewayId = process.env.PRINT_GATEWAY_ID;
     entries.push({ name, sha256: createHash("sha256").update(content).digest("hex"),
       printJobId: record.printJobId, printItemId: record.printItemId,
-      attemptId: typeof record.attemptId === "string" ? record.attemptId : null, state: record.state });
+      attemptId: typeof record.attemptId === "string" ? record.attemptId : null, state: record.state,
+      ...(gatewayId && (name.endsWith(".gateway-attempt.json") ? record.gatewayId : record.printerId) === gatewayId ? { gatewayId } : {}) });
   }
   return { count: entries.length, sha256: createHash("sha256").update(JSON.stringify(entries.map(({ name, sha256 }) => [name, sha256]))).digest("hex"), entries };
 };

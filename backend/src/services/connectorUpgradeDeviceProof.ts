@@ -61,7 +61,8 @@ export const verifyUpgradeDeviceChallenge = (input: {
 
 const journalEntry = z.object({ name: z.string().regex(/^[a-f0-9]{64}(\.gateway-attempt)?\.json$/),
   sha256: z.string().regex(/^[a-f0-9]{64}$/), printJobId: z.string().min(1).max(180), printItemId: z.string().min(1).max(180),
-  attemptId: z.string().max(180).nullable(), state: z.enum(["ATTEMPT_RESERVED", "PREPARING", "PRE_DISPATCH_FAILURE", "PRE_DISPATCH_REPORTED"]) }).strict();
+  attemptId: z.string().max(180).nullable(), state: z.enum(["ATTEMPT_RESERVED", "PREPARING", "PRE_DISPATCH_FAILURE", "PRE_DISPATCH_REPORTED"]),
+  gatewayId: z.string().min(1).max(180).optional() }).strict();
 export const MAX_MAINTENANCE_CHECKPOINT_CHARS = 8_000_000;
 export const maintenanceCheckpointStatementSchema = z.object({
   purpose: z.literal("mscqr-connector-maintenance-checkpoint-v1"), challenge: upgradeChallengeSchema,

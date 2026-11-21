@@ -33,6 +33,7 @@ const entries = Array.from({ length: 10_000 }, (_, index) => ({
   printJobId: `job-${String(index).padStart(176, '0')}`, printItemId: `item-${String(index).padStart(175, '0')}`,
   attemptId: `attempt-${String(index).padStart(172, '0')}`, state: 'PRE_DISPATCH_REPORTED',
 }));
+entries[0].gatewayId = 'gateway-fixture';
 const checkpoint = proof.signMaintenanceCheckpoint(privateKeyPem, {
   purpose: 'mscqr-connector-maintenance-checkpoint-v1', challenge: currentChallenge,
   observedAt: new Date().toISOString(),

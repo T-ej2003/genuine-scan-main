@@ -138,6 +138,10 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
     '${JSON.stringify([...journalEntries,{...gatewayGuard,state:'ATTEMPT_RESERVED'}])}'::jsonb)`,true),
     /UPGRADE_NO_REPLAY_DENIED/,'gateway preparation guards cannot masquerade as physical reservations');
   journalEntries.push(gatewayGuard);
+  const gatewayReservation={...uncertain[0],name:`${hash('gateway-reservation')}.json`,
+    sha256:hash('gateway-reservation-record'),printJobId:templateJobId,printItemId:settledId,
+    gatewayId:'gateway-fixture'};
+  journalEntries.push(gatewayReservation);
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${hash('unrelated-reissue')}',
     '${JSON.stringify([...journalEntries,{...reissued,name:`${hash('unrelated-history')}.json`,printJobId:templateJobId}])}'::jsonb)`,true),
@@ -161,7 +165,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   assert.equal(protectedResult.settled,2,'confirmed print and diagnostic history must be verified without freezing them');
   assert.equal(protectedResult.historicalReissues,1,'governed reissue history remains retained without claiming physical completion');
   assert.equal(protectedResult.supersededUnsubmitted,1,'durably aborted pre-submission attempt remains retained without being mistaken for physical output');
-  assert.equal(protectedResult.gatewayGuards,1,'gateway preparation guard is retained without duplicating its physical reservation');
+  assert.equal(protectedResult.gatewayJournalEntries,2,'gateway guard and reservation remain in the journal without entering local-printer reconciliation');
   assert.equal(protectedResult.protectedItemIds.length,12);
   assert.equal(protectedResult.newlyProtected,12,'nullable dispatch metadata must not skip the first protection write');
   assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');
