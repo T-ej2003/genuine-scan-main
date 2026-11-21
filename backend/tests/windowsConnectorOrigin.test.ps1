@@ -30,13 +30,13 @@ try {
   Set-Content -Path $wrapper -Value (Get-WrapperBody -ExecutableCommand "`"$probe`"" -WorkingDirectory $root -AgentVersion 'synthetic') -Encoding ASCII
   1..2 | ForEach-Object {
     $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$wrapper`"" -Wait -PassThru -NoNewWindow
-    if ($process.ExitCode -ne 0) {
+    if ($null -ne $process.ExitCode -and $process.ExitCode -ne 0) {
       $agentLog = Join-Path $LogDir 'agent.log'
       throw "Connector wrapper did not run on invocation $_ (exit $($process.ExitCode)); agent log: $(if(Test-Path -LiteralPath $agentLog) {Get-Content -LiteralPath $agentLog -Raw} else {'missing'})."
     }
   }
   $log = Get-Content -Path (Join-Path $LogDir 'agent.log') -Raw
-  if ($log -notmatch '(?m)^origin=https://staging\.mscqr\.example\r?$') { throw 'Packaged origin did not survive connector restart.' }
+  if ([regex]::Matches($log, '(?m)^origin=https://staging\.mscqr\.example\r?$').Count -ne 2) { throw 'Packaged origin did not survive both connector starts.' }
   if ($log -notmatch '(?m)^additional=https://dr\.mscqr\.example\r?$') { throw 'Explicit additional origins were lost.' }
   if ($log -match 'origin=https://untrusted\.example') { throw 'Editable environment file overrode the packaged origin.' }
   Write-Host 'Windows connector packaged origin and restart tests passed.'
