@@ -709,7 +709,7 @@
       "fileChecksums": {
         "runtime-policy.sql": "eb2a40a12ff9e052203a9766492f3295a3294d8dc36346cc30a24ed7a76488cd",
         "20-context-helpers.sql": "2b7d1e407567b9c1285ef35d34727141552b3f8920a08cf5a23ccf46a380e3f8",
-        "22-printing-upgrade.sql": "12dd24d1be9a2b5d167543fd323565c814c6712f34d015e11ab2d48cb8271249",
+        "22-printing-upgrade.sql": "8e0dc5c740188ab2f0d63327c63c5139f81ce2bc380afb516e8a8aa962bc3efd",
         "21-runtime-grants.sql": "a5b05e0869a6e2444d17aed46a0a2df32cb4e9cc99615fc5567b90f358f286f0",
         "30-policies.sql": "b7def3450c169df091700bcdae5845e8b340cd1809c349b765d19c4d31ab7110"
       }

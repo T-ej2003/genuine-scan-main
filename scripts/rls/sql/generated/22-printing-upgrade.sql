@@ -806,7 +806,9 @@ BEGIN
   )
   SELECT count(*) INTO historical_count FROM jsonb_to_recordset(p_entries)
     AS e("printJobId" text,"printItemId" text)
-    JOIN lineage l ON l.item_id=e."printItemId" AND l.job_id=e."printJobId" AND l.depth>0;
+    JOIN lineage l ON l.item_id=e."printItemId" AND l.job_id=e."printJobId" AND l.depth>0
+    WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(matches) current_item
+      WHERE current_item->>'itemId'=e."printItemId");
   IF jsonb_array_length(matches)+diagnostic_count+historical_count<>expected_count
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
   settled:=diagnostic_count;

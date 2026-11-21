@@ -124,6 +124,10 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
     '${printer}','${snapshot.requestId}','${hash('unrelated-reissue')}',
     '${JSON.stringify([...journalEntries,{...reissued,name:`${hash('unrelated-history')}.json`,printJobId:templateJobId}])}'::jsonb)`,true),
     /UPGRADE_NO_REPLAY_MISMATCH/,'unrelated historical jobs cannot be laundered as governed reissues');
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('unprotected-reissue')}',
+    '${JSON.stringify([...uncertain.slice(1),reissued])}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_MISMATCH/,'a historical record cannot leave its current item eligible for redispatch');
   const journalHash=hash(JSON.stringify(journalEntries.map(({name,sha256})=>[name,sha256])));
   for(const [table,column] of [['PrintItem','frozenAt'],['PrintSession','frozenItems']]) {
     assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."${table}"','${column}','UPDATE')`),'t');
