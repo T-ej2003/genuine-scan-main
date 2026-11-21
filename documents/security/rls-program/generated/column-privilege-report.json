@@ -8520,7 +8520,11 @@
       "table": "PrintItemEvent",
       "command": "SELECT",
       "columns": [
-        "printItemId"
+        "printItemId",
+        "eventType",
+        "previousState",
+        "nextState",
+        "details"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",

@@ -799,6 +799,9 @@ BEGIN
       WHERE current_item->>'itemId'=e."printItemId");
   -- An ABORT before committed INTENT records a durable RESUMED event. Keep
   -- its old journal, but accept it only beside a protected current attempt.
+  PERFORM set_config('app.printing_upgrade_item_ids',
+    (SELECT coalesce(jsonb_agg(item->>'itemId'),'[]'::jsonb)::text FROM jsonb_array_elements(matches) item),true),
+    set_config('app.printing_operation','printing-connector-upgrade-protect',true);
   SELECT count(*) INTO superseded_count FROM jsonb_to_recordset(p_entries)
     AS e(name text,"printJobId" text,"printItemId" text,"attemptId" text)
     WHERE e."attemptId" IS NOT NULL AND e.name !~ '\.gateway-attempt\.json$'
@@ -810,6 +813,8 @@ BEGIN
           AND event."previousState"='ISSUED' AND event."nextState"='RESERVED'
           AND event.details->>'attemptId'=e."attemptId"
           AND event.details->>'dispatchEvidenceVersion'='1');
+  PERFORM set_config('app.printing_upgrade_item_ids','[]',true),
+    set_config('app.printing_operation',prior_operation,true);
   IF jsonb_array_length(matches)+diagnostic_count+historical_count+superseded_count<>expected_count
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
   settled:=diagnostic_count;

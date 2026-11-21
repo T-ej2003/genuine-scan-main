@@ -114,6 +114,11 @@ async function main() {
     COMMIT;`);
   assert.equal(psql(admin, `SELECT has_function_privilege('mscqr_rls_cert_app',
     'app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb)', 'EXECUTE')`), 't');
+  assert.equal(psql(admin, `SELECT has_column_privilege('mscqr_rls_cert_auth_owner',
+    'public."PrintItemEvent"', 'eventType', 'SELECT')`), 't');
+  assert.equal(psql(admin, `SELECT has_table_privilege('mscqr_rls_cert_app',
+    'public."PrintItemEvent"', 'SELECT')`), 'f');
+  denied(app, `SELECT "printItemId", "eventType" FROM public."PrintItemEvent" LIMIT 1`, /permission denied/);
   assert.equal(psql(admin, `SELECT has_function_privilege('mscqr_rls_cert_app',
     'app_rls.printing_upgrade_handoff(text,text,jsonb)', 'EXECUTE')`), 't');
   const idempotencyKeyHash = hash("printing-idempotency-key");
