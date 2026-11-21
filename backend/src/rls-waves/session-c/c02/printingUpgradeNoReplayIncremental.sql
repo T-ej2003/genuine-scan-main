@@ -859,7 +859,8 @@ BEGIN
         WHERE event."printItemId"=e."printItemId" AND event."eventType"='RESUMED'
           AND event."previousState"='ISSUED' AND event."nextState"='RESERVED'
           AND event.details->>'attemptId'=e."attemptId"
-          AND event.details->>'dispatchEvidenceVersion'='1');
+          AND (event.details->>'dispatchEvidenceVersion'='1' OR
+            event.details->>'reason'='no_backend_dispatch_intent'));
   -- Gateway reservations belong to the gateway claim boundary; its retained
   -- journal and backend claim guard prevent replay independently of this local printer.
   SELECT count(*) INTO gateway_entry_count FROM jsonb_to_recordset(p_entries)

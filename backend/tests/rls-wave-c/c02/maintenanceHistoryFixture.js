@@ -131,6 +131,13 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
     '${JSON.stringify([...journalEntries,{...superseded,attemptId:randomUUID()}])}'::jsonb)`,true),
     /UPGRADE_NO_REPLAY_MISMATCH/,'a stale attempt without a durable unsubmitted abort remains fenced');
   journalEntries.push(superseded);
+  const workerRecoveredAttempt=randomUUID();
+  const workerRecovered={...uncertain[1],name:`${hash('worker-recovered-unsubmitted')}.json`,
+    sha256:hash('worker-recovered-unsubmitted-record'),attemptId:workerRecoveredAttempt};
+  psql(admin,`INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+    VALUES('${randomUUID()}','${uncertain[1].printItemId}','RESUMED','ISSUED','RESERVED',
+      '{"attemptId":"${workerRecoveredAttempt}","reason":"no_backend_dispatch_intent"}'::jsonb,'${ids.maker}',now())`);
+  journalEntries.push(workerRecovered);
   const gatewayGuard={...uncertain[0],name:`${hash('gateway-preparation-guard')}.gateway-attempt.json`,
     sha256:hash('gateway-preparation-record'),state:'PREPARING'};
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
@@ -164,7 +171,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   assert.equal(protectedResult.protected,12,'uncertain attempts must be durably protected');
   assert.equal(protectedResult.settled,2,'confirmed print and diagnostic history must be verified without freezing them');
   assert.equal(protectedResult.historicalReissues,1,'governed reissue history remains retained without claiming physical completion');
-  assert.equal(protectedResult.supersededUnsubmitted,1,'durably aborted pre-submission attempt remains retained without being mistaken for physical output');
+  assert.equal(protectedResult.supersededUnsubmitted,2,'connector abort and worker recovery remain retained without being mistaken for physical output');
   assert.equal(protectedResult.gatewayJournalEntries,2,'gateway guard and reservation remain in the journal without entering local-printer reconciliation');
   assert.equal(protectedResult.protectedItemIds.length,12);
   assert.equal(protectedResult.newlyProtected,12,'nullable dispatch metadata must not skip the first protection write');
