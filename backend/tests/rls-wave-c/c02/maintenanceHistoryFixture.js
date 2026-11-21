@@ -60,8 +60,30 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   const oversize=await call({action:'authorize',evidence:signedEvidence({...padded,padding:padded.padding+'x'})},400);
   assert.equal(oversize.code,'MAINTENANCE_EVIDENCE_TOO_LARGE');
   const authorization=await call({action:'authorize',evidence:signedEvidence(padded)},200);
-  await call({action:'consume',token:authorization.data.token,binding},200);
-  await call({action:'consume',token:authorization.data.token,binding},403);
+  const handoff=(operation,token=authorization.data.token,details=binding)=>
+    `SELECT app_rls.printing_upgrade_handoff('${operation}','${hash(token)}','${JSON.stringify(details)}'::jsonb)`;
+  // Refresh rotation revokes precisely this predecessor capability timestamp.
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=now() WHERE id='${ids.makerRefresh}'`);
+  assert.match(psql(app,`SELECT app_rls.printing_printer_administration('${capability}','printing-printer-admin',
+    '${randomUUID()}','MAINTENANCE_INVENTORY','${printer}','{}'::jsonb)`,true),/DENIED|REVOKED|revoked|denied/,
+    'the browser capability must actually be invalid before installer redemption');
+  const concurrent=await Promise.all([psqlAsync(app,handoff('CONSUME')),psqlAsync(app,handoff('CONSUME'))]);
+  assert.equal(concurrent.filter(result=>result.status===0).length,2,
+    'an identical retry must observe the same fenced redemption after browser capability revocation');
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=NULL WHERE id='${ids.makerRefresh}'`);
+  assert.equal(JSON.parse(psql(app,handoff('CONSUME'))).idempotent,true);
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=now() WHERE id='${ids.makerRefresh}'`);
+  assert.equal(JSON.parse(psql(app,handoff('VERIFY'))).authorized,true);
+  psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=NULL WHERE id='${ids.makerRefresh}'`);
+  assert.match(psql(app,handoff('VERIFY',authorization.data.token,{...binding,manufacturerId:ids.orgB}),true),/UPGRADE_HANDOFF_DENIED/);
+  assert.match(psql(app,handoff('VERIFY',authorization.data.token,{...binding,printerId:ids.foreignPrinter}),true),/UPGRADE_HANDOFF_DENIED/);
+  assert.match(psql(app,handoff('VERIFY',authorization.data.token,{...binding,agentId:'other-agent'}),true),/UPGRADE_HANDOFF_DENIED/);
+  const checkpointKey=psql(admin,`SELECT key FROM public."SystemCheckpoint" WHERE value->'upgrade'->'binding'->>'attemptId'='${binding.attemptId}'`);
+  assert.equal(psql(admin,`SELECT has_table_privilege('mscqr_rls_cert_app','public."SystemCheckpoint"','SELECT')`),'f',
+    'installer role must not read the checkpoint directly');
+  psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,'{upgrade,expiresAt}',to_jsonb((now()-interval '1 second')::text)) WHERE key='${checkpointKey}'`);
+  assert.match(psql(app,handoff('VERIFY'),true),/UPGRADE_HANDOFF_DENIED/);
+  psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,'{upgrade,expiresAt}',to_jsonb('${statement.expiresAt}'::text)) WHERE key='${checkpointKey}'`);
   await call({action:'authorize',evidence:signedEvidence(padded)},409);
   assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${historySession}' AND state IN('PRINT_CONFIRMED','CLOSED') AND "printConfirmedAt" IS NOT NULL`),'100000','authorization must preserve settled audit records');
   // A real confirmation remains possible while fenced. Any evidence from the
@@ -70,8 +92,117 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   const [,confirmation]=await Promise.all([call({action:'inventory'},200),psqlAsync(app,confirm)]);
   assert.equal(confirmation.status,0,confirmation.output);
   await call({action:'verify',token:authorization.data.token,binding},403);
+  assert.equal(JSON.parse(psql(app,handoff('REVOKE'))).revoked,true);
+  assert.match(psql(app,handoff('VERIFY'),true),/UPGRADE_HANDOFF_DENIED/);
   snapshot=inventory();
   assert.equal(snapshot.inventory.items.length,2);assert.equal(snapshot.inventory.settledHistory.items,100001);
+  for(let index=0;index<10;index++)newItem('RESERVED',0);
+  psql(admin,`UPDATE public."PrintSession" SET "totalItems"=13 WHERE id='${session}'`);
+  snapshot=inventory();
+  assert.equal(snapshot.inventory.items.length,12,'twelve legacy reservations remain individually visible');
+  const uncertain=snapshot.inventory.items.map((item,index)=>({name:`${hash(`upgrade-journal-${index}`)}.json`,
+    sha256:hash(`upgrade-record-${index}`),printJobId:job,printItemId:item.id,attemptId:null,state:'ATTEMPT_RESERVED'}));
+  const latestRecoveredAttempt=randomUUID();
+  uncertain[2].attemptId=latestRecoveredAttempt;
+  psql(admin,`UPDATE public."PrintItem" SET state='RESERVED',"dispatchMetadata"=jsonb_build_object('lastUnsubmittedAttemptId','${latestRecoveredAttempt}',
+    'journalState','UNKNOWN','recoveredAt',now()) WHERE id='${uncertain[2].printItemId}';
+    INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+    VALUES('${randomUUID()}','${uncertain[2].printItemId}','RESUMED','ISSUED','RESERVED',
+      '{"attemptId":"${latestRecoveredAttempt}","reason":"no_backend_dispatch_intent"}'::jsonb,'${ids.maker}',now())`);
+  psql(admin,`UPDATE public."PrintJob" SET "reprintOfJobId"='${historyJob}' WHERE id='${job}'`);
+  const reissued={...uncertain[0],name:`${hash('governed-reissue-history')}.json`,
+    sha256:hash('governed-reissue-record'),printJobId:historyJob};
+  const settledId=psql(admin,`SELECT id FROM public."PrintItem" WHERE "printSessionId"='${historySession}' AND state='PRINT_CONFIRMED' LIMIT 1`);
+  const journalEntries=[...uncertain,{name:`${hash('settled-journal')}.json`,sha256:hash('settled-record'),
+    printJobId:historyJob,printItemId:settledId,attemptId:null,state:'ATTEMPT_RESERVED'},reissued];
+  const diagnosticId=randomUUID();
+  const diagnostic={name:`${hash('settled-diagnostic')}.json`,sha256:hash('diagnostic-record'),
+    printJobId:`diagnostic:${diagnosticId}`,printItemId:`diagnostic:${diagnosticId}`,
+    attemptId:null,state:'ATTEMPT_RESERVED'};
+  const unverified=[...journalEntries,diagnostic];
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('unverified-diagnostic')}','${JSON.stringify(unverified)}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_MISMATCH/,'a diagnostic without durable confirmation remains blocked');
+  psql(admin,`INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details)
+    SELECT '${randomUUID()}',"assignedUserId","orgId","licenseeId",'PRINTER_TEST_LABEL_CONFIRMED','Printer',id,
+      jsonb_build_object('testJobId','${diagnosticId}') FROM public."Printer" WHERE id='${printer}'`);
+  journalEntries.push(diagnostic);
+  const abortedAttempt=randomUUID();
+  const superseded={...uncertain[0],name:`${hash('superseded-unsubmitted')}.json`,
+    sha256:hash('superseded-unsubmitted-record'),attemptId:abortedAttempt};
+  psql(admin,`INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+    VALUES('${randomUUID()}','${uncertain[0].printItemId}','RESUMED','ISSUED','RESERVED',
+      '{"attemptId":"${abortedAttempt}","dispatchEvidenceVersion":"1","journalState":"ATTEMPT_RESERVED"}'::jsonb,'${ids.maker}',now())`);
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('unverified-abort')}',
+    '${JSON.stringify([...journalEntries,{...superseded,attemptId:randomUUID()}])}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_MISMATCH/,'a stale attempt without a durable unsubmitted abort remains fenced');
+  journalEntries.push(superseded);
+  const workerRecoveredAttempt=randomUUID();
+  const workerRecovered={...uncertain[1],name:`${hash('worker-recovered-unsubmitted')}.json`,
+    sha256:hash('worker-recovered-unsubmitted-record'),attemptId:workerRecoveredAttempt};
+  psql(admin,`INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+    VALUES('${randomUUID()}','${uncertain[1].printItemId}','RESUMED','ISSUED','RESERVED',
+      '{"attemptId":"${workerRecoveredAttempt}","reason":"no_backend_dispatch_intent"}'::jsonb,'${ids.maker}',now())`);
+  journalEntries.push(workerRecovered);
+  const gatewayGuard={...uncertain[0],name:`${hash('gateway-preparation-guard')}.gateway-attempt.json`,
+    sha256:hash('gateway-preparation-record'),state:'PREPARING'};
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('invalid-gateway-guard')}',
+    '${JSON.stringify([...journalEntries,{...gatewayGuard,state:'ATTEMPT_RESERVED'}])}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_DENIED/,'gateway preparation guards cannot masquerade as physical reservations');
+  journalEntries.push(gatewayGuard);
+  const gatewayReservation={...uncertain[0],name:`${hash('gateway-reservation')}.json`,
+    sha256:hash('gateway-reservation-record'),printJobId:templateJobId,printItemId:settledId,
+    gatewayId:'gateway-fixture'};
+  journalEntries.push(gatewayReservation);
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('unrelated-reissue')}',
+    '${JSON.stringify([...journalEntries,{...reissued,name:`${hash('unrelated-history')}.json`,printJobId:templateJobId}])}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_MISMATCH/,'unrelated historical jobs cannot be laundered as governed reissues');
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('unprotected-reissue')}',
+    '${JSON.stringify([...uncertain.slice(1),reissued])}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_MISMATCH/,'a historical record cannot leave its current item eligible for redispatch');
+  const journalHash=hash(JSON.stringify(journalEntries.map(({name,sha256})=>[name,sha256])));
+  for(const [table,column] of [['PrintItem','frozenAt'],['PrintSession','frozenItems']]) {
+    assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."${table}"','${column}','UPDATE')`),'t');
+    assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_app','public."${table}"','${column}','UPDATE')`),'f');
+  }
+  assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."AuditLog"','details','SELECT')`),'t');
+  assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_app','public."AuditLog"','details','SELECT')`),'t',
+    'application audit access remains governed by its own RLS policies');
+  const protection=`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${journalHash}','${JSON.stringify(journalEntries)}'::jsonb)`;
+  const protectedResult=JSON.parse(psql(app,protection));
+  assert.equal(protectedResult.protected,12,'uncertain attempts must be durably protected');
+  assert.equal(protectedResult.settled,2,'confirmed print and diagnostic history must be verified without freezing them');
+  assert.equal(protectedResult.historicalReissues,1,'governed reissue history remains retained without claiming physical completion');
+  assert.equal(protectedResult.supersededUnsubmitted,2,'connector abort and worker recovery remain retained without being mistaken for physical output');
+  assert.equal(protectedResult.gatewayJournalEntries,2,'gateway guard and reservation remain in the journal without entering local-printer reconciliation');
+  assert.equal(protectedResult.protectedItemIds.length,12);
+  assert.equal(protectedResult.newlyProtected,12,'nullable dispatch metadata must not skip the first protection write');
+  assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${journalHash}',NULL::jsonb)`,true),/UPGRADE_NO_REPLAY_DENIED/);
+  assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem" WHERE id IN ('${uncertain.map(item=>item.printItemId).join("','")}')
+    AND state='FROZEN' AND "pipelineState"='NEEDS_OPERATOR_ACTION'
+    AND "dispatchMetadata"->'upgradeNoReplay'->>'journalSha256'='${journalHash}'`),'12');
+  assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${settledId}'`),'PRINT_CONFIRMED');
+  const retainedIds=psql(admin,`SELECT string_agg(id,',') FROM (SELECT id FROM public."PrintItem"
+    WHERE "printSessionId"='${historySession}' AND state='PRINT_CONFIRMED' ORDER BY id LIMIT 513) items`).split(',');
+  const retainedEntries=retainedIds.map((id,index)=>({name:`${hash(`retained-${index}`)}.json`,
+    sha256:hash(`retained-record-${index}`),printJobId:historyJob,printItemId:id,attemptId:null,state:'ATTEMPT_RESERVED'}));
+  const retainedHash=hash(JSON.stringify(retainedEntries.map(({name,sha256})=>[name,sha256])));
+  const retained=JSON.parse(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${retainedHash}','${JSON.stringify(retainedEntries)}'::jsonb)`));
+  assert.equal(retained.settled,513,'retained confirmed journal history must not hit a lower SQL bound');
+  assert.equal(retained.protected,0);
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('forged-journal')}','${JSON.stringify(journalEntries)}'::jsonb)`,true),/UPGRADE_NO_REPLAY_MISMATCH/);
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${ids.foreignPrinter}','${snapshot.requestId}','${journalHash}','${JSON.stringify(journalEntries)}'::jsonb)`,true),
+    /permission denied|PRINTING_BOUNDARY_DENIED|UPGRADE_NO_REPLAY_DENIED/);
   const claimed=await psqlAsync(app,`SELECT app_rls.printing_connector_event('${registration}','${agent}','${device}','history_fenced_claim_nonce',now()::timestamp,'${randomUUID()}','CLAIM','${randomUUID()}',NULL,'${printer}',NULL,NULL,'{}'::jsonb)`);
   assert.notEqual(claimed.status,0);assert.match(claimed.output,/CONNECTOR_MAINTENANCE_FENCED/);
   // A genuinely oversized *unresolved* workset must fail, not silently return

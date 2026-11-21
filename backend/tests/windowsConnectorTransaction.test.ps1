@@ -49,6 +49,9 @@ function Assert-MscqrRuntime {
   if ($script:processes -ne 1) { throw 'fixture process cardinality invalid' }
   return [pscustomobject]@{protocolVersion='1';buildVersion=$Version}
 }
+function Get-MscqrRuntimeProcesses {
+  if($script:processes -eq 1) {return [pscustomobject]@{ExecutablePath=$script:runtime;ProcessId=1234}}
+}
 function Stop-MscqrVerifiedRuntime {
   param($Runtime,$Hash)
   if ($script:injection -eq 'stop') { throw 'fixture stop failed' }
@@ -56,6 +59,7 @@ function Stop-MscqrVerifiedRuntime {
 }
 function Start-MscqrVerifiedRuntime {
   param($Wrapper)
+  if($script:failCommitStarts -gt 0) {$script:failCommitStarts-=1; throw 'fixture post-release restart failed'}
   if($script:injection -eq 'start' -and [IO.File]::ReadAllText((Join-Path ([IO.Path]::GetDirectoryName($Wrapper)) 'mscqr-local-print-agent.exe')).StartsWith('replacement')) {throw 'fixture replacement startup failed'}
   $script:processes++; if ($script:processes -ne 1) { throw 'duplicate start' }
   if($script:injection -eq 'partial-unverified') {return 10}
@@ -67,16 +71,23 @@ function Wait-MscqrRuntime {
   if ($script:processes -ne 1) { throw 'fixture cardinality failure' }
   return [pscustomobject]@{protocolVersion='1'}
 }
+function Wait-MscqrTrustedSession {
+  param($Journal)
+  if($script:injection -eq 'backend-session') {throw 'fixture backend session unavailable'}
+  return [pscustomobject]@{websocket=[pscustomobject]@{connected=$true;registrationId=$Journal.binding.registrationId}}
+}
+function Wait-MscqrBackendRelease {param($Auth,$Binding,$Attempts=12) return $script:backendReleased}
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
-  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','backup-flush','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
-    $script:injection=$scenario; $script:consumed=$false; $script:processes=1
+  foreach ($scenario in @('success','commit-after-pending-deletion','commit-restart-failure','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','backup-flush','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
+    $script:injection=$scenario; $script:consumed=$false; $script:processes=1; $script:backendReleased=$false; $script:failCommitStarts=0
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
     New-Item -ItemType Directory -Path "$live\bin","$payload\bin" -Force | Out-Null
     $runtime="$live\bin\mscqr-local-print-agent.exe"; $state="$case\state.json"; $startup="$case\startup.vbs"; $auth="$case\auth.json"; $installer="$case\setup.exe"
+    $script:runtime=$runtime
     if($scenario -like 'legacy-*'){New-Item -ItemType Directory "$case\.authenticqr"|Out-Null;$state="$case\.authenticqr\local-print-agent-state.json"}
     [IO.File]::WriteAllText($runtime,'previous verified runtime fixture')
     [IO.File]::WriteAllText("$payload\bin\mscqr-local-print-agent.exe",'replacement verified runtime fixture')
@@ -107,13 +118,13 @@ try {
     $binding | Add-Member uninstallerSha256 (Get-FileHash "$live\unins000.exe").Hash
     $binding | Add-Member uninstallDataSha256 (Get-FileHash "$live\unins000.dat").Hash
     $binding | Add-Member uninstallRegistrationSha256 (Get-MscqrUninstallDigest (Get-MscqrUninstallSnapshot $live))
-    [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/fixture/maintenance';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
+    [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/connector-upgrade/handoff';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
     $args=@{LiveDirectory=$live;Payload=$payload;Installer=$installer;AuthFile=$auth;Version=$binding.targetVersion;StateFile=$state;StartupFile=$startup}
     if($scenario -like 'legacy-*') {
       $discovery=Resolve-MscqrUpgradeState $case $live 'fixture'
       $args.StateFile=$discovery.selectedPath;$args.StateDiscovery=$discovery
       $binding.stateDiscoverySha256=$discovery.sha256
-      [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/fixture/maintenance';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
+      [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/connector-upgrade/handoff';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
     }
     $failed=$false
     if($scenario -eq 'extra-startup'){[IO.File]::WriteAllText("$case\unknown-legacy.vbs","$runtime")}
@@ -187,13 +198,38 @@ try {
         if(-not $failed -or $script:processes -ne 0 -or (Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_FAILED'){throw 'failed restoration was not left stopped'}
         Write-Host 'PASS transaction failed-restoration stayed stopped and fenced'
         continue
-      } elseif($scenario -in @('success','legacy-success')) {
+      } elseif($scenario -in @('success','commit-after-pending-deletion','commit-restart-failure','legacy-success')) {
         if($failed){throw 'successful activation failed'}
-        Invoke-MscqrUpgradeTransaction -Phase Commit @args
-        if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256){throw 'commit invalid'}
+        if($scenario -eq 'commit-restart-failure') {
+          [IO.File]::WriteAllText((Join-Path ([IO.Path]::GetDirectoryName($state)) 'maintenance-fence.json'),'{"version":1,"state":"FENCED"}')
+          $script:backendReleased=$true; $script:failCommitStarts=2
+        }
+        if($scenario -eq 'commit-restart-failure') {
+          try {Invoke-MscqrUpgradeTransaction -Phase Commit @args; throw 'restart failure was accepted'}
+          catch {if($_.Exception.Message -eq 'restart failure was accepted'){throw}}
+        } else {Invoke-MscqrUpgradeTransaction -Phase Commit @args}
+        $record=Get-Content $journal -Raw|ConvertFrom-Json
+        if($record.phase -ne 'COMMITTED_FENCED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256 -or
+           ($scenario -eq 'commit-restart-failure' -and $record.localReleaseStarted -ne $true)){throw 'commit invalid'}
+        if(-not(Test-Path -LiteralPath $auth)) {throw 'Fenced commit discarded its recovery credential'}
+        if($scenario -in @('success','commit-after-pending-deletion','commit-restart-failure')) {
+          $pendingFence=Join-Path ([IO.Path]::GetDirectoryName($state)) 'maintenance-fence.json.release-pending'
+          if($scenario -eq 'success') {[IO.File]::WriteAllText($pendingFence,'{"version":1,"state":"FENCED"}')}
+          elseif($scenario -eq 'commit-after-pending-deletion') {
+            $record=Get-Content $journal -Raw|ConvertFrom-Json
+            $record.localReleaseStarted=$true
+            Write-MscqrTransaction $journal $record 'COMMITTED_FENCED'
+          }
+          $script:backendReleased=$true
+          Invoke-MscqrUpgradeTransaction -Phase Recover @args
+          if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED' -or
+             (Test-Path -LiteralPath $auth) -or (Test-Path -LiteralPath $pendingFence)) {
+            throw 'Fenced commit did not resume safely after backend release'
+          }
+        }
       } elseif(-not $failed) {throw 'verification failure did not fail upgrade'}
     }
-    if($scenario -notin @('success','legacy-success') -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}
+    if($scenario -notin @('success','commit-after-pending-deletion','commit-restart-failure','legacy-success') -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}
     if($scenario -like 'legacy-*' -and (Test-Path -LiteralPath "$case\.mscqr\local-print-agent-state.json")){throw 'Legacy identity was silently migrated'}
     if($script:processes -ne 1 -or (Get-FileHash $state).Hash -ne $binding.stateSha256 -or [IO.File]::ReadAllText("$live\unknown-pending.json") -ne 'preserve uncertain evidence' -or [IO.File]::ReadAllText("$journal.next") -ne 'unrelated recovery evidence') {throw 'identity, pending evidence or cardinality lost'}
     Write-Host "PASS transaction $scenario (external boundaries simulated)"
@@ -216,18 +252,19 @@ try {
   Invoke-Expression $wire.Extent.Text.Replace('function Invoke-MscqrMaintenance','function Invoke-MscqrMaintenanceWireFixture').Replace('__MSCQR_MAINTENANCE_API_ORIGIN__','https://isolated.example.invalid')
   function Invoke-RestMethod {param($Uri,$Method,$Headers,$ContentType,$Body,$TimeoutSec,$MaximumRedirection) $script:wireCalls++;return $script:wireReply}
   $wireBinding=[pscustomobject]@{printerId='synthetic';tenantId='synthetic-tenant'}
-  $wireAuth=[pscustomobject]@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/synthetic/maintenance';token='synthetic';headers=[pscustomobject]@{Authorization='Bearer synthetic'}}
+  $wireAuth=[pscustomobject]@{endpoint='https://isolated.example.invalid/api/connector-upgrade/handoff';token='synthetic'}
   $script:wireCalls=0
   $script:wireReply=[pscustomobject]@{success=$true;data=[pscustomobject]@{authorized=$true;dispatchFenced=$true;binding=$wireBinding}}
   Invoke-MscqrMaintenanceWireFixture $wireAuth 'verify' $wireBinding
-  foreach($attack in @('host-header','wrong-origin','string-authorization','unfenced','wrong-tenant')) {
+  foreach($attack in @('browser-credentials','wrong-origin','legacy-endpoint','string-authorization','unfenced','wrong-tenant')) {
     $callsBefore=$script:wireCalls
-    $wireAuth.headers=[pscustomobject]@{Authorization='Bearer synthetic'}
-    $wireAuth.endpoint='https://isolated.example.invalid/api/manufacturer/printers/synthetic/maintenance'
+    $wireAuth.PSObject.Properties.Remove('headers')
+    $wireAuth.endpoint='https://isolated.example.invalid/api/connector-upgrade/handoff'
     $script:wireReply.data.authorized=$true;$script:wireReply.data.dispatchFenced=$true;$script:wireReply.data.binding=$wireBinding
     switch($attack) {
-      'host-header' {$wireAuth.headers | Add-Member Host 'attacker.example.invalid'}
-      'wrong-origin' {$wireAuth.endpoint='https://attacker.example.invalid/api/manufacturer/printers/synthetic/maintenance'}
+      'browser-credentials' {$wireAuth | Add-Member headers ([pscustomobject]@{Authorization='Bearer synthetic'})}
+      'wrong-origin' {$wireAuth.endpoint='https://attacker.example.invalid/api/connector-upgrade/handoff'}
+      'legacy-endpoint' {$wireAuth.endpoint='https://isolated.example.invalid/api/manufacturer/printers/synthetic/maintenance'}
       'string-authorization' {$script:wireReply.data.authorized='true'}
       'unfenced' {$script:wireReply.data.dispatchFenced=$false}
       'wrong-tenant' {$script:wireReply.data.binding=[pscustomobject]@{printerId='synthetic';tenantId='wrong'}}
@@ -235,7 +272,7 @@ try {
     $failed=$false
     try {Invoke-MscqrMaintenanceWireFixture $wireAuth 'verify' $wireBinding}catch{$failed=$true}
     if(-not $failed){throw "Maintenance wire attack accepted: $attack"}
-    if($attack -in @('host-header','wrong-origin') -and $script:wireCalls -ne $callsBefore){throw 'Invalid authority reached the transport'}
+    if($attack -in @('browser-credentials','wrong-origin','legacy-endpoint') -and $script:wireCalls -ne $callsBefore){throw 'Invalid authority reached the transport'}
     Write-Host "PASS maintenance client $attack rejection (transport simulated)"
   }
 } finally {

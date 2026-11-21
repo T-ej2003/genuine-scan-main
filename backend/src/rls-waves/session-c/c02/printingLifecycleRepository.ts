@@ -66,6 +66,25 @@ export const readUpgradeDeviceBinding = (input: {
   ) AS result
 `);
 
+export const protectUpgradeUnknownAttempts = (input: {
+  capability: string; requestId: string; printerId: string; fenceRequestId: string;
+  journalSha256: string; entries: unknown[];
+}) => oneJson(prisma, Prisma.sql`
+  SELECT app_rls.printing_upgrade_protect_unknown(
+    ${input.capability}::text,${input.requestId}::text,${input.printerId}::text,
+    ${input.fenceRequestId}::text,${input.journalSha256}::text,${input.entries}::jsonb
+  ) AS result
+`);
+
+export const redeemPrintingUpgradeHandoff = (input: {
+  operation: "CONSUME" | "VERIFY" | "REVOKE" | "RELEASE_STATUS"; tokenHash: string;
+  binding: Record<string, string | null>;
+}) => oneJson(prisma, Prisma.sql`
+  SELECT app_rls.printing_upgrade_handoff(
+    ${input.operation}::text,${input.tokenHash}::text,${input.binding}::jsonb
+  ) AS result
+`);
+
 export const beginPrintingIdempotency = (input: {
   capability: string;
   requestId: string;

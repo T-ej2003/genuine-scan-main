@@ -1559,8 +1559,10 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
 let activeDirectPrintWorkerStop: (() => void) | null = null;
 let activeDirectPrintWorkerWake: ((reason?: string) => void) | null = null;
 let activeMaintenanceClose: (() => void) | null = null;
+let maintenanceCloseRequested = false;
 
 export const stopDirectPrintAcquisition = () => {
+  maintenanceCloseRequested = true;
   activeMaintenanceClose?.();
   activeDirectPrintWorkerWake?.();
 };
@@ -1640,10 +1642,10 @@ const startPersistentPrintSessionWorker = () => {
 
   const loop = async () => {
     while (!stopped) {
-      if (maintenanceFenced()) break;
+      if (maintenanceCloseRequested) break;
       const backendUrl = await resolveBackendUrl();
       const selection = backendUrl ? await resolveSelection().catch(() => null) : null;
-      if (maintenanceFenced()) break;
+      if (maintenanceCloseRequested) break;
       if (!backendUrl || !selection) {
         updatePersistentSessionStatus({
           connected: false,
@@ -1804,7 +1806,7 @@ const startPersistentPrintSessionWorker = () => {
               });
               return;
             }
-            if (maintenanceFenced()) { ws.close(); return; }
+            if (maintenanceFenced()) return;
             if (!session || processing || ws.readyState !== WebSocket.OPEN) return;
             const workSession = session;
             if (payload?.type === "test_label") {
@@ -1842,7 +1844,7 @@ const startPersistentPrintSessionWorker = () => {
           console.info("persistent printer session socket closed", {
             sessionId: session?.sessionId || null,
             code,
-            stopOrSelectionChangeRequested: stopped || selectionReconnect,
+            stopOrSelectionChangeRequested: stopped || selectionReconnect || maintenanceCloseRequested,
           });
           finish();
         });

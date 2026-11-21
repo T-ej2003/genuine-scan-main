@@ -665,6 +665,7 @@ const installationSteps = [
   { id: "prisma-from-zero", phase: "migration", executor: "prisma" },
   { id: "ownership", phase: "admin-ownership", file: "11-ownership-grants.sql", executor: "administrator" },
   { id: "helpers", phase: "runtime-policy", file: "20-context-helpers.sql", executor: "administrator" },
+  { id: "printing-upgrade", phase: "runtime-policy", file: "22-printing-upgrade.sql", executor: "administrator" },
   { id: "runtime-grants", phase: "runtime-policy", file: "21-runtime-grants.sql", executor: "administrator" },
   { id: "policies", phase: "runtime-policy", file: "30-policies.sql", executor: "administrator" },
   { id: "verification", phase: "verification", file: "40-post-apply-verification.sql", executor: "administrator" },
@@ -835,7 +836,7 @@ const certifyPreflightRefusals = ({ adminUrl, maintenanceDatabase, manifest, blu
 
 const certifyDirectSubphaseRefusals = ({ adminUrl, maintenanceDatabase, manifest, blueUrl, expectedBlueFingerprint }) => {
   const results = [];
-  for (const file of ["15-migration-preflight.sql", "11-ownership-grants.sql", "20-context-helpers.sql", "21-runtime-grants.sql", "30-policies.sql"]) {
+  for (const file of ["15-migration-preflight.sql", "11-ownership-grants.sql", "20-context-helpers.sql", "22-printing-upgrade.sql", "21-runtime-grants.sql", "30-policies.sql"]) {
     const database = candidateName(`direct_${file.replace(/\W+/g, "_")}`);
     const urls = createUrls(adminUrl, maintenanceDatabase, database, manifest);
     createGreenDatabase(urls.maintenance, database);

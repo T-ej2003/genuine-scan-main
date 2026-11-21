@@ -1,4 +1,4 @@
-import { requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
+import { completeConnectorUpgradePairing, createConnectorUpgradePairing, issueVerifiedConnectorMaintenanceEvidence, issueVerifiedPostInstallEvidence, pollConnectorUpgradePairing, readConnectorUpgradePairing, redeemConnectorMaintenanceHandoff, requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
 import { issueConnectorUpgradeChallenge, verifyConnectorUpgradeProof } from "../controllers/connectorUpgradeDeviceProofController";
 import { Request, type RequestHandler, Router } from "express";
 import {
@@ -917,6 +917,10 @@ const printMutationPreAuthRouteLimiter = createSharedRateLimiter({
     buildPublicActorRateLimitKey(req, "print.mutation:pre-auth", protectedPreAuthActor, composeRequestResolvers(fromParamFields("id", "batchId", "printerId"))),
   handler: createRateLimitJsonHandler("print.mutation:pre-auth", "Too many printing actions. Please wait before retrying."),
 });
+const connectorHandoffIpLimiter = createPublicIpRateLimiter({
+  scope: "connector.upgrade-handoff:ip", windowMs: 5 * 60 * 1000, max: 30,
+  message: "Too many connector upgrade requests. Please wait before retrying.",
+});
 
 const qrRequestReadPreAuthRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
@@ -1364,6 +1368,9 @@ protectedMutationRouter.use(createGovernanceMutationRoutes());
 publicReadRouter.get("/public/connector/releases", connectorManifestIpLimiter, connectorManifestActorLimiter, listConnectorReleasesController);
 publicReadRouter.get("/public/connector/releases/latest", connectorManifestIpLimiter, connectorManifestActorLimiter, getLatestConnectorReleaseController);
 publicReadRouter.get("/public/connector/download/:version/:platform", connectorDownloadIpLimiter, connectorDownloadActorLimiter, downloadConnectorReleaseController);
+publicMutationRouter.post("/connector-upgrade/handoff", connectorHandoffIpLimiter, redeemConnectorMaintenanceHandoff);
+publicMutationRouter.post("/connector-upgrade/pairing", connectorHandoffIpLimiter, createConnectorUpgradePairing);
+publicMutationRouter.post("/connector-upgrade/pairing/poll", connectorHandoffIpLimiter, pollConnectorUpgradePairing);
 publicMutationRouter.post(
   "/public/request-access",
   requestAccessIpLimiter,
@@ -1862,10 +1869,7 @@ protectedMutationRouter.post(
   requireCsrf,
   requestConnectorMaintenance
 );
-for (const [path, handler] of [
-  ["/manufacturer/printers/:id/maintenance/challenge", issueConnectorUpgradeChallenge],
-  ["/manufacturer/printers/:id/maintenance/device-proof", verifyConnectorUpgradeProof],
-] as const) protectedMutationRouter.post(path,
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/challenge",
   printMutationPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
@@ -1875,8 +1879,31 @@ for (const [path, handler] of [
   printMutationIpLimiter,
   printMutationActorLimiter,
   requireCsrf,
-  handler
+  issueConnectorUpgradeChallenge
 );
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/device-proof",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter,
+  printMutationActorLimiter, requireCsrf, verifyConnectorUpgradeProof
+);
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/evidence",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter,
+  printMutationActorLimiter, requireCsrf, issueVerifiedConnectorMaintenanceEvidence
+);
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/postinstall",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter,
+  printMutationActorLimiter, requireCsrf, issueVerifiedPostInstallEvidence
+);
+protectedReadRouter.get("/manufacturer/printers/:id/maintenance/pairing/:pairingId",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter, printMutationActorLimiter,
+  readConnectorUpgradePairing);
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/pairing",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter,
+  printMutationActorLimiter, requireCsrf, completeConnectorUpgradePairing);
 protectedMutationRouter.post(
   "/manufacturer/printers/:id/relink-local-agent",
   authenticate,

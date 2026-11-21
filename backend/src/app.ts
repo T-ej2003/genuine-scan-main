@@ -117,6 +117,12 @@ export const createBackendApp = () => {
     })
   );
 
+  app.use("/api/manufacturer/printers/:id/maintenance/evidence",
+    createPublicIpRateLimiter({ scope: "connector.maintenance-evidence:pre-parse", windowMs: 5 * 60 * 1000, max: 12,
+      message: "Too many connector maintenance requests. Please wait before retrying." }),
+    (req, res, next) => req.get("content-encoding") && req.get("content-encoding")?.toLowerCase() !== "identity"
+      ? res.status(415).json({ success: false, error: "Compressed maintenance evidence is unsupported." }) : next(),
+    express.json({ limit: "10mb", inflate: false }));
   app.use(express.urlencoded({ extended: false, limit: "1mb" }));
   app.use(express.json({ limit: "1mb" }));
   app.use(sanitizeRequestInput);

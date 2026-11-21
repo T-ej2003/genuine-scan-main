@@ -189,7 +189,7 @@ export const verifyFullRlsPackage = () => {
     for (const dependency of phase.files.slice(1)) ensure(entrypointLines.filter((line) => line === `\\ir ${dependency}`).length === 1, `${phase.id} must include ${dependency} exactly once`);
   }
 
-  for (const name of ["00-preflight.sql", "10-roles.sql", "15-migration-preflight.sql", "11-ownership-grants.sql", "20-context-helpers.sql", "21-runtime-grants.sql", "30-policies.sql", "40-post-apply-verification.sql", "50-certification-fixtures.sql", "90-clean-room-role-cleanup.sql"]) {
+  for (const name of ["00-preflight.sql", "10-roles.sql", "15-migration-preflight.sql", "11-ownership-grants.sql", "20-context-helpers.sql", "22-printing-upgrade.sql", "21-runtime-grants.sql", "30-policies.sql", "40-post-apply-verification.sql", "50-certification-fixtures.sql", "90-clean-room-role-cleanup.sql"]) {
     const sql = readGenerated(name).toString();
     ensure(sql.startsWith("\\set ON_ERROR_STOP on\nBEGIN;\n") && sql.trimEnd().endsWith("COMMIT;"), `${name} is not phase-transaction atomic`);
     ensure((sql.match(/^BEGIN;$/gm) || []).length === 1 && (sql.match(/^COMMIT;$/gm) || []).length === 1, `${name} has ambiguous transaction boundaries`);
@@ -217,9 +217,9 @@ export const verifyFullRlsPackage = () => {
   ensure(!/^\s*(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|GRANT|REVOKE)\b/im.test(verification), "Verification SQL is not read-only");
   ensure((readGenerated("30-policies.sql").toString().match(/FORCE ROW LEVEL SECURITY/g) || []).length === TABLE_INVENTORY_BASELINE.forceRlsTargets, `Generated SQL does not FORCE exactly ${TABLE_INVENTORY_BASELINE.forceRlsTargets} tables`);
   ensure((readGenerated("30-policies.sql").toString().match(/CREATE POLICY/g) || []).length === policies.rows.length, "Generated SQL policy count differs from inventory");
-  const runtimeGrantSql = readGenerated("21-runtime-grants.sql").toString();
-  const exactTableGrantCount = (runtimeGrantSql.match(/GRANT\s+(?:SELECT|INSERT|UPDATE)\s*\(/g) || []).length
-    + (runtimeGrantSql.match(/GRANT\s+DELETE\s+ON\s+TABLE\s+public\./g) || []).length;
+  const tableGrantSql = readGenerated("21-runtime-grants.sql").toString() + readGenerated("22-printing-upgrade.sql").toString();
+  const exactTableGrantCount = (tableGrantSql.match(/GRANT\s+(?:SELECT|INSERT|UPDATE)\s*\(/g) || []).length
+    + (tableGrantSql.match(/GRANT\s+DELETE\s+ON\s+TABLE\s+public\./g) || []).length;
   ensure(exactTableGrantCount === privileges.rows.length + (privileges.functionOwnerRows || []).length, "Generated SQL exact table grants differ from inventory");
 
   ensure(roleLifecycle.schemaVersion === 5 && roleLifecycle.deploymentModel === "clean-room-blue-green", "Role lifecycle report is not clean-room blue/green");

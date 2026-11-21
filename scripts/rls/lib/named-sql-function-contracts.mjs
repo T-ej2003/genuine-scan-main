@@ -88,6 +88,7 @@ const administrationRollback = "backend/src/rls-waves/session-c/c01/administrati
 const qrSystemSource = "backend/src/rls-waves/session-c/c01/qrSystem.sql";
 const qrSystemRollback = "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql";
 const printingLifecycleSource = "backend/src/rls-waves/session-c/c02/printingLifecycle.sql";
+const printingUpgradeNoReplaySource = "backend/src/rls-waves/session-c/c02/printingUpgradeNoReplayDefinitions.sql";
 const printingLifecycleRollback = "backend/src/rls-waves/session-c/c02/printingLifecycleRollback.sql";
 const publicVerificationSource = "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql";
 const publicVerificationRollback = "backend/src/rls-waves/session-b/b02/publicVerificationRollback.sql";
@@ -916,10 +917,10 @@ const printingOwnerPrivileges = [
   ["PrintJob","UPDATE",["status","pipelineState","sentAt","completedAt","failureReason","confirmedAt","updatedAt"]],
   ["PrintSession","SELECT",["id","printJobId","batchId","manufacturerId","printerRegistrationId","printerId","status","totalItems","issuedItems","confirmedItems","frozenItems","failedReason","startedAt","completedAt","createdAt","updatedAt"]],
   ["PrintSession","INSERT",["id","printJobId","batchId","manufacturerId","printerRegistrationId","printerId","status","totalItems","createdAt","updatedAt"]],
-  ["PrintSession","UPDATE",["status","issuedItems","confirmedItems","failedReason","completedAt","updatedAt"]],
+  ["PrintSession","UPDATE",["status","issuedItems","confirmedItems","frozenItems","failedReason","completedAt","updatedAt"]],
   ["PrintItem","SELECT",["id","printSessionId","qrCodeId","code","state","pipelineState","issueSequence","attemptCount","currentRenderTokenHash","deviceJobRef","dispatchMetadata","confirmationEvidence","issuedAt","dispatchedAt","agentAckedAt","confirmationDeadlineAt","printConfirmedAt","closedAt","frozenAt","failedAt","failureReason","deadLetterReason","createdAt","updatedAt"]],
   ["PrintItem","INSERT",["id","printSessionId","qrCodeId","code","state","pipelineState","issueSequence","createdAt","updatedAt"]],
-  ["PrintItem","UPDATE",["printSessionId","state","pipelineState","issueSequence","attemptCount","deviceJobRef","dispatchMetadata","confirmationEvidence","issuedAt","dispatchedAt","agentAckedAt","confirmationDeadlineAt","printConfirmedAt","failedAt","failureReason","updatedAt"]],
+  ["PrintItem","UPDATE",["printSessionId","state","pipelineState","issueSequence","attemptCount","deviceJobRef","dispatchMetadata","confirmationEvidence","issuedAt","dispatchedAt","agentAckedAt","confirmationDeadlineAt","printConfirmedAt","frozenAt","failedAt","failureReason","updatedAt"]],
   ["PrintItemEvent","SELECT",["printItemId"]],
   ["PrintItemEvent","INSERT",["id","printItemId","eventType","previousState","nextState","details","actorUserId","createdAt"]],
   ["PrintJobChunk","SELECT",["printJobId","printSessionId"]],
@@ -948,6 +949,7 @@ const printingOwnerPrivileges = [
   ["Licensee","SELECT",["id","orgId","name","prefix","location","metadata","isActive","suspendedAt"]],
   ["Organization","SELECT",["id","isActive"]],
   ["AuditLog","INSERT",["id","userId","orgId","licenseeId","action","entityType","entityId","details","createdAt"]],
+  ["AuditLog","SELECT",["userId","orgId","licenseeId","action","entityType","entityId","details"]],
   ["SecurityEventOutbox","INSERT",["id","eventType","payload","requestId","organizationId","licenseeId","initiatingUserId","updatedAt"]],
   ["ActionIdempotencyKey","SELECT",["id","keyHash","action","scope","requestHash","statusCode","responsePayload","createdAt","completedAt","expiresAt"]],
   ["ActionIdempotencyKey","INSERT",["id","keyHash","action","scope","requestHash","createdAt","expiresAt"]],
@@ -1001,6 +1003,7 @@ const printingOwnerPolicies = [
   ["Licensee","SELECT",`${printingSession} OR (${printingConnector} AND id=current_setting('app.printing_licensee_id',true))`],
   ["Organization","SELECT",printingSession],
   ["AuditLog","INSERT",`(${printingSession} OR (${printingConnectorEvidence})) AND id=current_setting('app.printing_audit_id',true)`],
+  ["AuditLog","SELECT",`${printingSession} AND ${printingOperation}='printing-connector-upgrade-protect' AND "userId"=current_setting('app.printing_user_id',true) AND "orgId" IS NOT DISTINCT FROM nullif(current_setting('app.printing_organization_id',true),'') AND "licenseeId" IS NOT DISTINCT FROM nullif(current_setting('app.printing_licensee_id',true),'') AND action='PRINTER_TEST_LABEL_CONFIRMED' AND "entityType"='Printer' AND "entityId"=${printingPrinterId}`],
   ["SecurityEventOutbox","INSERT",`(${printingSession} OR (${printingConnectorEvidence})) AND id=current_setting('app.printing_outbox_id',true)`],
   ["ActionIdempotencyKey","SELECT",`${printingSession} AND ${printingOperation} LIKE 'printing-idempotency-%' AND "keyHash"=${printingIdempotencyKeyHash}`],
   ["ActionIdempotencyKey","INSERT",`${printingSession} AND ${printingOperation}='printing-idempotency-begin' AND "keyHash"=${printingIdempotencyKeyHash}`],
@@ -1012,6 +1015,11 @@ const printingLifecycleSecurity = Object.freeze({
   functionSource:printingLifecycleSource,rollbackDefinition:printingLifecycleRollback,
   deploymentPhase:"release-fix-5-printing-lifecycle",
   ownerPrivileges:printingOwnerPrivileges,ownerPolicies:printingOwnerPolicies,
+});
+const printingUpgradeSecurity = Object.freeze({
+  ...printingLifecycleSecurity,
+  ownerPrivileges:[...printingOwnerPrivileges,["PrintItemEvent","SELECT",["eventType","previousState","nextState","details"]]],
+  ownerPolicies:[...printingOwnerPolicies,["PrintItemEvent","SELECT",`${printingConnector} AND ${printingOperation}='printing-connector-upgrade-protect' AND "printItemId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb))`]],
 });
 const publicOperation = `current_setting('app.public_verification_operation',true)`;
 const publicOwner = `current_user={{AUTH_OWNER}} AND session_user={{PREAUTH_ROLE}} AND ${publicOperation} LIKE 'public-verification-%'`;
@@ -1403,6 +1411,12 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     ["printer-administration","printing_printer_administration","text,text,text,text,text,jsonb","p_capability text, p_purpose text, p_request_id text, p_operation text, p_printer_id text, p_payload jsonb","jsonb",
       [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["PrinterRegistration","SELECT"],["Printer","SELECT"],["Printer","INSERT"],["Printer","UPDATE"],["Printer","DELETE"],["PrintJob","SELECT"],["PrintSession","SELECT"],["PrintItem","SELECT"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]],
       ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:administerPrintingPrinter"]],
+    ["upgrade-protect-unknown","printing_upgrade_protect_unknown","text,text,text,text,text,jsonb","p_capability text, p_request_id text, p_printer_id text, p_fence_request_id text, p_journal_sha256 text, p_entries jsonb","jsonb",
+      [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["Printer","SELECT"],["PrintJob","SELECT"],["PrintJob","UPDATE"],["PrintSession","SELECT"],["PrintSession","UPDATE"],["PrintItem","SELECT"],["PrintItem","UPDATE"],["PrintItemEvent","SELECT"],["PrintItemEvent","INSERT"],["AuditLog","SELECT"]],
+      ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:protectUpgradeUnknownAttempts"]],
+    ["upgrade-handoff","printing_upgrade_handoff","text,text,jsonb","p_operation text, p_token_hash text, p_binding jsonb","jsonb",
+      [["SystemCheckpoint","SELECT"],["SystemCheckpoint","UPDATE"]],
+      ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:redeemPrintingUpgradeHandoff"]],
     ["idempotency","printing_idempotency","text,text,text,text,text,text,text,integer,jsonb","p_capability text, p_purpose text, p_request_id text, p_operation text, p_action text, p_key_hash text, p_request_hash text, p_status_code integer, p_response jsonb","jsonb",
       [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["ActionIdempotencyKey","SELECT"],["ActionIdempotencyKey","INSERT"],["ActionIdempotencyKey","UPDATE"]],
       ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:beginPrintingIdempotency","backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:completePrintingIdempotency","backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:abortPrintingIdempotency"]],
@@ -1435,8 +1449,9 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
       ["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:mutatePrintingReissueRequest"]],
   ].map(([id,name,signature,identityArguments,returnType,tableCommands,repositoryCallers]) => ({
     id:`release-fix-5-${id}`,schema:"app_rls",name,signature,returnType,identityArguments,
-    definitionLocation:printingLifecycleSource,definitionKind:"checked-in-production-package",
-    definitionStatus:"production-reviewed",security:printingLifecycleSecurity,tableCommands,
+    definitionLocation:["printing_printer_administration","printing_reissue_request","printing_upgrade_protect_unknown","printing_upgrade_handoff"].includes(name)
+      ? printingUpgradeNoReplaySource : printingLifecycleSource,definitionKind:"checked-in-production-package",
+    definitionStatus:"production-reviewed",security:name==="printing_upgrade_protect_unknown" ? printingUpgradeSecurity : printingLifecycleSecurity,tableCommands,
     context:"Uses the authenticated database-session capability or the exact connector evidence boundary, derives live tenant and manufacturer scope, and validates one fixed printing lifecycle operation under FORCE RLS.",
     canonicalWorkflowIds:[`workflow-release-fix-5-${id}`],repositoryCallers,
     inputAuthority:"database-verified session or reviewed connector evidence; record identifiers are selectors only",

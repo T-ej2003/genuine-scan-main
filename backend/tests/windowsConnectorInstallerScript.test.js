@@ -108,6 +108,8 @@ const run = async () => {
   const sourceVersionHelper = fs.readFileSync(sourceVersionHelperPath, "utf8");
   const smokeScript = fs.readFileSync(smokeScriptPath, "utf8");
   const installerTemplate = fs.readFileSync(installerTemplatePath, "utf8");
+  const upgradeTransaction = fs.readFileSync(path.join(__dirname, '..', 'local-print-agent', 'install', 'windows', 'connector-upgrade-transaction.ps1'), 'utf8');
+  const existingUpgradeCertification = fs.readFileSync(path.join(__dirname, '..', 'local-print-agent', 'install', 'windows', 'certify-existing-upgrade.ps1'), 'utf8');
   const readme = fs.readFileSync(readmePath, "utf8");
   const signedReleaseWorkflow = fs.readFileSync(signedReleaseWorkflowPath, "utf8");
 
@@ -207,9 +209,13 @@ const run = async () => {
     "Windows installer must expand the supported per-user profile environment constant before signing"
   );
   const supportedInnoConstants = new Set([
-    "app", "cmd", "tmp", "srcexe", "sys", "%USERPROFILE",
-    "param:MSCQRAUTH|", "param:MSCQRRECOVER|",
+    "app", "cmd", "tmp", "srcexe", "sys", "localappdata", "%USERPROFILE",
+    "param:MSCQRRECOVER|",
   ]);
+  assert(installerTemplate.includes("RunUpgrade('Acquire')") &&
+    installerTemplate.includes("connector-upgrade\\authorization.json") &&
+    !installerTemplate.includes('param:MSCQRAUTH|'),
+    'existing installations must acquire a private installer authorization automatically');
   for (const [, pathExpression] of installerTemplate.matchAll(/ExpandConstant\('([^']+)'\)/g)) {
     for (const [, constant] of pathExpression.matchAll(/\{([^{}]+)\}/g)) {
       assert(supportedInnoConstants.has(constant), "Unsupported Inno runtime constant: " + constant);
@@ -353,6 +359,12 @@ const run = async () => {
     "Interactive failures must show a failed Finished page while upgrade recovery still runs at setup exit"
   );
   assert(
+    installerTemplate.includes("FileExists(ExpandConstant('{localappdata}\\MSCQR\\connector-upgrade\\transaction.json'))") &&
+      installerTemplate.indexOf("if not RunUpgrade('Recover') then begin") < installerTemplate.indexOf("if not RunUpgrade('Acquire') then") &&
+      installerTemplate.includes('if RecoveryCompleted then begin'),
+    "Double-clicking the installer must resume a fenced prior upgrade before creating another attempt"
+  );
+  assert(
     installerTemplate.includes('function VerifyUpgradePayloadSignatures: Boolean;') &&
       installerTemplate.includes('Result := VerifyUpgradePayloadSignatures;') &&
       installerTemplate.includes("$runtime.Status -ne ''Valid''") &&
@@ -363,6 +375,33 @@ const run = async () => {
       installerTemplate.includes('-ExecutionPolicy RemoteSigned -File') &&
       !installerTemplate.includes('-ExecutionPolicy AllSigned -File'),
     "Upgrade execution must verify the signed transaction and sourced helper scripts before noninteractive launch"
+  );
+  assert(installerTemplate.includes('AppId={{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}') &&
+    installerTemplate.includes('UsePreviousAppDir=yes') &&
+    installerTemplate.includes("ExpandConstant('{app}') + '\" -AuthorizationFile") &&
+    upgradeTransaction.includes('Previous connector installation directory requires separate compatibility verification.') &&
+    upgradeTransaction.includes('Uninstall\\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1') &&
+    upgradeTransaction.includes("Get-MscqrRuntimeVersion $runtime") &&
+    upgradeTransaction.includes('Connector checkpoint listener ownership is unverified.') &&
+    upgradeTransaction.includes('Connector did not reach a drained maintenance checkpoint.') &&
+    upgradeTransaction.includes("$uri.AbsolutePath -cne '/api/connector-upgrade/handoff'") &&
+    upgradeTransaction.includes("Handoff cannot carry browser credentials.") &&
+    !upgradeTransaction.includes('X-Database-Session-Capability') &&
+    upgradeTransaction.indexOf("Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options") > 0 &&
+    upgradeTransaction.indexOf("Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") &&
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") > 0 &&
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") &&
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") > 0 &&
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/shutdown'") &&
+    !upgradeTransaction.includes('$process.Kill()'),
+    "Upgrade must drain fenced work and request a connector-owned shutdown before replacement"
+  );
+  assert(existingUpgradeCertification.includes("[Parameter(Mandatory=$true)][ValidateSet('Before','After')][string]$Stage") &&
+    existingUpgradeCertification.includes(' -TargetVersion $expectedTargetVersion') &&
+    existingUpgradeCertification.includes("$version -cne $TargetVersion -or $runtimeHash -cne $TargetRuntimeSha256") &&
+    existingUpgradeCertification.includes("$before.runtimeSha256 -ceq $record.runtimeSha256") &&
+    existingUpgradeCertification.includes("$before.journal | ConvertTo-Json"),
+    "Existing-install certification must prove the signed target replaced the old runtime without changing journal records"
   );
   assert(
     readme.includes("Needs attention: connector installed and running"),

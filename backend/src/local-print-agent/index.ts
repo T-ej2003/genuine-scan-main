@@ -39,8 +39,10 @@ import {
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "./crypto";
-import { signUpgradeDeviceChallenge, upgradeChallengeSchema } from "../services/connectorUpgradeDeviceProof";
+import { postInstallStatementSchema, signMaintenanceCheckpoint, signUpgradeDeviceChallenge, upgradeChallengeSchema } from "../services/connectorUpgradeDeviceProof";
+import { createHash } from "crypto";
 import { enterMaintenanceFence, maintenanceCheckpoint } from "./maintenanceFence";
+import { inspectDispatchJournal } from "./dispatchJournal";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
 const app = express();
@@ -201,6 +203,26 @@ if (cliArgs.has("--validate-state")) {
   }).catch(() => { console.error("Existing connector identity validation failed."); process.exit(1); });
 }
 
+if (cliArgs.has("--sign-upgrade-challenge")) {
+  (async () => {
+    let input = "";
+    for await (const chunk of process.stdin) {
+      input += String(chunk);
+      if (input.length > 4096) throw new Error("Upgrade challenge exceeds the bounded input.");
+    }
+    const challenge = upgradeChallengeSchema.parse(JSON.parse(input));
+    const state = await loadAgentState({ initialize: false });
+    if (challenge.targetVersion !== AGENT_BUILD_VERSION ||
+        challenge.agentId !== state.agentId || challenge.deviceFingerprint !== state.deviceFingerprint ||
+        Date.parse(challenge.expiresAt) <= Date.now() || Date.parse(challenge.expiresAt) > Date.now() + 120_000) {
+      throw new Error("Upgrade challenge does not match the existing device.");
+    }
+    console.log(JSON.stringify({ challengeId: challenge.challengeId,
+      signature: signUpgradeDeviceChallenge(state.privateKeyPem, challenge) }));
+    process.exit(0);
+  })().catch(() => { console.error("Upgrade device proof could not be established."); process.exit(1); });
+}
+
 if (cliArgs.has("--self-test")) {
   runSelfTest()
     .then(() => process.exit(0))
@@ -222,7 +244,7 @@ if (cliArgs.has("--self-test")) {
 
 let singleInstanceLock: { lockPath: string; fd: number } | null = null;
 try {
-  if (!cliArgs.has("--validate-state")) singleInstanceLock = acquireSingleInstanceLock();
+  if (!cliArgs.has("--validate-state") && !cliArgs.has("--sign-upgrade-challenge")) singleInstanceLock = acquireSingleInstanceLock();
 } catch (error: any) {
   console.error(
     JSON.stringify({
@@ -474,6 +496,16 @@ app.get("/maintenance/checkpoint", (_req, res) => {
   return res.json({ ...maintenanceCheckpoint(), socketClosed: directPrintSocketClosed() });
 });
 
+app.post("/maintenance/shutdown", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const checkpoint = maintenanceCheckpoint();
+  if (!checkpoint.fenced || !checkpoint.idle || !directPrintSocketClosed()) {
+    return res.status(409).json({ success: false, error: "Connector maintenance has not drained." });
+  }
+  res.once("finish", () => setImmediate(() => process.exit(0)));
+  return res.json({ success: true });
+});
+
 app.post("/maintenance/device-proof", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {
@@ -488,6 +520,53 @@ app.post("/maintenance/device-proof", async (req, res) => {
       signature: signUpgradeDeviceChallenge(state.privateKeyPem, challenge) });
   } catch {
     return res.status(403).json({ success: false, error: "Connector upgrade device challenge was rejected." });
+  }
+});
+
+app.post("/maintenance/checkpoint-evidence", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const challenge = upgradeChallengeSchema.parse(req.body);
+    const state = await loadAgentState();
+    if (challenge.agentId !== state.agentId || challenge.deviceFingerprint !== state.deviceFingerprint ||
+        challenge.currentVersion !== AGENT_BUILD_VERSION || Date.parse(challenge.expiresAt) <= Date.now() - 180_000 ||
+        Date.parse(challenge.expiresAt) > Date.now() + 300_000) throw new Error("Checkpoint challenge rejected");
+    if (!maintenanceCheckpoint().fenced) throw new Error("Maintenance fence is absent");
+    enterMaintenanceFence();
+    stopDirectPrintAcquisition();
+    const checkpoint = { ...maintenanceCheckpoint(), socketClosed: directPrintSocketClosed() };
+    if (!checkpoint.fenced || !checkpoint.idle || !checkpoint.socketClosed) {
+      return res.status(409).json({ success: false, error: "Connector work has not drained." });
+    }
+    const journal = await inspectDispatchJournal();
+    const evidence = signMaintenanceCheckpoint(state.privateKeyPem, { purpose: "mscqr-connector-maintenance-checkpoint-v1",
+      challenge, observedAt: new Date().toISOString(), fence: checkpoint, journal, physicalOutcomes: "UNVERIFIED" });
+    return res.json({ success: true, evidence });
+  } catch {
+    return res.status(403).json({ success: false, error: "Connector maintenance checkpoint could not be verified." });
+  }
+});
+
+app.post("/maintenance/postinstall-proof", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const { attemptId } = z.object({ attemptId: z.string().uuid() }).strict().parse(req.body);
+    const state = await loadAgentState({ initialize: false });
+    const session = getPersistentPrintSessionStatus();
+    if (!maintenanceCheckpoint().fenced || !session.connected || !session.sessionId ||
+        !session.registrationId || !session.selectedPrinterId || session.selectedPrinterId !== state.selectedPrinterId ||
+        !session.lastHeartbeatAt || Date.now() - Date.parse(session.lastHeartbeatAt) > 120_000)
+      throw new Error("Post-install session is not trusted");
+    const journal = await inspectDispatchJournal();
+    const statement = JSON.stringify(postInstallStatementSchema.parse({ purpose: "mscqr-connector-upgrade-postinstall-v1",
+      attemptId, observedAt: new Date().toISOString(), version: AGENT_BUILD_VERSION,
+      sha256: createHash("sha256").update(await fs.promises.readFile(process.execPath)).digest("hex"),
+      agentId: state.agentId, deviceFingerprint: state.deviceFingerprint,
+      registrationId: session.registrationId, selectedPrinterId: session.selectedPrinterId,
+      sessionId: session.sessionId, journalSha256: journal.sha256, fenced: true }));
+    return res.json({ success: true, proof: { statement, signature: signPrinterAgentPayload(state.privateKeyPem, statement) } });
+  } catch {
+    return res.status(409).json({ success: false, error: "Post-install connector verification is unavailable." });
   }
 });
 
@@ -658,7 +737,8 @@ app.post("/print", async (_req, res) => {
   });
 });
 
-if (!cliArgs.has("--self-test") && !cliArgs.has("--validate-state") && !cliArgs.has("--initialize-state")) {
+if (!cliArgs.has("--self-test") && !cliArgs.has("--validate-state") && !cliArgs.has("--initialize-state") &&
+    !cliArgs.has("--sign-upgrade-challenge")) {
   loadAgentState({ initialize: false }).then(() => {
     app.listen(PORT, HOST, () => {
       console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);

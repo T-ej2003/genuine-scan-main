@@ -60,8 +60,10 @@ const connection = (raw) => {
 };
 const psql = (raw, sql, expectFailure = false) => {
   const target = connection(raw);
-  const result = spawnSync("psql", [target.url, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", sql], {
+  const large = Buffer.byteLength(sql) > 100_000;
+  const result = spawnSync("psql", [target.url, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", ...(large ? [] : ["-c", sql])], {
     encoding: "utf8",
+    ...(large ? { input: sql } : {}),
     env: { ...process.env, PGPASSWORD: target.password },
   });
   const output = `${result.stdout || ""}${result.stderr || ""}`.trim();
@@ -110,6 +112,15 @@ async function main() {
     SET ROLE "mscqr_rls_cert_owner";
     REVOKE CREATE ON SCHEMA app_rls FROM "mscqr_rls_cert_auth_owner";
     COMMIT;`);
+  assert.equal(psql(admin, `SELECT has_function_privilege('mscqr_rls_cert_app',
+    'app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb)', 'EXECUTE')`), 't');
+  assert.equal(psql(admin, `SELECT has_column_privilege('mscqr_rls_cert_auth_owner',
+    'public."PrintItemEvent"', 'eventType', 'SELECT')`), 't');
+  assert.equal(psql(admin, `SELECT has_table_privilege('mscqr_rls_cert_app',
+    'public."PrintItemEvent"', 'SELECT')`), 'f');
+  denied(app, `SELECT "printItemId", "eventType" FROM public."PrintItemEvent" LIMIT 1`, /permission denied/);
+  assert.equal(psql(admin, `SELECT has_function_privilege('mscqr_rls_cert_app',
+    'app_rls.printing_upgrade_handoff(text,text,jsonb)', 'EXECUTE')`), 't');
   const idempotencyKeyHash = hash("printing-idempotency-key");
   const idempotencyRequestHash = hash("printing-idempotency-request");
   const abortedKeyHash = hash("printing-idempotency-aborted-key");
@@ -1494,7 +1505,8 @@ async function main() {
       {user:{userId:ids.maker}},'print.mutation',req=>req.user.userId);
     await rateRedis.del(`rl:${routeKey}`);
     const authorityResult=await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(statement)},200);
-    await postMaintenance('maker',{action:'authorize',evidence:lastAuthorizeEvidence},403);
+    const recoveredAuthorization=await postMaintenance('maker',{action:'authorize',evidence:lastAuthorizeEvidence},200);
+    assert.equal(recoveredAuthorization.data.token,authorityResult.data.token,'lost response must recover the same authorization');
     const expiredChallengeId=randomUUID();
     const expiredProofSha256=hash(expiredChallengeId);
     const expiredStatement={...statement,challengeId:expiredChallengeId,deviceProofSha256:expiredProofSha256};
@@ -1511,7 +1523,7 @@ async function main() {
     let token=authorityResult.data.token;
     await postMaintenance('maker',{action:'consume',token,binding:{...binding,attemptId:randomUUID()}},403);
     const consumeResults=await Promise.all([postMaintenance('maker',{action:'consume',token,binding}),postMaintenance('maker',{action:'consume',token,binding})]);
-    assert.deepEqual(consumeResults.map(result=>result.status).sort(),[200,403],'exactly one concurrent consumption may succeed');
+    assert.deepEqual(consumeResults.map(result=>result.status).sort(),[200,200],'identical concurrent consumption must be safe to retry');
     await postMaintenance('maker',{action:'verify',token,binding},200);
     const expiredToken=token;
     psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,'{upgrade,expiresAt}',to_jsonb((clock_timestamp()-interval '1 second')::text))
@@ -1523,13 +1535,17 @@ async function main() {
     await postMaintenance('maker',{action:'verify',token:expiredToken,binding},403);
     await postMaintenance('maker',{action:'verify',token,binding},200);
     assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${claim.printItemId}'`),'PRINT_CONFIRMED','authorization must not reset lifecycle records');
-    const releaseStatement={...statement,purpose:'mscqr-upgrade-verification-v1',runtime:{version:binding.targetVersion,sha256:binding.targetSha256,
+    const releaseStatement={...statement,purpose:'mscqr-upgrade-verification-v1',tokenHash:hash(token),runtime:{version:binding.targetVersion,sha256:binding.targetSha256,
       agentId:binding.agentId,deviceFingerprint:binding.deviceFingerprint,processCount:1,verificationSha256:hash('disposable-runtime-verification')}};
     await postMaintenance('maker',{action:'release',evidence:signedEvidence(statement)},409);
     await postMaintenance('maker',{action:'release',evidence:signedEvidence({...releaseStatement,runtime:{...releaseStatement.runtime,processCount:2}})},403);
+    const releaseStatusSql=bound=>`SELECT app_rls.printing_upgrade_handoff('RELEASE_STATUS','${hash(token)}','${JSON.stringify(bound)}'::jsonb)`;
+    denied(app,releaseStatusSql(binding),/UPGRADE_HANDOFF_DENIED/);
     const released=await postMaintenance('maker',{action:'release',evidence:signedEvidence(releaseStatement)},200);
     assert.equal(released.data.dispatchFenced,false);
     assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_STATUS')).state,'ACTIVE');
+    assert.deepEqual(json(app,releaseStatusSql(binding)),{released:true,dispatchFenced:false,binding});
+    denied(app,releaseStatusSql({...binding,printerId:randomUUID()}),/UPGRADE_HANDOFF_DENIED/);
     await require('./maintenanceHistoryFixture')({admin,app,psql,psqlAsync,ids,capability:caps.maker,templateJobId:created.job.id,postMaintenance,binding,statement,signedEvidence,hash});
   } finally {
     await new Promise(resolve=>maintenanceServer.close(resolve));
@@ -2325,7 +2341,7 @@ async function main() {
   const rollback = readFileSync(
     path.resolve(__dirname, "../../../src/rls-waves/session-c/c02/printingLifecycleRollback.sql"),
     "utf8"
-  );
+  ).replaceAll('"mscqr_prd_rls_phase2_auth_owner"', '"mscqr_rls_cert_auth_owner"');
   const functionRollbackAt = rollback.indexOf("REVOKE ALL ON FUNCTION");
   assert(functionRollbackAt > 0, "printing rollback must separate policy and function ownership phases");
   psql(admin, `BEGIN;
@@ -2336,7 +2352,11 @@ async function main() {
     ${rollback.slice(functionRollbackAt)}
     RESET ROLE;
     COMMIT;`);
-  assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_policies WHERE schemaname='public' AND policyname LIKE 'printing_lifecycle_%'`)), 0);
+  const remainingPrintingPolicies=psql(admin, `SELECT coalesce(string_agg(tablename||'.'||policyname,',' ORDER BY tablename,policyname),'')
+    FROM pg_policies WHERE schemaname='public' AND (policyname LIKE 'printing_lifecycle_%' OR policyname LIKE 'printing_upgrade_%')`);
+  assert.equal(remainingPrintingPolicies, '', `printing rollback left policies: ${remainingPrintingPolicies}`);
+  assert.equal(psql(admin, `SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."PrintItemEvent"','details','SELECT')`), 'f',
+    'upgrade-only event privilege must be removed during lifecycle rollback');
   assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='app_rls' AND p.proname LIKE 'printing_%'`)), 0);
   assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE
     (n.nspname='app_auth' AND p.proname='require_authenticated_session')

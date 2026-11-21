@@ -1,4 +1,20 @@
-import { createPublicKey, verify, createHash } from "crypto";
+import { createPrivateKey, createPublicKey, verify, createHash, sign } from "crypto";
+
+export const issueConnectorIsolationEvidence = (statement: Record<string, unknown>) => {
+  const privatePem = process.env.CONNECTOR_ISOLATION_AUTHORITY_PRIVATE_KEY_PEM;
+  const publicPem = process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM;
+  if (!privatePem || !publicPem) throw new Error("ISOLATION_AUTHORITY_NOT_CONFIGURED");
+  const privateKey = createPrivateKey(privatePem);
+  const publicKey = createPublicKey(publicPem);
+  if (privateKey.asymmetricKeyType !== "ed25519" || publicKey.asymmetricKeyType !== "ed25519" ||
+      createPublicKey(privateKey).export({ format: "der", type: "spki" }).toString("hex") !==
+        publicKey.export({ format: "der", type: "spki" }).toString("hex"))
+    throw new Error("ISOLATION_AUTHORITY_KEY_MISMATCH");
+  const text = JSON.stringify(statement);
+  const envelope = { statement: text, signature: sign(null, Buffer.from(text), privateKey).toString("base64") };
+  verifyConnectorIsolationEvidence(envelope, String(statement.purpose));
+  return envelope;
+};
 
 // This trust anchor is server configuration, never supplied by the caller.
 // No default key or production bypass is permitted. Provisioning it is a

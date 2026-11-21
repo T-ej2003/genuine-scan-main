@@ -201,7 +201,9 @@ for (const file of walk(path.join(root, "src"))) {
           source: `${rel(file)}:${lineOf(node, source)}`,
           call: textOf(node, source),
           dynamic: !endpoint,
-          runtimeOrigin: file.endsWith("internal-client-local-agent.ts") ? "loopback-print-agent" : "mscqr-backend",
+          runtimeOrigin: file.endsWith("internal-client-local-agent.ts") ||
+            (name === "fetch" && node.arguments[0].getText(source).startsWith("`${localBase}"))
+            ? "loopback-print-agent" : "mscqr-backend",
         });
       }
       if (name === "navigate" && node.arguments[0] && !literalPath(node.arguments[0], source)) {

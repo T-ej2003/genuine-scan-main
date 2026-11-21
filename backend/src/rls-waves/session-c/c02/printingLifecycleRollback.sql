@@ -2,6 +2,7 @@ DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_insert ON public."
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_select ON public."ActionIdempotencyKey";
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_update ON public."ActionIdempotencyKey";
 DROP POLICY IF EXISTS printing_lifecycle_auditlog_insert ON public."AuditLog";
+DROP POLICY IF EXISTS printing_lifecycle_auditlog_select ON public."AuditLog";
 DROP POLICY IF EXISTS printing_lifecycle_batch_select ON public."Batch";
 DROP POLICY IF EXISTS printing_lifecycle_batch_update ON public."Batch";
 DROP POLICY IF EXISTS printing_lifecycle_licensee_select ON public."Licensee";
@@ -29,6 +30,8 @@ DROP POLICY IF EXISTS printing_lifecycle_printitem_select ON public."PrintItem";
 DROP POLICY IF EXISTS printing_lifecycle_printitem_update ON public."PrintItem";
 DROP POLICY IF EXISTS printing_lifecycle_printitemevent_insert ON public."PrintItemEvent";
 DROP POLICY IF EXISTS printing_lifecycle_printitemevent_select ON public."PrintItemEvent";
+DROP POLICY IF EXISTS printing_upgrade_printitemevent_select ON public."PrintItemEvent";
+REVOKE SELECT ("eventType","previousState","nextState",details) ON public."PrintItemEvent" FROM "mscqr_prd_rls_phase2_auth_owner";
 DROP POLICY IF EXISTS printing_lifecycle_printjobchunk_select ON public."PrintJobChunk";
 DROP POLICY IF EXISTS printing_lifecycle_printjob_insert ON public."PrintJob";
 DROP POLICY IF EXISTS printing_lifecycle_printjob_select ON public."PrintJob";
@@ -53,6 +56,8 @@ REVOKE ALL ON FUNCTION app_rls.printing_control_job(text,text,text,text,text,tex
 REVOKE ALL ON FUNCTION app_rls.printing_printer_administration(text,text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_idempotency(text,text,text,text,text,text,text,integer,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_connector_registration(text,text,text,text,jsonb) FROM PUBLIC;
+DROP FUNCTION IF EXISTS app_rls.printing_upgrade_handoff(text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb);
 REVOKE ALL ON FUNCTION app_rls.printing_maintenance_gate(text,text,text,jsonb) FROM PUBLIC;
 DROP FUNCTION IF EXISTS app_rls.printing_maintenance_gate(text,text,text,jsonb);
 REVOKE ALL ON FUNCTION app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb) FROM PUBLIC;

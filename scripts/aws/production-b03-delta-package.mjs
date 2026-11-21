@@ -13,14 +13,16 @@ const productionRole = (sql) => sql.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls
 const functionName = (identity) => /^app_rls\.([a-z0-9_]+)\(/.exec(identity)?.[1];
 const sqlFile = (relativePath, repositoryRoot) => fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8");
 
-// C02 printing grants belong to its separately governed installation, never B03.
+// C02 printing and connector-upgrade grants belong to their separately governed installations, never B03.
 export function selectB03GrantDelta(changedGrants) {
   const c02Grants = new Set(NAMED_SQL_FUNCTION_CONTRACTS
-    .filter(({ name }) => ["printing_connector_session", "printing_control_job", "printing_reissue_request"].includes(name))
+    .filter(({ name }) => ["printing_connector_session", "printing_control_job", "printing_reissue_request", "printing_upgrade_protect_unknown"].includes(name))
     .flatMap(({ security }) => security.ownerPrivileges)
     .filter(([table, privilege]) => table === "PrinterAgentSession" ||
+      (table === "AuditLog" && privilege === "SELECT") ||
       (privilege === "SELECT" && ["PrintItemEvent", "PrintJobChunk"].includes(table)) ||
-      (table === "QRCode" && ["SELECT", "UPDATE"].includes(privilege)))
+      (table === "QRCode" && ["SELECT", "UPDATE"].includes(privilege)) ||
+      (["PrintItem", "PrintSession"].includes(table) && privilege === "UPDATE"))
     .map(([table, privilege, columns]) => `GRANT ${privilege} (${columns.map((column) => `"${column}"`).join(", ")}) ON TABLE public."${table}" TO "mscqr_prd_rls_phase2_auth_owner";`));
   const publicVerification = NAMED_SQL_FUNCTION_CONTRACTS.find(({ name }) => name === "verify_signed_qr");
   assert.ok(publicVerification?.security?.ownerPrivileges);

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434",
+  "sourceContractSha256": "984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -50,7 +50,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "60dde8129e6d2d8100f765f7bea24eaf1a2c8de882cab314e07cddac3f1c9e7d"
+      "sha256": "4cb1b7cc6929c8320ed55515dc2a6a1c4d4e7815bc0858ce16beaea43a6bd281"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -62,15 +62,15 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "69e378165329c10537c8c598fd0d05037bde29d8fb96097725d9f6385fe5c02e"
+      "sha256": "dc610e33aedf67547111fc09abe53708e5ef39e91414d601e1830035f0b593c9"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
-      "sha256": "4a273e76254285c9701144f0cb6de63f8eb721043db736143c63cd292d43b055"
+      "sha256": "adff93af77760f7a1068188270cd137319adc44e5f2f33dc3acb9b90b4d840c7"
     },
     {
       "path": "scripts/rls/certify-clean-room-database.mjs",
-      "sha256": "0b7561de84f8684060420a63786b3627cae5c57bab01c3e3e3f466e3b645d2b9"
+      "sha256": "252970f3c5a8636ae66eda37c3685d9df0e8a4fe3940491ccb1ba00594c012d7"
     },
     {
       "path": "scripts/rls/create-production-rls-approval.mjs",
@@ -94,7 +94,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "e552db847b6ae8584ce26c0d0d4094ea8bf9bfb3d649ad2fc53f03d0c12d5671"
+      "sha256": "909b93bd85c32d3689f46729277b6202d18caa11ee98761d1fde1c7b7cf5d01e"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -2656,6 +2656,33 @@
         "contract:release-fix-5-reissue-request:AuditLog:INSERT",
         "contract:release-fix-5-release-batch:AuditLog:INSERT",
         "contract:release-fix-5-test-label-job:AuditLog:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log",
+      "table": "AuditLog",
+      "policyName": "printing_lifecycle_auditlog_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND \"userId\"=current_setting('app.printing_user_id',true) AND \"orgId\" IS NOT DISTINCT FROM nullif(current_setting('app.printing_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.printing_licensee_id',true),'') AND action='PRINTER_TEST_LABEL_CONFIRMED' AND \"entityType\"='Printer' AND \"entityId\"=current_setting('app.printing_printer_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-upgrade-protect-unknown:AuditLog:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -6053,7 +6080,8 @@
         "contract:release-fix-5-record-sample:Licensee:SELECT",
         "contract:release-fix-5-reissue-request:Licensee:SELECT",
         "contract:release-fix-5-release-batch:Licensee:SELECT",
-        "contract:release-fix-5-test-label-job:Licensee:SELECT"
+        "contract:release-fix-5-test-label-job:Licensee:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:Licensee:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -6598,7 +6626,8 @@
         "contract:release-fix-5-record-sample:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-5-reissue-request:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-5-release-batch:ManufacturerLicenseeLink:SELECT",
-        "contract:release-fix-5-test-label-job:ManufacturerLicenseeLink:SELECT"
+        "contract:release-fix-5-test-label-job:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:ManufacturerLicenseeLink:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -7255,7 +7284,8 @@
         "contract:release-fix-5-record-sample:Organization:SELECT",
         "contract:release-fix-5-reissue-request:Organization:SELECT",
         "contract:release-fix-5-release-batch:Organization:SELECT",
-        "contract:release-fix-5-test-label-job:Organization:SELECT"
+        "contract:release-fix-5-test-label-job:Organization:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:Organization:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -8027,6 +8057,7 @@
         "contract:release-fix-5-printer-administration:Printer:SELECT",
         "contract:release-fix-5-reissue-request:Printer:SELECT",
         "contract:release-fix-5-test-label-job:Printer:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:Printer:SELECT",
         "contract:release-fix-5-worker-network:Printer:SELECT"
       ],
       "workflowId": null,
@@ -8404,6 +8435,7 @@
         "contract:release-fix-5-readiness:PrintItem:SELECT",
         "contract:release-fix-5-reissue-request:PrintItem:SELECT",
         "contract:release-fix-5-release-batch:PrintItem:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItem:SELECT",
         "contract:release-fix-5-worker-network:PrintItem:SELECT",
         "contract:release-fix-5-worker-reconcile:PrintItem:SELECT"
       ],
@@ -8436,6 +8468,7 @@
         "contract:release-fix-5-control-job:PrintItem:UPDATE",
         "contract:release-fix-5-gateway-job:PrintItem:UPDATE",
         "contract:release-fix-5-reissue-request:PrintItem:UPDATE",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItem:UPDATE",
         "contract:release-fix-5-worker-network:PrintItem:UPDATE",
         "contract:release-fix-5-worker-reconcile:PrintItem:UPDATE"
       ],
@@ -8491,6 +8524,7 @@
       "sourceCommandRuleIds": [
         "contract:release-fix-5-connector-event:PrintItemEvent:INSERT",
         "contract:release-fix-5-gateway-job:PrintItemEvent:INSERT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItemEvent:INSERT",
         "contract:release-fix-5-worker-reconcile:PrintItemEvent:INSERT"
       ],
       "workflowId": null,
@@ -8518,10 +8552,35 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND \"printItemId\" IN (SELECT pi.id FROM public.\"PrintItem\" pi WHERE pi.\"printSessionId\"=current_setting('app.printing_original_session_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT"
+        "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItemEvent:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-item-event",
+      "table": "PrintItemEvent",
+      "policyName": "printing_upgrade_printitemevent_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "connector-upgrade-no-replay"
+      ],
+      "scopeType": "verified-upgrade-item-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND \"printItemId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_upgrade_item_ids',true),''),'[]')::jsonb))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItemEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Connector upgrade no-replay evidence",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -8622,6 +8681,7 @@
         "contract:release-fix-5-record-sample:PrintJob:SELECT",
         "contract:release-fix-5-reissue-request:PrintJob:SELECT",
         "contract:release-fix-5-release-batch:PrintJob:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintJob:SELECT",
         "contract:release-fix-5-worker-network:PrintJob:SELECT",
         "contract:release-fix-5-worker-reconcile:PrintJob:SELECT"
       ],
@@ -8653,6 +8713,7 @@
         "contract:release-fix-5-connector-event:PrintJob:UPDATE",
         "contract:release-fix-5-control-job:PrintJob:UPDATE",
         "contract:release-fix-5-gateway-job:PrintJob:UPDATE",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintJob:UPDATE",
         "contract:release-fix-5-worker-network:PrintJob:UPDATE"
       ],
       "workflowId": null,
@@ -8866,6 +8927,7 @@
         "contract:release-fix-5-readiness:PrintSession:SELECT",
         "contract:release-fix-5-reissue-request:PrintSession:SELECT",
         "contract:release-fix-5-release-batch:PrintSession:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintSession:SELECT",
         "contract:release-fix-5-worker-network:PrintSession:SELECT"
       ],
       "workflowId": null,
@@ -8896,6 +8958,7 @@
         "contract:release-fix-5-connector-event:PrintSession:UPDATE",
         "contract:release-fix-5-control-job:PrintSession:UPDATE",
         "contract:release-fix-5-gateway-job:PrintSession:UPDATE",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintSession:UPDATE",
         "contract:release-fix-5-worker-network:PrintSession:UPDATE"
       ],
       "workflowId": null,
@@ -11370,7 +11433,8 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user IN ('mscqr_rls_cert_app','mscqr_rls_cert_worker') AND \"key\"=current_setting('app.printing_maintenance_key',true) AND \"key\" LIKE 'connector-maintenance:%'",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:release-fix-5-maintenance-gate:SystemCheckpoint:SELECT"
+        "contract:release-fix-5-maintenance-gate:SystemCheckpoint:SELECT",
+        "contract:release-fix-5-upgrade-handoff:SystemCheckpoint:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -11397,7 +11461,8 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user IN ('mscqr_rls_cert_app','mscqr_rls_cert_worker') AND \"key\"=current_setting('app.printing_maintenance_key',true) AND \"key\" LIKE 'connector-maintenance:%'",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:release-fix-5-maintenance-gate:SystemCheckpoint:UPDATE"
+        "contract:release-fix-5-maintenance-gate:SystemCheckpoint:UPDATE",
+        "contract:release-fix-5-upgrade-handoff:SystemCheckpoint:UPDATE"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -12296,7 +12361,8 @@
         "contract:release-fix-5-record-sample:User:SELECT",
         "contract:release-fix-5-reissue-request:User:SELECT",
         "contract:release-fix-5-release-batch:User:SELECT",
-        "contract:release-fix-5-test-label-job:User:SELECT"
+        "contract:release-fix-5-test-label-job:User:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:User:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -12952,55 +13018,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434"
+      "marker": "mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2"
     }
   ]
 }

@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434'
+    AND source_contract_sha256='984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8152,6 +8152,15 @@ BEGIN
        p_details->'binding'->>'fenceRequestId' IS DISTINCT FROM current_value->>'requestId'
     THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
     IF p_operation='AUTHORIZE' THEN
+      -- A lost HTTP response may retry the same signed evidence and token.
+      -- A consumed token or different evidence must never be reissued.
+      IF current_value->'upgrade'->>'state'='AUTHORIZED' AND
+         current_value->'upgrade'->>'actor'=p_actor AND
+         current_value->'upgrade'->>'tokenHash'=p_details->>'tokenHash' AND
+         current_value->'upgrade'->'binding'=p_details->'binding' AND
+         current_value->'upgrade'->'evidence'=p_details->'evidence' AND
+         (current_value->'upgrade'->>'expiresAt')::timestamptz>clock_timestamp()
+      THEN RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',true); END IF;
       IF coalesce(p_details->>'tokenHash','') !~ '^[a-f0-9]{64}$' OR
          (current_value ? 'upgrade' AND (
            current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR
@@ -8184,9 +8193,14 @@ BEGIN
          current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR
          current_value->'upgrade'->'evidence'->>'workDigest' IS DISTINCT FROM p_details->>'workDigest' OR
          coalesce((current_value->'upgrade'->>'expiresAt')::timestamptz,'-infinity')<=clock_timestamp() OR
-         current_value->'upgrade'->>'state' IS DISTINCT FROM (CASE WHEN p_operation='CONSUME' THEN 'AUTHORIZED' ELSE 'CONSUMED' END)
+         (p_operation='CONSUME' AND current_value->'upgrade'->>'state' IS DISTINCT FROM 'AUTHORIZED' AND
+           current_value->'upgrade'->>'state' IS DISTINCT FROM 'CONSUMED') OR
+         (p_operation='VERIFY' AND current_value->'upgrade'->>'state' IS DISTINCT FROM 'CONSUMED')
       THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
       IF p_operation='CONSUME' THEN
+        IF current_value->'upgrade'->>'state'='CONSUMED' THEN
+          RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',true,'idempotent',true);
+        END IF;
         current_value:=jsonb_set(current_value,'{upgrade,state}',to_jsonb('CONSUMED'::text));
       END IF;
     END IF;
@@ -11936,7 +11950,6 @@ BEGIN
     'itemCount',cardinality(item_ids),'remaining',remaining,'idempotent',false);
 END
 $fn$;
-
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_identity(text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_registration(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
@@ -11945,10 +11958,8 @@ GRANT EXECUTE ON FUNCTION app_rls.printing_control_job(text,text,text,text,text,
 GRANT EXECUTE ON FUNCTION app_rls.printing_create_job(text,text,text,text,text,integer,text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_gateway_job(text,text,text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_idempotency(text,text,text,text,text,text,text,integer,jsonb) TO "mscqr_rls_cert_app";
-GRANT EXECUTE ON FUNCTION app_rls.printing_printer_administration(text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_readiness(text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_record_sample(text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
-GRANT EXECUTE ON FUNCTION app_rls.printing_reissue_request(text,text,text,text,text,text,integer,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_release_batch(text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_test_label_job(text,text,text,text,jsonb,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_worker_network_job(text,text,text,jsonb) TO "mscqr_rls_cert_worker";
@@ -16234,5 +16245,6 @@ JOIN pg_namespace n ON n.oid=p.pronamespace
 JOIN pg_roles owner_role ON owner_role.oid=p.proowner
 JOIN pg_language l ON l.oid=p.prolang
 WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops');
+
 UPDATE mscqr_rls_install.state SET phase='context-helpers-installed' WHERE singleton;
 COMMIT;

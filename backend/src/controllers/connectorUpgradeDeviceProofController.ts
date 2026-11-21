@@ -17,7 +17,7 @@ const newer = (target: string, source: string) => {
   return false;
 };
 
-const trustedBinding = async (req: AuthRequest) => {
+export const trustedBinding = async (req: AuthRequest) => {
   if (!req.user) throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
   const printerId = z.string().uuid().parse(req.params.id);
   const result = await readUpgradeDeviceBinding({ capability: String(req.databaseSessionCapability || ""),
@@ -64,7 +64,7 @@ export const issueConnectorUpgradeChallenge = async (req: AuthRequest, res: Resp
     const challenge = createUpgradeDeviceChallenge({ ...immutable, currentVersion: sourceVersion, attemptId: id });
     if (await redis.set(challengeKey(challenge.challengeId), JSON.stringify(challenge), "PX", 120_000, "NX") !== "OK")
       throw new Error("CONNECTOR_UPGRADE_CHALLENGE_STORE_UNAVAILABLE");
-    return res.json({ success: true, challenge });
+    return res.json({ success: true, data: { challenge } });
   } catch {
     return res.status(409).json({ success: false, error: "Connector upgrade device challenge is unavailable." });
   }
@@ -95,7 +95,7 @@ export const verifyConnectorUpgradeProof = async (req: AuthRequest, res: Respons
     const proof = verifyUpgradeDeviceChallenge({ challenge, signature, publicKeyPem,
       binding: { ...binding, attemptId: challenge.attemptId, sourceVersion: original.sourceVersion,
         currentVersion: sourceVersion, targetVersion: challenge.targetVersion } });
-    if (await redis.set(upgradeProofKey(challengeId), JSON.stringify({ challenge, proofSha256: proof.proofSha256 }),
+    if (await redis.set(upgradeProofKey(challengeId), JSON.stringify({ challenge, proofSha256: proof.proofSha256, publicKeyPem }),
       "PX", Math.max(1, Date.parse(challenge.expiresAt) - Date.now()), "NX") !== "OK")
       throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
     return res.json({ success: true, attemptId: challenge.attemptId, challengeId, proofSha256: proof.proofSha256 });

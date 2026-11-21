@@ -183,7 +183,7 @@ const reserveGatewayAttempt = async (claimed: any, payloadHash: string) => {
   const testId = String(claimed.testJobId || "").trim();
   const printItemId = testId ? `diagnostic:${testId}` : String(claimed.printItemId || "").trim();
   const printJobId = testId ? `diagnostic:${testId}` : String(claimed.printJobId || "").trim();
-  if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId: GATEWAY_ID, payloadHash })) {
+  if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId: GATEWAY_ID, gatewayId: GATEWAY_ID, payloadHash })) {
     throw Object.assign(new Error("Prior gateway dispatch requires reconciliation; replay refused."), { errorCode: "dispatch_reconciliation_required" });
   }
 };

@@ -1,7 +1,8 @@
 param(
-  [ValidateSet('Prepare','Activate','Commit','Recover')][string]$Operation,
+  [ValidateSet('Acquire','Prepare','Activate','Commit','Recover')][string]$Operation,
   [string]$PayloadDirectory,
   [string]$InstallerFile,
+  [string]$LiveDirectory,
   [string]$AuthorizationFile,
   [string]$TargetVersion
 )
@@ -139,6 +140,72 @@ function Get-MscqrUninstallDigest($Snapshot) {
   $sha=[Security.Cryptography.SHA256]::Create()
   try {return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json)))).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()}
 }
+function Acquire-MscqrUpgradeAuthorization([string]$Live,[string]$Payload,[string]$Installer,[string]$AuthFile,[string]$Version) {
+  $candidate=Join-Path $Payload 'bin\mscqr-local-print-agent.exe'
+  $runtime=Join-Path $Live 'bin\mscqr-local-print-agent.exe'
+  $discovery=Resolve-MscqrUpgradeState $env:USERPROFILE $Live $candidate
+  $stateFile=$discovery.selectedPath
+  $identity=Read-MscqrJson $stateFile
+  $evidence=Get-MscqrIdentityEvidence $candidate $stateFile
+  $sourceVersion=Get-MscqrRuntimeVersion $runtime
+  $startup=Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
+  $status=Assert-MscqrRuntime $runtime $sourceVersion $stateFile $startup (Get-FileHash -LiteralPath $startup -Algorithm SHA256).Hash
+  $authority=[Uri]$identity.backendUrl
+  if($authority.Scheme -cne 'https' -or $authority.UserInfo -or $authority.Query -or $authority.Fragment -or
+     $authority.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__') {throw 'Connector backend does not match the signed maintenance authority.'}
+  $binding=[ordered]@{
+    agentId=[string]$identity.agentId; deviceFingerprint=[string]$identity.deviceFingerprint
+    sourceVersion=$sourceVersion; targetVersion=$Version; statePath=$stateFile
+    protocolVersion=[string]$status.protocolVersion; publicKeySha256=[string]$evidence.publicKeySha256
+    sourceSha256=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+    targetSha256=(Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+    installerSha256=(Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+    stateSha256=(Get-FileHash -LiteralPath $stateFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    stateDiscoverySha256=$discovery.sha256
+    configurationSha256=(Get-FileHash -LiteralPath (Join-Path $Live 'agent.env') -Algorithm SHA256).Hash.ToLowerInvariant()
+    startupSha256=(Get-FileHash -LiteralPath $startup -Algorithm SHA256).Hash.ToLowerInvariant()
+    wrapperSha256=(Get-FileHash -LiteralPath (Join-Path $Live 'bin\start-local-print-agent.cmd') -Algorithm SHA256).Hash.ToLowerInvariant()
+    payloadSha256=(Get-MscqrPayloadDigest $Payload); sourcePayloadSha256=(Get-MscqrPayloadDigest $Live)
+    uninstallerSha256=(Get-FileHash -LiteralPath (Join-Path $Live 'unins000.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    uninstallDataSha256=(Get-FileHash -LiteralPath (Join-Path $Live 'unins000.dat') -Algorithm SHA256).Hash.ToLowerInvariant()
+    uninstallRegistrationSha256=(Get-MscqrUninstallDigest (Get-MscqrUninstallSnapshot $Live))
+  }
+  if([version]$Version -le [version]$sourceVersion -or $binding.agentId -cne $status.agentId -or
+     $binding.deviceFingerprint -cne $status.deviceFingerprint) {throw 'Existing connector version or identity is incompatible with this upgrade.'}
+  Assert-MscqrSignedFile $Installer $binding.installerSha256
+  Assert-MscqrSignedFile $candidate $binding.targetSha256
+  Assert-MscqrSignedFile $runtime $binding.sourceSha256
+  $pairingId=[guid]::NewGuid().ToString()
+  $secretBytes=New-Object byte[] 32
+  [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($secretBytes)
+  $secret=([BitConverter]::ToString($secretBytes)).Replace('-','').ToLowerInvariant()
+  $base=$authority.GetLeftPart([UriPartial]::Authority)
+  $request=@{pairingId=$pairingId;secret=$secret;binding=$binding}|ConvertTo-Json -Depth 20 -Compress
+  $created=Invoke-RestMethod -Uri "$base/api/connector-upgrade/pairing" -Method Post -Body $request -ContentType 'application/json' -TimeoutSec 20 -MaximumRedirection 0
+  if($created.success -isnot [bool] -or -not $created.success -or $created.pairingId -cne $pairingId) {throw 'Upgrade pairing was not accepted.'}
+  Start-Process -FilePath ('__MSCQR_WEB_APP_BASE_URL__/connector-download?upgradePairing='+$pairingId) | Out-Null
+  $reply=$null
+  for($index=0;$index -lt 30;$index++) {
+    Start-Sleep -Seconds 30
+    $response=Invoke-WebRequest -Uri "$base/api/connector-upgrade/pairing/poll" -Method Post -Body (@{pairingId=$pairingId;secret=$secret}|ConvertTo-Json -Compress) -ContentType 'application/json' -TimeoutSec 20 -MaximumRedirection 0
+    if($response.StatusCode -eq 202) {continue}
+    if($response.StatusCode -ne 200) {throw 'Upgrade authorization pairing was rejected.'}
+    $reply=$response.Content | ConvertFrom-Json -ErrorAction Stop
+    break
+  }
+  if(-not $reply -or $reply.success -isnot [bool] -or -not $reply.success -or $reply.token -notmatch '^[a-f0-9]{64}$') {throw 'Upgrade authorization was not received.'}
+  foreach($key in $binding.Keys) {if($reply.binding.$key -cne $binding[$key]) {throw 'Upgrade authorization does not match the installed connector.'}}
+  $root=[IO.Path]::GetDirectoryName($AuthFile)
+  if(-not(Test-Path -LiteralPath $root)) {Protect-MscqrDirectory $root}
+  Assert-MscqrPrivatePath $root
+  $document=@{endpoint="$base/api/connector-upgrade/handoff";token=$reply.token;binding=$reply.binding}|ConvertTo-Json -Depth 20
+  $next="$AuthFile.$([guid]::NewGuid().ToString('N')).next"
+  [IO.File]::WriteAllText($next,$document,[Text.Encoding]::UTF8)
+  Assert-MscqrPrivatePath $next
+  if(Test-Path -LiteralPath $AuthFile) {[IO.File]::Replace($next,$AuthFile,"$AuthFile.previous")}
+  else {[IO.File]::Move($next,$AuthFile)}
+  Assert-MscqrPrivatePath $AuthFile
+}
 function Assert-MscqrRuntime([string]$Runtime, [string]$Version, [string]$StateFile, [string]$Startup, [string]$StartupHash) {
   $processes = @(Get-MscqrRuntimeProcesses)
   if ($processes.Count -ne 1 -or [IO.Path]::GetFullPath([string]$processes[0].ExecutablePath) -ine $Runtime) { throw 'Expected exactly one canonical connector process.' }
@@ -168,16 +235,12 @@ function Invoke-MscqrMaintenance($Auth, [string]$Action, $Binding) {
   $uri = [Uri]$Auth.endpoint
   if ($uri.Scheme -cne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or
       $uri.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__' -or
-      $uri.AbsolutePath -cne "/api/manufacturer/printers/$($Binding.printerId)/maintenance") { throw 'Invalid authenticated maintenance endpoint.' }
+      $uri.AbsolutePath -cne '/api/connector-upgrade/handoff') { throw 'Invalid authenticated maintenance endpoint.' }
+  if ($Auth.headers -and @($Auth.headers.PSObject.Properties).Count) { throw 'Handoff cannot carry browser credentials.' }
   # TLS authentication is required, redirects are prohibited, and no credential
   # or bearer authorization is written into the transaction journal or logs.
   $body = @{ action=$Action; token=$Auth.token; binding=$Binding } | ConvertTo-Json -Depth 20
-  $headers = @{}
-  foreach ($property in $Auth.headers.PSObject.Properties) {
-    if($property.Name -notin @('Authorization','X-Database-Session-Capability','X-CSRF-Token','Cookie')) {throw 'Unexpected maintenance authentication header.'}
-    $headers[$property.Name] = [string]$property.Value
-  }
-  $reply = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 20 -MaximumRedirection 0
+  $reply = Invoke-RestMethod -Uri $uri -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 20 -MaximumRedirection 0
   if ($reply.success -isnot [bool] -or -not $reply.success -or $reply.data.authorized -isnot [bool] -or -not $reply.data.authorized -or
       $reply.data.dispatchFenced -isnot [bool] -or -not $reply.data.dispatchFenced -or
       @($reply.data.binding.PSObject.Properties).Count -ne @($Binding.PSObject.Properties).Count) { throw 'Backend maintenance authorization was not verified.' }
@@ -185,18 +248,65 @@ function Invoke-MscqrMaintenance($Auth, [string]$Action, $Binding) {
     if ($reply.data.binding.($property.Name) -cne $property.Value) { throw 'Backend maintenance binding mismatch.' }
   }
 }
+function Wait-MscqrBackendRelease($Auth,$Binding,[int]$Attempts=8) {
+  $uri=[Uri]$Auth.endpoint
+  if($uri.Scheme -cne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment -or
+     $uri.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__' -or
+     $uri.AbsolutePath -cne '/api/connector-upgrade/handoff') {throw 'Invalid maintenance release endpoint.'}
+  $body=@{action='release-status';token=$Auth.token;binding=$Binding}|ConvertTo-Json -Depth 20
+  for($index=0;$index -lt $Attempts;$index++) {
+    try {
+      $reply=Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 10 -MaximumRedirection 0
+      if($reply.success -eq $true -and $reply.data.released -eq $true -and
+         $reply.data.dispatchFenced -eq $false -and
+         @($reply.data.binding.PSObject.Properties).Count -eq @($Binding.PSObject.Properties).Count) {
+        $matches=$true
+        foreach($property in $Binding.PSObject.Properties) {
+          if($reply.data.binding.($property.Name) -cne $property.Value) {$matches=$false;break}
+        }
+        if($matches) {return $true}
+      }
+    } catch { }
+    if($index -lt $Attempts-1) {Start-Sleep -Seconds 15}
+  }
+  return $false
+}
 function Stop-MscqrVerifiedRuntime([string]$Runtime, [string]$Hash) {
   Assert-MscqrSignedFile $Runtime $Hash
   $processes = @(Get-MscqrRuntimeProcesses)
   if ($processes.Count -gt 1) { throw 'Multiple connector processes; refusing shutdown.' }
   if ($processes.Count -eq 1) {
     if ([IO.Path]::GetFullPath([string]$processes[0].ExecutablePath) -ine $Runtime) { throw 'Unexpected connector path; refusing shutdown.' }
-    # The independently verified isolation/reconciliation authorization is
-    # checked immediately before this call. A status snapshot is never authority.
+    # Backend authorization is checked before this call. The process-owned
+    # checkpoint must also show that local work drained and acquisition stopped.
+    $listeners=@(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction Stop)
+    if ($listeners.Count -eq 0 -or @($listeners | Where-Object { $_.OwningProcess -ne $processes[0].ProcessId -or
+          $_.LocalAddress -notin @('127.0.0.1','::1') }).Count) { throw 'Connector checkpoint listener ownership is unverified.' }
+    $shutdownRoute=Invoke-WebRequest -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Options -TimeoutSec 5 -MaximumRedirection 0 -ErrorAction Stop
+    if ($shutdownRoute.StatusCode -ne 200 -or [string]$shutdownRoute.Headers['Allow'] -notmatch '(^|,\s*)POST($|,)') {
+      throw 'Installed connector does not support verified maintenance shutdown.'
+    }
+    $fence=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence' -Method Post -TimeoutSec 5 -ErrorAction Stop
+    if ($fence.success -isnot [bool] -or -not $fence.success) { throw 'Connector did not persist its maintenance fence.' }
+    $drained=$false
+    for ($attempt=0; $attempt -lt 30; $attempt++) {
+      $listeners=@(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction Stop)
+      if ($listeners.Count -eq 0 -or @($listeners | Where-Object { $_.OwningProcess -ne $processes[0].ProcessId -or
+            $_.LocalAddress -notin @('127.0.0.1','::1') }).Count) { throw 'Connector checkpoint listener ownership is unverified.' }
+      $checkpoint=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint' -TimeoutSec 5 -ErrorAction Stop
+      if ($checkpoint.fenced -isnot [bool] -or -not $checkpoint.fenced -or
+          $checkpoint.idle -isnot [bool] -or $checkpoint.socketClosed -isnot [bool] -or
+          $null -eq $checkpoint.active) { throw 'Connector maintenance checkpoint is invalid.' }
+      if ($checkpoint.idle -and $checkpoint.socketClosed -and [int]$checkpoint.active -eq 0) { $drained=$true; break }
+      Start-Sleep -Milliseconds 500
+    }
+    if (-not $drained) { throw 'Connector did not reach a drained maintenance checkpoint.' }
     $process = Get-Process -Id $processes[0].ProcessId -ErrorAction Stop
     if ($process.Path -ine $Runtime) { throw 'Connector process identity changed.' }
-    $process.Kill()
-    if (-not $process.WaitForExit(15000)) { throw 'Connector did not stop.' }
+    $shutdown=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Post -TimeoutSec 5 -ErrorAction Stop
+    if ($shutdown.success -isnot [bool] -or -not $shutdown.success -or -not $process.WaitForExit(15000)) {
+      throw 'Connector did not stop after its verified maintenance checkpoint.'
+    }
   }
   if (@(Get-MscqrRuntimeProcesses).Count -ne 0) { throw 'Connector restarted during shutdown.' }
 }
@@ -210,6 +320,20 @@ function Wait-MscqrRuntime($Journal) {
     catch { $lastError = $_; Start-Sleep -Milliseconds 500 }
   }
   throw $lastError
+}
+function Wait-MscqrTrustedSession($Journal) {
+  for($index=0;$index -lt 60;$index++) {
+    $status=Assert-MscqrRuntime $Journal.runtime $Journal.expectedVersion $Journal.stateFile $Journal.startup $Journal.startupHash
+    $heartbeat=[DateTime]::MinValue
+    if([DateTime]::TryParse([string]$status.websocket.lastHeartbeatAt,[ref]$heartbeat) -and
+       $status.websocket.connected -eq $true -and
+       $status.websocket.registrationId -ceq $Journal.binding.registrationId -and
+       $status.websocket.selectedPrinterId -ceq $status.selectedPrinterId -and
+       ([DateTime]::UtcNow - $heartbeat.ToUniversalTime()).TotalSeconds -ge 0 -and
+       ([DateTime]::UtcNow - $heartbeat.ToUniversalTime()).TotalSeconds -lt 120) {return $status}
+    Start-Sleep -Seconds 1
+  }
+  throw 'Replacement connector did not restore the registered signed backend session.'
 }
 function Assert-MscqrJournalBinding($Journal,[string]$JournalPath) {
   $expected = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.mscqr\dispatch-journal'))
@@ -225,7 +349,7 @@ function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
     Write-MscqrTransaction $JournalPath $Journal 'ABORTED'
     return
   }
-  if ($Journal.phase -eq 'COMMITTED') { return }
+  if ($Journal.phase -in @('COMMITTED','COMMITTED_FENCED')) { return }
   Assert-MscqrJournalBinding $Journal $JournalPath
   if ($Journal.phase -eq 'RESTORATION_VERIFIED') {
     Assert-MscqrDispatchJournalLive $Journal.dispatchJournal
@@ -294,19 +418,25 @@ function Invoke-MscqrUpgradeTransaction {
       if($journal.binding.statePath -ine $journal.stateFile -or $journal.stateDiscovery.sha256 -cne $journal.binding.stateDiscoverySha256) {throw 'Journal state discovery binding mismatch.'}
       if ($journal.runtime -ine (Join-Path $live 'bin\mscqr-local-print-agent.exe') -or $journal.stateFile -ine $StateFile -or $journal.startup -ine $StartupFile) { throw 'Upgrade journal ownership mismatch.' }
       if ($Phase -eq 'Recover') {
-        if ($journal.phase -notin @('AUTHORIZED','STAGED','ABORTED','COMMITTED','RESTORATION_VERIFIED')) {
-          $auth = Read-MscqrAuthorization $AuthFile
-          # A fresh, independently evidenced renewal can recover an expired
-          # interrupted attempt. It retains exactly the same immutable binding.
-          try { Invoke-MscqrMaintenance $auth 'verify' $journal.binding } catch {
-            Invoke-MscqrMaintenance $auth 'consume' $journal.binding
-            Invoke-MscqrMaintenance $auth 'verify' $journal.binding
+        $pendingFence=Join-Path ([IO.Path]::GetDirectoryName($journal.stateFile)) 'maintenance-fence.json.release-pending'
+        if ($journal.phase -eq 'COMMITTED_FENCED' -or
+            ($journal.phase -eq 'VERIFIED' -and ((Test-Path -LiteralPath $pendingFence) -or
+              (Wait-MscqrBackendRelease (Read-MscqrAuthorization $AuthFile) $journal.binding 1)))) { $Phase = 'Commit' }
+        else {
+          if ($journal.phase -notin @('AUTHORIZED','STAGED','ABORTED','COMMITTED','RESTORATION_VERIFIED')) {
+            $auth = Read-MscqrAuthorization $AuthFile
+            # A fresh, independently evidenced renewal can recover an expired
+            # interrupted attempt. It retains exactly the same immutable binding.
+            try { Invoke-MscqrMaintenance $auth 'verify' $journal.binding } catch {
+              Invoke-MscqrMaintenance $auth 'consume' $journal.binding
+              Invoke-MscqrMaintenance $auth 'verify' $journal.binding
+            }
           }
+          Restore-MscqrTransaction $journal $journalPath; return
         }
-        Restore-MscqrTransaction $journal $journalPath; return
       }
       if ($Phase -eq 'Prepare') {
-        if($journal.phase -notin @('COMMITTED','RESTORATION_VERIFIED','ABORTED')) {throw 'Interrupted upgrade requires reviewed recovery before a new attempt.'}
+        if($journal.phase -notin @('COMMITTED','COMMITTED_FENCED','RESTORATION_VERIFIED','ABORTED')) {throw 'Interrupted upgrade requires reviewed recovery before a new attempt.'}
         $archive=Join-Path $root ('archive-'+[guid]::NewGuid().ToString('N'))
         Protect-MscqrDirectory $archive
         $names=@('transaction.json','transaction.json.previous','backup','stage','displaced.exe')+@((Get-MscqrSetupFiles).Values | ForEach-Object {"$_.displaced"})
@@ -387,7 +517,7 @@ function Invoke-MscqrUpgradeTransaction {
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe')).Hash -ine $binding.uninstallerSha256 -or
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.dat')).Hash -ine $binding.uninstallDataSha256) {throw 'Previous uninstaller ownership binding mismatch.'}
       Invoke-MscqrMaintenance $auth 'consume' $binding
-      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); dispatchJournal=$null; staged=''; protocol=$status.protocolVersion; uninstall=$uninstall }
+      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); dispatchJournal=$null; staged=''; protocol=$status.protocolVersion; uninstall=$uninstall; localReleaseStarted=$false }
       Write-MscqrTransaction $journalPath $journal 'AUTHORIZED'
       $stage = Join-Path $root 'stage'
       Protect-MscqrDirectory $stage
@@ -441,7 +571,8 @@ function Invoke-MscqrUpgradeTransaction {
         foreach ($record in $journal.records | Where-Object { $_.name -in @('state','environment','startup','wrapper') }) {
           if ((Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256) { throw 'Persistent state changed during startup.' }
         }
-        Invoke-MscqrMaintenance $auth 'verify' $journal.binding
+        try {Invoke-MscqrMaintenance $auth 'verify' $journal.binding}
+        catch {if(-not(Wait-MscqrBackendRelease $auth $journal.binding 3)) {throw}}
         Assert-MscqrDispatchJournalLive $journal.dispatchJournal
         Assert-MscqrStateDiscovery $journal.stateDiscovery
         Write-MscqrTransaction $journalPath $journal 'VERIFIED'
@@ -462,23 +593,96 @@ function Invoke-MscqrUpgradeTransaction {
         throw "Upgrade failed; previous runtime restoration verified. Dispatch remains fenced. $($failure.Exception.Message)"
       }
     } elseif ($Phase -eq 'Commit') {
-      if ($journal.phase -cne 'VERIFIED') { throw 'Unverified upgrade cannot commit.' }
+      if ($journal.phase -notin @('VERIFIED','COMMITTED_FENCED')) { throw 'Unverified upgrade cannot commit.' }
       Assert-MscqrJournalBinding $journal $journalPath
       Assert-MscqrDispatchJournalLive $journal.dispatchJournal
-      Wait-MscqrRuntime $journal | Out-Null
+      $marker=Join-Path ([IO.Path]::GetDirectoryName($journal.stateFile)) 'maintenance-fence.json'
+      $pending="$marker.release-pending"
+      if (Test-Path -LiteralPath $pending) {
+        Assert-MscqrPlainPath $pending
+        if ((Read-MscqrJson $pending).state -cne 'FENCED') {throw 'Interrupted local fence transition is invalid.'}
+        if (@(Get-MscqrRuntimeProcesses).Count) {Stop-MscqrVerifiedRuntime $journal.runtime $journal.binding.targetSha256}
+        if (Test-Path -LiteralPath $marker) {
+          if ((Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Conflicting maintenance fences require review.'}
+          Remove-Item -LiteralPath $pending -Force -ErrorAction Stop
+        } else {[IO.File]::Move($pending,$marker)}
+        Start-MscqrVerifiedRuntime $journal.wrapper
+      }
+      if (@(Get-MscqrRuntimeProcesses).Count -eq 0) {
+        Assert-MscqrSignedFile $journal.runtime $journal.binding.targetSha256
+        if (Test-Path -LiteralPath $marker) {
+          if ((Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Recovery maintenance fence is invalid.'}
+        } elseif ($journal.localReleaseStarted -ne $true) {throw 'Unfenced recovery lacks a committed release transition.'}
+        Start-MscqrVerifiedRuntime $journal.wrapper
+      }
+      Wait-MscqrTrustedSession $journal | Out-Null
       Assert-MscqrStateDiscovery $journal.stateDiscovery
       $uninstall=Get-MscqrUninstallSnapshot $live
       if(($uninstall | Where-Object name -eq 'DisplayVersion').value -cne $journal.binding.targetVersion) {throw 'Replacement uninstall registration version mismatch.'}
       Assert-MscqrSignedFile (Join-Path $live 'unins000.exe') (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe') -Algorithm SHA256).Hash
-      Write-MscqrTransaction $journalPath $journal 'COMMITTED'
+      $auth=Read-MscqrAuthorization $AuthFile
+      Assert-MscqrDispatchJournalLive $journal.dispatchJournal
+      $released=Wait-MscqrBackendRelease $auth $journal.binding
+      if(-not $released) {
+        try {Invoke-MscqrMaintenance $auth 'verify' $journal.binding}
+        catch {if(-not(Wait-MscqrBackendRelease $auth $journal.binding 3)) {throw};$released=$true}
+      }
+      if($released) {
+        Assert-MscqrPlainPath $marker
+        Assert-MscqrPlainPath $pending
+        if ($journal.localReleaseStarted -eq $true -and -not(Test-Path -LiteralPath $marker) -and
+            -not(Test-Path -LiteralPath $pending)) {
+          Write-MscqrTransaction $journalPath $journal 'COMMITTED'
+        } else {
+          if(-not(Test-Path -LiteralPath $marker -PathType Leaf) -or (Test-Path -LiteralPath $pending) -or
+             (Read-MscqrJson $marker).state -cne 'FENCED') {throw 'Local maintenance fence could not be released safely.'}
+          $journal.localReleaseStarted=$true
+          Write-MscqrTransaction $journalPath $journal 'COMMITTED_FENCED'
+          try {
+            Stop-MscqrVerifiedRuntime $journal.runtime $journal.binding.targetSha256
+            [IO.File]::Move($marker,$pending)
+            Start-MscqrVerifiedRuntime $journal.wrapper
+            Wait-MscqrTrustedSession $journal | Out-Null
+            Remove-Item -LiteralPath $pending -Force -ErrorAction Stop
+            Write-MscqrTransaction $journalPath $journal 'COMMITTED'
+          } catch {
+            # If restart or verification fails, preserve the local fence even
+            # though the backend released it. Frozen unknown items remain blocked.
+            if(Test-Path -LiteralPath $pending) {
+              if(@(Get-MscqrRuntimeProcesses).Count) {Stop-MscqrVerifiedRuntime $journal.runtime $journal.binding.targetSha256}
+              if(-not(Test-Path -LiteralPath $marker)) {[IO.File]::Move($pending,$marker)}
+              else {Remove-Item -LiteralPath $pending -Force}
+            }
+            if(@(Get-MscqrRuntimeProcesses).Count -eq 0) {
+              Start-MscqrVerifiedRuntime $journal.wrapper
+              Wait-MscqrRuntime $journal | Out-Null
+            }
+            Write-MscqrTransaction $journalPath $journal 'COMMITTED_FENCED'
+          }
+        }
+      } else {
+        Write-MscqrTransaction $journalPath $journal 'COMMITTED_FENCED'
+      }
+      if ($journal.phase -eq 'COMMITTED') {
+        Remove-Item -LiteralPath $AuthFile -Force -ErrorAction Stop
+        Remove-Item -LiteralPath "$AuthFile.previous" -Force -ErrorAction SilentlyContinue
+      }
     }
   } finally { $lock.Dispose() }
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
   try {
-    $live=Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
+    $live=[IO.Path]::GetFullPath($LiveDirectory)
+    if ($live -ine [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'))) {
+      throw 'Previous connector installation directory requires separate compatibility verification.'
+    }
     $discovery=$null
+    $recoveringFencedCommit=$false
+    if($Operation -eq 'Acquire') {
+      Acquire-MscqrUpgradeAuthorization $live $PayloadDirectory $InstallerFile $AuthorizationFile $TargetVersion
+      exit 0
+    }
     if($Operation -eq 'Prepare') {
       $authorization=Read-MscqrAuthorization $AuthorizationFile
       $candidate=Join-Path $PayloadDirectory 'bin\mscqr-local-print-agent.exe'
@@ -491,8 +695,12 @@ if ($MyInvocation.InvocationName -ne '.') {
       Assert-MscqrPrivatePath $journalFile
       $existing=Read-MscqrJson $journalFile
       $selected=[string]$existing.stateFile
+      $recoveringFencedCommit=$Operation -eq 'Recover' -and $existing.phase -in @('COMMITTED_FENCED','VERIFIED')
     }
     Invoke-MscqrUpgradeTransaction -Phase $Operation -LiveDirectory $live -Payload $PayloadDirectory -Installer $InstallerFile -AuthFile $AuthorizationFile -Version $TargetVersion -StateFile $selected -StateDiscovery $discovery -StartupFile (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs')
+    $resultPhase=(Read-MscqrJson (Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade\transaction.json')).phase
+    if($recoveringFencedCommit -and $resultPhase -eq 'COMMITTED') {exit 11}
+    if($Operation -in @('Commit','Recover') -and $resultPhase -eq 'COMMITTED_FENCED') {exit 10}
     exit 0
   } catch { Write-Error $_; exit 1 }
 }
