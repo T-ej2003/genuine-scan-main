@@ -226,6 +226,9 @@ const server = createBackendApp().listen(0, '127.0.0.1', async () => {
       headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' }, body: gzipSync(body) });
     assert.strictEqual(raw.status, 401, 'large unauthenticated evidence must reach authentication, not a generic parser error');
     assert.strictEqual(compressed.status, 415, 'compressed evidence must be rejected before inflation');
+    const postInstall = await fetch(url.replace('/maintenance/evidence', '/maintenance/postinstall'), {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: 'a'.repeat(64) }) });
+    assert.strictEqual(postInstall.status, 401, 'post-install release evidence must require manufacturer authentication');
   } catch (error) { console.error(error); process.exitCode = 1; }
   finally { server.close(); }
 });

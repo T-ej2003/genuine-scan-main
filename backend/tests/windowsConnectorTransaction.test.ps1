@@ -67,6 +67,12 @@ function Wait-MscqrRuntime {
   if ($script:processes -ne 1) { throw 'fixture cardinality failure' }
   return [pscustomobject]@{protocolVersion='1'}
 }
+function Wait-MscqrTrustedSession {
+  param($Journal)
+  if($script:injection -eq 'backend-session') {throw 'fixture backend session unavailable'}
+  return [pscustomobject]@{websocket=[pscustomobject]@{connected=$true;registrationId=$Journal.binding.registrationId}}
+}
+function Wait-MscqrBackendRelease {param($Auth,$Binding,$Attempts=12) return $false}
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
@@ -190,7 +196,7 @@ try {
       } elseif($scenario -in @('success','legacy-success')) {
         if($failed){throw 'successful activation failed'}
         Invoke-MscqrUpgradeTransaction -Phase Commit @args
-        if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256){throw 'commit invalid'}
+        if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED_FENCED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256){throw 'commit invalid'}
       } elseif(-not $failed) {throw 'verification failure did not fail upgrade'}
     }
     if($scenario -notin @('success','legacy-success') -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}

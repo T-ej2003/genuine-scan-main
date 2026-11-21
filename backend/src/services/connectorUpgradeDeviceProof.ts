@@ -24,6 +24,9 @@ export const upgradeAttemptKey = (id: string) => `connector-upgrade:attempt:${id
 export const upgradeProofKey = (id: string) => `connector-upgrade:proof:${id}`;
 export const upgradeHandoffKey = (tokenHash: string) => `connector-upgrade:handoff:${tokenHash}`;
 export const upgradeAuthorizationKey = (evidenceSha256: string) => `connector-upgrade:authorization:${evidenceSha256}`;
+export const upgradePairingKey = (id: string) => `connector-upgrade:pairing:${id}`;
+export const upgradePairingResultKey = (id: string) => `connector-upgrade:pairing-result:${id}`;
+export const upgradeReleaseKey = (tokenHash: string) => `connector-upgrade:released:${tokenHash}`;
 
 export const createUpgradeDeviceChallenge = (binding: Omit<UpgradeDeviceChallenge, "purpose" | "challengeId" | "nonce" | "expiresAt">, now = Date.now()): UpgradeDeviceChallenge =>
   upgradeChallengeSchema.parse({ ...binding, purpose, challengeId: randomUUID(), nonce: randomBytes(32).toString("base64url"),
@@ -90,5 +93,25 @@ export const verifyMaintenanceCheckpoint = (envelope: { statement: string; signa
       statement.journal.sha256 !== createHash("sha256").update(JSON.stringify(statement.journal.entries.map(({ name, sha256 }) => [name, sha256]))).digest("hex") ||
       !verifyPrinterAgentPayloadSignature({ publicKeyPem, payload: envelope.statement, signature: envelope.signature }))
     throw new Error("CONNECTOR_MAINTENANCE_CHECKPOINT_INVALID");
+  return statement;
+};
+
+export const postInstallStatementSchema = z.object({
+  purpose: z.literal("mscqr-connector-upgrade-postinstall-v1"), attemptId: z.string().uuid(),
+  observedAt: z.string().datetime(), version: z.string(), sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  agentId: z.string(), deviceFingerprint: z.string(), registrationId: z.string().uuid(),
+  selectedPrinterId: z.string(), sessionId: z.string(), journalSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  fenced: z.literal(true),
+}).strict();
+
+export const verifyPostInstallStatement = (envelope: { statement: string; signature: string }, publicKeyPem: string) => {
+  if (typeof envelope?.statement !== "string" || envelope.statement.length > 4096 ||
+      typeof envelope?.signature !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(envelope.signature))
+    throw new Error("CONNECTOR_UPGRADE_POSTINSTALL_INVALID");
+  const statement = postInstallStatementSchema.parse(JSON.parse(envelope.statement));
+  if (JSON.stringify(statement) !== envelope.statement ||
+      Math.abs(Date.now() - Date.parse(statement.observedAt)) > 120_000 ||
+      !verifyPrinterAgentPayloadSignature({ publicKeyPem, payload: envelope.statement, signature: envelope.signature }))
+    throw new Error("CONNECTOR_UPGRADE_POSTINSTALL_INVALID");
   return statement;
 };

@@ -40,7 +40,7 @@ Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: ru
 
 [Code]
 var
-  UpgradeMode, UpgradePrepared, SetupCommitted, InitializationFailed: Boolean;
+  UpgradeMode, UpgradePrepared, SetupCommitted, InitializationFailed, PrintingPaused: Boolean;
 
 function GetCustomSetupExitCode: Integer;
 begin
@@ -100,11 +100,12 @@ begin
     '" -Operation ' + Operation + ' -PayloadDirectory "' + ExpandConstant('{tmp}\mscqr-payload') +
     '" -InstallerFile "' + ExpandConstant('{srcexe}') + '" -LiveDirectory "' +
     ExpandConstant('{app}') + '" -AuthorizationFile "' +
-    ExpandConstant('{param:MSCQRAUTH|}') + '" -TargetVersion "__MSCQR_CONNECTOR_VERSION__"';
+    ExpandConstant('{localappdata}\MSCQR\connector-upgrade\authorization.json') + '" -TargetVersion "__MSCQR_CONNECTOR_VERSION__"';
   Code := -1;
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
     ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);
-  Result := Result and (Code = 0);
+  if (Operation = 'Commit') and (Code = 10) then PrintingPaused := True;
+  Result := Result and ((Code = 0) or ((Operation = 'Commit') and (Code = 10)));
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -122,10 +123,6 @@ begin
      FileExists(ExpandConstant('{%USERPROFILE}\.mscqr\local-print-agent-state.json')) or
      FileExists(ExpandConstant('{%USERPROFILE}\.authenticqr\local-print-agent-state.json'));
   if UpgradeMode then begin
-    if ExpandConstant('{param:MSCQRAUTH|}') = '' then begin
-      Result := 'Existing connector requires authenticated maintenance and independently verified reconciliation. Supply MSCQRAUTH. No upgrade was performed.';
-      exit;
-    end;
     ExtractTemporaryFiles('mscqr-payload\*');
     if ExpandConstant('{param:MSCQRRECOVER|}') = '1' then begin
       if RunUpgrade('Recover') then
@@ -134,7 +131,9 @@ begin
         Result := 'Interrupted upgrade restoration could not be verified. Keep dispatch fenced and inspect the durable journal.';
       exit;
     end;
-    if not RunUpgrade('Prepare') then
+    if not RunUpgrade('Acquire') then
+      Result := 'Upgrade authorization could not be verified. The existing installation is unchanged.'
+    else if not RunUpgrade('Prepare') then
       Result := 'Upgrade preflight, backend authorization, staging or backup failed. The existing runtime has not been replaced.'
     else UpgradePrepared := True;
   end;
@@ -199,6 +198,13 @@ end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  if (CurPageID = wpFinished) and UpgradeMode and SetupCommitted then begin
+    WizardForm.FinishedHeadingLabel.Caption := 'MSCQR Connector updated';
+    if PrintingPaused then
+      WizardForm.FinishedLabel.Caption := 'The connector and printer settings were preserved. Printing remains paused because backend safety verification did not complete. Uncertain print attempts will not be replayed.'
+    else
+      WizardForm.FinishedLabel.Caption := 'The connector and printer settings were preserved. Eligible printing can resume. Uncertain print attempts remain protected.';
+  end;
   if (CurPageID = wpFinished) and InitializationFailed then begin
     WizardForm.FinishedHeadingLabel.Caption := 'MSCQR Connector setup failed';
     if UpgradeMode then

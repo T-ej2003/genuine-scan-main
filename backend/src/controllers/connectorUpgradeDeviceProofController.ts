@@ -95,7 +95,7 @@ export const verifyConnectorUpgradeProof = async (req: AuthRequest, res: Respons
     const proof = verifyUpgradeDeviceChallenge({ challenge, signature, publicKeyPem,
       binding: { ...binding, attemptId: challenge.attemptId, sourceVersion: original.sourceVersion,
         currentVersion: sourceVersion, targetVersion: challenge.targetVersion } });
-    if (await redis.set(upgradeProofKey(challengeId), JSON.stringify({ challenge, proofSha256: proof.proofSha256 }),
+    if (await redis.set(upgradeProofKey(challengeId), JSON.stringify({ challenge, proofSha256: proof.proofSha256, publicKeyPem }),
       "PX", Math.max(1, Date.parse(challenge.expiresAt) - Date.now()), "NX") !== "OK")
       throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
     return res.json({ success: true, attemptId: challenge.attemptId, challengeId, proofSha256: proof.proofSha256 });

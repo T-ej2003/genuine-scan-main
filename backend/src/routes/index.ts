@@ -1,4 +1,4 @@
-import { issueVerifiedConnectorMaintenanceEvidence, redeemConnectorMaintenanceHandoff, requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
+import { completeConnectorUpgradePairing, createConnectorUpgradePairing, issueVerifiedConnectorMaintenanceEvidence, issueVerifiedPostInstallEvidence, pollConnectorUpgradePairing, readConnectorUpgradePairing, redeemConnectorMaintenanceHandoff, requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
 import { issueConnectorUpgradeChallenge, verifyConnectorUpgradeProof } from "../controllers/connectorUpgradeDeviceProofController";
 import { Request, type RequestHandler, Router } from "express";
 import {
@@ -1369,6 +1369,8 @@ publicReadRouter.get("/public/connector/releases", connectorManifestIpLimiter, c
 publicReadRouter.get("/public/connector/releases/latest", connectorManifestIpLimiter, connectorManifestActorLimiter, getLatestConnectorReleaseController);
 publicReadRouter.get("/public/connector/download/:version/:platform", connectorDownloadIpLimiter, connectorDownloadActorLimiter, downloadConnectorReleaseController);
 publicMutationRouter.post("/connector-upgrade/handoff", connectorHandoffIpLimiter, redeemConnectorMaintenanceHandoff);
+publicMutationRouter.post("/connector-upgrade/pairing", connectorHandoffIpLimiter, createConnectorUpgradePairing);
+publicMutationRouter.post("/connector-upgrade/pairing/poll", connectorHandoffIpLimiter, pollConnectorUpgradePairing);
 publicMutationRouter.post(
   "/public/request-access",
   requestAccessIpLimiter,
@@ -1871,6 +1873,7 @@ for (const [path, handler] of [
   ["/manufacturer/printers/:id/maintenance/challenge", issueConnectorUpgradeChallenge],
   ["/manufacturer/printers/:id/maintenance/device-proof", verifyConnectorUpgradeProof],
   ["/manufacturer/printers/:id/maintenance/evidence", issueVerifiedConnectorMaintenanceEvidence],
+  ["/manufacturer/printers/:id/maintenance/postinstall", issueVerifiedPostInstallEvidence],
 ] as const) protectedMutationRouter.post(path,
   printMutationPreAuthRouteLimiter,
   authenticate,
@@ -1883,6 +1886,13 @@ for (const [path, handler] of [
   requireCsrf,
   handler
 );
+protectedReadRouter.get("/manufacturer/printers/:id/maintenance/pairing/:pairingId",
+  authenticate, requireOpsUser, requireRecentSensitiveAuth, enforceTenantIsolation,
+  readConnectorUpgradePairing);
+protectedMutationRouter.post("/manufacturer/printers/:id/maintenance/pairing",
+  printMutationPreAuthRouteLimiter, authenticate, requireOpsUser, requireRecentSensitiveAuth,
+  enforceTenantIsolation, printMutationRouteLimiter, printMutationIpLimiter,
+  printMutationActorLimiter, requireCsrf, completeConnectorUpgradePairing);
 protectedMutationRouter.post(
   "/manufacturer/printers/:id/relink-local-agent",
   authenticate,

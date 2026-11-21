@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import QRCode from "qrcode";
 import { AlertCircle, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 
@@ -40,6 +40,10 @@ export default function Login() {
 
   const { login, logout, pendingAuth, completeMfaSession } = useAuth();
   const navigate = useNavigate();
+  const [query] = useSearchParams();
+  const requestedReturn = String(query.get("returnTo") || "");
+  const afterLogin = /^\/connector-download\?upgradePairing=[0-9a-f-]{36}$/i.test(requestedReturn)
+    ? requestedReturn : "/dashboard";
 
   const humanizeAuthError = useCallback((value?: string) => {
     const text = String(value || "").toLowerCase();
@@ -179,7 +183,7 @@ export default function Login() {
     try {
       const result = await login(email.trim().toLowerCase(), password);
       if (result.success && result.sessionStage === "ACTIVE") {
-        navigate("/dashboard");
+        navigate(afterLogin);
         return;
       }
       if (!result.success) {
@@ -204,7 +208,7 @@ export default function Login() {
 
       if (response.data?.user) {
         completeMfaSession({ user: response.data.user, auth: response.data.auth || null });
-        navigate("/dashboard");
+        navigate(afterLogin);
         return;
       }
 
@@ -256,7 +260,7 @@ export default function Login() {
       }
 
       completeMfaSession({ user: response.data.user, auth: response.data.auth || null });
-      navigate("/dashboard");
+      navigate(afterLogin);
     } finally {
       mfaSubmitInFlightRef.current = false;
       setMfaLoading(false);
@@ -286,7 +290,7 @@ export default function Login() {
       }
 
       completeMfaSession({ user: response.data.user, auth: response.data.auth || null });
-      navigate("/dashboard");
+      navigate(afterLogin);
     } catch (error: unknown) {
       setError(humanizeAuthError(error instanceof Error ? error.message : "Could not verify the security key."));
     } finally {

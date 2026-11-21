@@ -39,7 +39,8 @@ import {
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "./crypto";
-import { signMaintenanceCheckpoint, signUpgradeDeviceChallenge, upgradeChallengeSchema } from "../services/connectorUpgradeDeviceProof";
+import { postInstallStatementSchema, signMaintenanceCheckpoint, signUpgradeDeviceChallenge, upgradeChallengeSchema } from "../services/connectorUpgradeDeviceProof";
+import { createHash } from "crypto";
 import { enterMaintenanceFence, maintenanceCheckpoint } from "./maintenanceFence";
 import { inspectDispatchJournal } from "./dispatchJournal";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
@@ -543,6 +544,29 @@ app.post("/maintenance/checkpoint-evidence", async (req, res) => {
     return res.json({ success: true, evidence });
   } catch {
     return res.status(403).json({ success: false, error: "Connector maintenance checkpoint could not be verified." });
+  }
+});
+
+app.post("/maintenance/postinstall-proof", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const { attemptId } = z.object({ attemptId: z.string().uuid() }).strict().parse(req.body);
+    const state = await loadAgentState({ initialize: false });
+    const session = getPersistentPrintSessionStatus();
+    if (!maintenanceCheckpoint().fenced || !session.connected || !session.sessionId ||
+        !session.registrationId || !session.selectedPrinterId || session.selectedPrinterId !== state.selectedPrinterId ||
+        !session.lastHeartbeatAt || Date.now() - Date.parse(session.lastHeartbeatAt) > 120_000)
+      throw new Error("Post-install session is not trusted");
+    const journal = await inspectDispatchJournal();
+    const statement = JSON.stringify(postInstallStatementSchema.parse({ purpose: "mscqr-connector-upgrade-postinstall-v1",
+      attemptId, observedAt: new Date().toISOString(), version: AGENT_BUILD_VERSION,
+      sha256: createHash("sha256").update(await fs.promises.readFile(process.execPath)).digest("hex"),
+      agentId: state.agentId, deviceFingerprint: state.deviceFingerprint,
+      registrationId: session.registrationId, selectedPrinterId: session.selectedPrinterId,
+      sessionId: session.sessionId, journalSha256: journal.sha256, fenced: true }));
+    return res.json({ success: true, proof: { statement, signature: signPrinterAgentPayload(state.privateKeyPem, statement) } });
+  } catch {
+    return res.status(409).json({ success: false, error: "Post-install connector verification is unavailable." });
   }
 });
 

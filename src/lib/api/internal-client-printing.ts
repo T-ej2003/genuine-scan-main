@@ -104,6 +104,45 @@ export const createPrintingApi = (core: ApiClientCore) => ({
     );
   },
 
+  async getConnectorUpgradePairing(printerId: string, pairingId: string) {
+    return core.request<{ binding: Record<string, string | null> }>(`/manufacturer/printers/${encodeURIComponent(printerId)}/maintenance/pairing/${encodeURIComponent(pairingId)}`);
+  },
+
+  async connectorUpgradeChallenge(printerId: string, targetVersion: string, attemptId?: string) {
+    return core.request<{ challenge: Record<string, unknown> }>(`/manufacturer/printers/${encodeURIComponent(printerId)}/maintenance/challenge`,
+      { method: "POST", body: JSON.stringify({ targetVersion, ...(attemptId ? { attemptId } : {}) }) });
+  },
+
+  async connectorUpgradeProof(printerId: string, challengeId: string, signature: string) {
+    return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/maintenance/device-proof`,
+      { method: "POST", body: JSON.stringify({ challengeId, signature }) });
+  },
+
+  async connectorMaintenance(printerId: string, body: Record<string, unknown>) {
+    return core.request<any>(`/manufacturer/printers/${encodeURIComponent(printerId)}/maintenance`,
+      { method: "POST", body: JSON.stringify(body) });
+  },
+
+  async connectorMaintenanceEvidence(printerId: string, body: Record<string, unknown>) {
+    return core.request<any>(`/manufacturer/printers/${encodeURIComponent(printerId)}/maintenance/evidence`,
+      { method: "POST", body: JSON.stringify(body) });
+  },
+
+  async connectorPostInstallEvidence(printerId: string, body: Record<string, unknown>) {
+    return core.request<any>(`/manufacturer/printers/${encodeURIComponent(printerId)}/maintenance/postinstall`,
+      { method: "POST", body: JSON.stringify(body) });
+  },
+
+  async completeConnectorUpgradePairing(printerId: string, pairingId: string, token: string) {
+    return core.request(`/manufacturer/printers/${encodeURIComponent(printerId)}/maintenance/pairing`,
+      { method: "POST", body: JSON.stringify({ pairingId, token }) });
+  },
+
+  async connectorUpgradeReleaseStatus(token: string, binding: Record<string, string | null>) {
+    return core.request<{ released: boolean; dispatchFenced: boolean }>(`/connector-upgrade/handoff`,
+      { method: "POST", body: JSON.stringify({ action: "release-status", token, binding }), suppressMutationEvent: true });
+  },
+
   async createNetworkPrinter(payload: {
     name: string;
     vendor?: string;

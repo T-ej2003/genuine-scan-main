@@ -209,9 +209,13 @@ const run = async () => {
     "Windows installer must expand the supported per-user profile environment constant before signing"
   );
   const supportedInnoConstants = new Set([
-    "app", "cmd", "tmp", "srcexe", "sys", "%USERPROFILE",
-    "param:MSCQRAUTH|", "param:MSCQRRECOVER|",
+    "app", "cmd", "tmp", "srcexe", "sys", "localappdata", "%USERPROFILE",
+    "param:MSCQRRECOVER|",
   ]);
+  assert(installerTemplate.includes("RunUpgrade('Acquire')") &&
+    installerTemplate.includes("connector-upgrade\\authorization.json") &&
+    !installerTemplate.includes('param:MSCQRAUTH|'),
+    'existing installations must acquire a private installer authorization automatically');
   for (const [, pathExpression] of installerTemplate.matchAll(/ExpandConstant\('([^']+)'\)/g)) {
     for (const [, constant] of pathExpression.matchAll(/\{([^{}]+)\}/g)) {
       assert(supportedInnoConstants.has(constant), "Unsupported Inno runtime constant: " + constant);

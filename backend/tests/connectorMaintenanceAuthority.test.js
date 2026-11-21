@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { createHash, generateKeyPairSync } = require('node:crypto');
+const { createHash, generateKeyPairSync, sign } = require('node:crypto');
 const path = require('node:path');
 
 const dist = path.resolve(__dirname, '../dist');
@@ -21,7 +21,8 @@ const challenge = proofService.createUpgradeDeviceChallenge({ ...attempt, curren
   attemptId: '33045895-4cb7-49ad-81da-0d412d73fa93' });
 const proofSha256 = hash('verified-device-proof');
 const records = new Map([
-  [proofService.upgradeProofKey(challenge.challengeId), JSON.stringify({ challenge, proofSha256 })],
+  [proofService.upgradeProofKey(challenge.challengeId), JSON.stringify({ challenge, proofSha256,
+    publicKeyPem: device.publicKey.export({ type: 'spki', format: 'pem' }).toString() })],
   [proofService.upgradeAttemptKey(challenge.attemptId), JSON.stringify(attempt)],
 ]);
 let unresolved = false;
@@ -30,6 +31,7 @@ let protectedJournalSha;
 let failHandoffStore = false;
 let authorizations = 0;
 let authorizedTokenHash;
+let runtimeVersion = attempt.sourceVersion;
 const redis = { get: async key => records.get(key) || null,
   set: async (key, value, _px, _ttl, nx) => { if (failHandoffStore && key.startsWith('connector-upgrade:handoff:')) return null;
     if (nx === 'NX' && records.has(key)) return null;
@@ -44,7 +46,7 @@ mock('controllers/connectorUpgradeDeviceProofController.js', { trustedBinding: a
   binding: { agentId: attempt.agentId, deviceFingerprint: attempt.deviceFingerprint,
     manufacturerId: attempt.manufacturerId, tenantId: attempt.tenantId,
     printerId: attempt.printerId, registrationId: attempt.registrationId },
-  publicKeyPem: publicPem, sourceVersion: attempt.sourceVersion,
+  publicKeyPem: publicPem, sourceVersion: runtimeVersion,
 }) });
 let consumed = false;
 let revoked = false;
@@ -65,6 +67,7 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
     supersededUnsubmitted: 0,
     protectedItemIds: protectedEntries.map(entry => entry.printItemId) };
 }, administerPrintingPrinter: async input => {
+  if (input.operation === 'MAINTENANCE_RELEASE') return { state: 'ACTIVE', reconciliationRequired: false };
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
     workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : protectedEntries.map(entry => ({
       id: entry.printItemId, state: 'FROZEN', pipelineState: 'NEEDS_OPERATOR_ACTION',
@@ -86,7 +89,8 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
 } });
 const controller = require(path.join(dist, 'controllers/printerMaintenanceController'));
 const binding = { ...attempt, attemptId: challenge.attemptId, fenceRequestId: 'fence-1',
-  installerSha256: hash('installer'), publicKeySha256: hash(publicPem), protocolVersion: 'local-agent-direct-v2' };
+  installerSha256: hash('installer'), targetSha256: hash('replacement'), stateSha256: 'd'.repeat(64),
+  publicKeySha256: hash(publicPem), protocolVersion: 'local-agent-direct-v2' };
 const emptyJournal = { count: 0, sha256: hash('[]'), entries: [] };
 const checkpoint = proofService.signMaintenanceCheckpoint(device.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), {
   purpose: 'mscqr-connector-maintenance-checkpoint-v1', challenge, observedAt: new Date().toISOString(),
@@ -174,6 +178,7 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const mismatchedAuthority = response();
     await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId, checkpoint, binding }), mismatchedAuthority);
     assert.equal(mismatchedAuthority.code, 409, 'unmatched production authority configuration must fail closed');
+    process.env.CONNECTOR_ISOLATION_AUTHORITY_PRIVATE_KEY_PEM = authority.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
     failHandoffStore = true;
     const noHandoff = response();
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), noHandoff);
@@ -197,6 +202,39 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     assert(records.has(proofService.upgradeHandoffKey(hash(token))));
     assert.equal(JSON.stringify(JSON.parse(records.get(proofService.upgradeHandoffKey(hash(token)))).capability),undefined,
       'handoff must not retain the rotating browser capability');
+    const pairingId = '5b7ce12e-752e-4a97-8ff3-f9aae9bd1c28';
+    const secret = 'c'.repeat(64);
+    const createdPairing = response();
+    await controller.createConnectorUpgradePairing(request({ pairingId, secret, binding: {
+      agentId: binding.agentId, deviceFingerprint: binding.deviceFingerprint,
+      sourceVersion: binding.sourceVersion, targetVersion: binding.targetVersion,
+      installerSha256: binding.installerSha256, stateSha256: 'd'.repeat(64),
+    } }), createdPairing);
+    assert.equal(createdPairing.code, 200);
+    const pendingPairing = response();
+    await controller.pollConnectorUpgradePairing(request({ pairingId, secret }), pendingPairing);
+    assert.equal(pendingPairing.code, 202);
+    const wrongSecret = response();
+    await controller.pollConnectorUpgradePairing(request({ pairingId, secret: 'e'.repeat(64) }), wrongSecret);
+    assert.equal(wrongSecret.code, 403);
+    const inspectedPairing = response();
+    const pairingRequest = request({}); pairingRequest.params.pairingId = pairingId;
+    await controller.readConnectorUpgradePairing(pairingRequest, inspectedPairing);
+    assert.equal(inspectedPairing.code, 200);
+    const wrongManufacturer = response();
+    await controller.completeConnectorUpgradePairing({ ...request({ pairingId, token }), user: { userId: 'other-maker' } }, wrongManufacturer);
+    assert.equal(wrongManufacturer.code, 403);
+    const completedPairing = response();
+    await controller.completeConnectorUpgradePairing(request({ pairingId, token }), completedPairing);
+    assert.equal(completedPairing.code, 200);
+    const retriedPairing = response();
+    await controller.completeConnectorUpgradePairing(request({ pairingId, token }), retriedPairing);
+    assert.equal(retriedPairing.code, 200, 'lost completion response must retain the same authorization');
+    const deliveredPairing = response();
+    await controller.pollConnectorUpgradePairing(request({ pairingId, secret }), deliveredPairing);
+    assert.equal(deliveredPairing.code, 200);
+    assert.equal(deliveredPairing.body.token, token);
+    assert.equal(deliveredPairing.body.binding.attemptId, binding.attemptId);
     const handoff = response();
     const refreshed = request({ action: 'consume', token, binding });
     refreshed.databaseSessionCapability = undefined;
@@ -209,6 +247,35 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const verification = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'verify', token, binding }), verification);
     assert.equal(verification.code, 200, 'browser capability rotation after redemption cannot revoke the installer token');
+    runtimeVersion = attempt.targetVersion;
+    const statement = JSON.stringify({ purpose: 'mscqr-connector-upgrade-postinstall-v1',
+      attemptId: challenge.attemptId, observedAt: new Date().toISOString(), version: attempt.targetVersion,
+      sha256: binding.targetSha256 || hash('replacement'), agentId: attempt.agentId,
+      deviceFingerprint: attempt.deviceFingerprint, registrationId: attempt.registrationId,
+      selectedPrinterId: 'native-printer', sessionId: 'trusted-session',
+      journalSha256: protectedJournalSha, fenced: true });
+    const postInstallProof = { statement,
+      signature: sign(null, Buffer.from(statement), device.privateKey).toString('base64url') };
+    const badPostInstall = response();
+    await controller.issueVerifiedPostInstallEvidence(request({ token,
+      proof: { ...postInstallProof, signature: 'a'.repeat(86) } }), badPostInstall);
+    assert.equal(badPostInstall.code, 409, 'forged runtime proof cannot release printing');
+    protectedEntries = [{ printItemId: 'unresolved', sha256: hash('unresolved') }];
+    protectedJournalSha = hash('different-journal');
+    const unprotectedPostInstall = response();
+    await controller.issueVerifiedPostInstallEvidence(request({ token, proof: postInstallProof }), unprotectedPostInstall);
+    assert.equal(unprotectedPostInstall.code, 409, 'changed durable no-replay evidence keeps the maintenance fence');
+    protectedEntries = [];
+    const postInstall = response();
+    await controller.issueVerifiedPostInstallEvidence(request({ token, proof: postInstallProof }), postInstall);
+    assert.equal(postInstall.code, 200, 'fresh registered connector proof and frozen work permit release review');
+    const release = response();
+    await controller.requestConnectorMaintenance(request({ action: 'release', evidence: postInstall.body.evidence }), release);
+    assert.equal(release.code, 200);
+    const releaseStatus = response();
+    await controller.redeemConnectorMaintenanceHandoff(request({ action: 'release-status', token, binding }), releaseStatus);
+    assert.equal(releaseStatus.code, 200);
+    assert.equal(releaseStatus.body.data.dispatchFenced, false);
     const afterConsumption = response();
     await controller.requestConnectorMaintenance(request({ action: 'authorize', evidence: accepted.body.evidence }), afterConsumption);
     assert.equal(afterConsumption.code, 409, 'consumed authorization cannot be reissued');
