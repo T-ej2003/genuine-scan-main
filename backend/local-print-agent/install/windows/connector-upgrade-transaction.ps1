@@ -679,8 +679,9 @@ if ($MyInvocation.InvocationName -ne '.') {
       $journalFile=Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade\transaction.json'
       Assert-MscqrPrivatePath $journalFile
       $existing=Read-MscqrJson $journalFile
-      $recoveringFencedCommit=$Operation -eq 'Recover' -and $existing.phase -eq 'COMMITTED_FENCED'
       $selected=[string]$existing.stateFile
+      $recoveringFencedCommit=$Operation -eq 'Recover' -and ($existing.phase -eq 'COMMITTED_FENCED' -or
+        ($existing.phase -eq 'VERIFIED' -and (Test-Path -LiteralPath (Join-Path ([IO.Path]::GetDirectoryName($selected)) 'maintenance-fence.json.release-pending'))))
     }
     Invoke-MscqrUpgradeTransaction -Phase $Operation -LiveDirectory $live -Payload $PayloadDirectory -Installer $InstallerFile -AuthFile $AuthorizationFile -Version $TargetVersion -StateFile $selected -StateDiscovery $discovery -StartupFile (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs')
     $resultPhase=(Read-MscqrJson (Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade\transaction.json')).phase
