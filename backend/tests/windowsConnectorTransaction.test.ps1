@@ -25,7 +25,7 @@ function Get-AuthenticodeSignature {
   if($script:injection -eq 'stage' -and "$LiteralPath$FilePath" -like '*connector-upgrade\stage\*') {return [pscustomobject]@{Status='Invalid'}}
   return [pscustomobject]@{ Status='Valid'; TimeStamperCertificate='fixture timestamp'; SignerCertificate=[pscustomobject]@{Subject='fixture publisher'} }
 }
-function Get-MscqrRuntimeVersion { param($Runtime) return '2026.6.26' }
+function Get-MscqrRuntimeVersion { param($Runtime) return $script:sourceVersion }
 function Assert-MscqrExistingIdentity {param($Candidate,$StateFile,$Binding)}
 function Get-MscqrIdentityEvidence {param($Candidate,$StateFile) return [pscustomobject]@{stateSemanticSha256=(Get-FileHash $StateFile).Hash.ToLowerInvariant()}}
 function Get-ScheduledTask { return @() }
