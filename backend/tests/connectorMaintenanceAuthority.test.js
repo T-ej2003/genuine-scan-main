@@ -53,14 +53,15 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
     throw new Error('UPGRADE_HANDOFF_DENIED');
   if (input.operation === 'REVOKE') { revoked = true; return { revoked: true, dispatchFenced: true }; }
   if (input.operation === 'CONSUME') {
-    if (consumed) throw new Error('MAINTENANCE_AUTHORIZATION_DENIED');
+    if (consumed) return { authorized: true, dispatchFenced: true, binding: input.binding, idempotent: true };
     consumed = true;
   } else if (!consumed) throw new Error('MAINTENANCE_AUTHORIZATION_DENIED');
   return { authorized: true, dispatchFenced: true, binding: input.binding };
 }, protectUpgradeUnknownAttempts: async input => {
-  protectedEntries = input.entries.filter(entry => entry.printItemId !== 'settled-item');
+  protectedEntries = input.entries.filter(entry => entry.printItemId !== 'settled-item' && entry.printJobId !== 'old-job');
   protectedJournalSha = input.journalSha256;
-  return { protected: protectedEntries.length, settled: input.entries.length - protectedEntries.length,
+  return { protected: protectedEntries.length, settled: input.entries.filter(entry => entry.printItemId === 'settled-item').length,
+    historicalReissues: input.entries.filter(entry => entry.printJobId === 'old-job').length,
     protectedItemIds: protectedEntries.map(entry => entry.printItemId) };
 }, administerPrintingPrinter: async input => {
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
@@ -128,6 +129,20 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const protectedEvidence = require(path.join(dist, 'services/connectorMaintenanceEvidence')).verifyConnectorIsolationEvidence(reservedResult.body.evidence);
     assert.equal(protectedEvidence.reconciliations.length, 12);
     assert(protectedEvidence.reconciliations.every(item => item.outcome === 'PROTECTED_UNKNOWN'));
+    const oldRecord = { ...entries[0], name: `${hash('old-job-record')}.json`,
+      sha256: hash('old-job-content'), printJobId: 'old-job' };
+    const reissuedEntries = [...entries, oldRecord];
+    const reissued = proofService.signMaintenanceCheckpoint(device.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), {
+      purpose: 'mscqr-connector-maintenance-checkpoint-v1', challenge, observedAt: new Date().toISOString(),
+      fence: { fenced: true, active: 0, idle: true, socketClosed: true },
+      journal: { count: reissuedEntries.length, entries: reissuedEntries,
+        sha256: hash(JSON.stringify(reissuedEntries.map(({ name, sha256 }) => [name, sha256]))) },
+      physicalOutcomes: 'UNVERIFIED',
+    });
+    const reissuedResult = response();
+    await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId,
+      checkpoint: reissued, binding }), reissuedResult);
+    assert.equal(reissuedResult.code, 200, 'historical governed record cannot replace the current no-replay marker');
     const settledEntry = { name: `${hash('settled-journal')}.json`, sha256: hash('settled-record'),
       printJobId: 'settled-job', printItemId: 'settled-item', attemptId: null, state: 'ATTEMPT_RESERVED' };
     const historicalEntries = [...entries, settledEntry];
@@ -188,7 +203,8 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     assert.equal(handoff.code, 200);
     const afterRefresh = response();
     await controller.redeemConnectorMaintenanceHandoff(refreshed, afterRefresh);
-    assert.equal(afterRefresh.code, 403, 'browser refresh cannot permit a second consume');
+    assert.equal(afterRefresh.code, 200, 'lost responses may retry the same fenced consumption after browser refresh');
+    assert.equal(afterRefresh.body.data.idempotent, true);
     const verification = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'verify', token, binding }), verification);
     assert.equal(verification.code, 200, 'browser capability rotation after redemption cannot revoke the installer token');
@@ -197,7 +213,8 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     assert.equal(afterConsumption.code, 409, 'consumed authorization cannot be reissued');
     const replay = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'consume', token, binding }), replay);
-    assert.equal(replay.code, 403);
+    assert.equal(replay.code, 200);
+    assert.equal(replay.body.data.idempotent, true);
     const wrongBinding = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'verify', token,
       binding: { ...binding, manufacturerId: 'other-maker' } }), wrongBinding);

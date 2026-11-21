@@ -724,7 +724,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $fn$
 DECLARE snapshot jsonb; registration_id text; expected_count integer;
   matches jsonb; entry jsonb; item_row record; marker jsonb; added integer:=0;
-  settled integer:=0; diagnostic_count integer:=0; prior_operation text; protected_ids jsonb:='[]'::jsonb;
+  settled integer:=0; diagnostic_count integer:=0; historical_count integer:=0; prior_operation text; protected_ids jsonb:='[]'::jsonb;
 BEGIN
   IF session_user <> {{APP_ROLE}} OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
      p_fence_request_id IS NULL OR p_fence_request_id !~* '^[0-9a-f-]{36}$' OR
@@ -739,8 +739,7 @@ BEGIN
       e.state NOT IN ('ATTEMPT_RESERVED','PREPARING','PRE_DISPATCH_FAILURE','PRE_DISPATCH_REPORTED') OR
       e."printJobId" IS NULL OR e."printItemId" IS NULL OR
       (e."attemptId" IS NOT NULL AND e."attemptId" !~* '^[0-9a-f-]{36}$')
-  ) OR (SELECT count(DISTINCT e."printItemId") FROM jsonb_to_recordset(p_entries) AS e("printItemId" text))<>expected_count OR
-       (SELECT count(DISTINCT e.name) FROM jsonb_to_recordset(p_entries) AS e(name text))<>expected_count
+  ) OR (SELECT count(DISTINCT e.name) FROM jsonb_to_recordset(p_entries) AS e(name text))<>expected_count
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_DENIED' USING ERRCODE='42501'; END IF;
 
   -- The maintenance gate serializes claims and this write on the same printer.
@@ -775,7 +774,28 @@ BEGIN
     WHERE ps."printerRegistrationId"=registration_id AND
       j."manufacturerId"=current_setting('app.printing_user_id',true) AND
       (e."attemptId" IS NOT DISTINCT FROM pi."dispatchMetadata"->>'attemptId');
-  IF jsonb_array_length(matches)+diagnostic_count<>expected_count
+  IF (SELECT count(DISTINCT item->>'itemId') FROM jsonb_array_elements(matches) item)<>jsonb_array_length(matches)
+  THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
+  -- Governed reissue moves the same item to a replacement job. Its old
+  -- journal remains evidence, but the old job can no longer dispatch the item.
+  WITH RECURSIVE lineage AS (
+    SELECT pi.id AS item_id,j.id AS job_id,j."reprintOfJobId" AS parent_id,
+      j."manufacturerId" AS manufacturer_id,j."batchId" AS batch_id,j."printerId" AS printer_id,0 AS depth
+    FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+      JOIN public."PrintJob" j ON j.id=ps."printJobId"
+    WHERE pi.id IN (SELECT e."printItemId" FROM jsonb_to_recordset(p_entries) AS e("printItemId" text))
+      AND ps."printerRegistrationId"=registration_id
+      AND j."manufacturerId"=current_setting('app.printing_user_id',true)
+    UNION ALL
+    SELECT l.item_id,parent.id,parent."reprintOfJobId",l.manufacturer_id,l.batch_id,l.printer_id,l.depth+1
+    FROM lineage l JOIN public."PrintJob" parent ON parent.id=l.parent_id
+    WHERE l.depth<32 AND parent."manufacturerId"=l.manufacturer_id
+      AND parent."batchId"=l.batch_id AND parent."printerId"=l.printer_id
+  )
+  SELECT count(*) INTO historical_count FROM jsonb_to_recordset(p_entries)
+    AS e("printJobId" text,"printItemId" text)
+    JOIN lineage l ON l.item_id=e."printItemId" AND l.job_id=e."printJobId" AND l.depth>0;
+  IF jsonb_array_length(matches)+diagnostic_count+historical_count<>expected_count
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
   settled:=diagnostic_count;
 
@@ -819,7 +839,8 @@ BEGIN
       "pipelineState"='NEEDS_OPERATOR_ACTION',"failureReason"='physical_outcome_unconfirmed',"updatedAt"=clock_timestamp()
       WHERE j.id=entry->>'jobId';
   END LOOP;
-  RETURN jsonb_build_object('protected',expected_count-settled,'settled',settled,
+  RETURN jsonb_build_object('protected',expected_count-settled-historical_count,'settled',settled,
+    'historicalReissues',historical_count,
     'protectedItemIds',protected_ids,'newlyProtected',added,'journalSha256',p_journal_sha256);
 END
 $fn$;

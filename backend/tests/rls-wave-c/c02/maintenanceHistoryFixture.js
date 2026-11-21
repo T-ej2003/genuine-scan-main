@@ -68,10 +68,10 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
     '${randomUUID()}','MAINTENANCE_INVENTORY','${printer}','{}'::jsonb)`,true),/DENIED|REVOKED|revoked|denied/,
     'the browser capability must actually be invalid before installer redemption');
   const concurrent=await Promise.all([psqlAsync(app,handoff('CONSUME')),psqlAsync(app,handoff('CONSUME'))]);
-  assert.equal(concurrent.filter(result=>result.status===0).length,1,
-    'one installer redemption must win even after browser capability revocation');
+  assert.equal(concurrent.filter(result=>result.status===0).length,2,
+    'an identical retry must observe the same fenced redemption after browser capability revocation');
   psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=NULL WHERE id='${ids.makerRefresh}'`);
-  assert.match(psql(app,handoff('CONSUME'),true),/MAINTENANCE_AUTHORIZATION_DENIED/);
+  assert.equal(JSON.parse(psql(app,handoff('CONSUME'))).idempotent,true);
   psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=now() WHERE id='${ids.makerRefresh}'`);
   assert.equal(JSON.parse(psql(app,handoff('VERIFY'))).authorized,true);
   psql(admin,`UPDATE public."RefreshToken" SET "sessionCapabilityRevokedAt"=NULL WHERE id='${ids.makerRefresh}'`);
@@ -102,9 +102,12 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   assert.equal(snapshot.inventory.items.length,12,'twelve legacy reservations remain individually visible');
   const uncertain=snapshot.inventory.items.map((item,index)=>({name:`${hash(`upgrade-journal-${index}`)}.json`,
     sha256:hash(`upgrade-record-${index}`),printJobId:job,printItemId:item.id,attemptId:null,state:'ATTEMPT_RESERVED'}));
+  psql(admin,`UPDATE public."PrintJob" SET "reprintOfJobId"='${historyJob}' WHERE id='${job}'`);
+  const reissued={...uncertain[0],name:`${hash('governed-reissue-history')}.json`,
+    sha256:hash('governed-reissue-record'),printJobId:historyJob};
   const settledId=psql(admin,`SELECT id FROM public."PrintItem" WHERE "printSessionId"='${historySession}' AND state='PRINT_CONFIRMED' LIMIT 1`);
   const journalEntries=[...uncertain,{name:`${hash('settled-journal')}.json`,sha256:hash('settled-record'),
-    printJobId:historyJob,printItemId:settledId,attemptId:null,state:'ATTEMPT_RESERVED'}];
+    printJobId:historyJob,printItemId:settledId,attemptId:null,state:'ATTEMPT_RESERVED'},reissued];
   const diagnosticId=randomUUID();
   const diagnostic={name:`${hash('settled-diagnostic')}.json`,sha256:hash('diagnostic-record'),
     printJobId:`diagnostic:${diagnosticId}`,printItemId:`diagnostic:${diagnosticId}`,
@@ -117,6 +120,10 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
     SELECT '${randomUUID()}',"assignedUserId","orgId","licenseeId",'PRINTER_TEST_LABEL_CONFIRMED','Printer',id,
       jsonb_build_object('testJobId','${diagnosticId}') FROM public."Printer" WHERE id='${printer}'`);
   journalEntries.push(diagnostic);
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('unrelated-reissue')}',
+    '${JSON.stringify([...journalEntries,{...reissued,name:`${hash('unrelated-history')}.json`,printJobId:templateJobId}])}'::jsonb)`,true),
+    /UPGRADE_NO_REPLAY_MISMATCH/,'unrelated historical jobs cannot be laundered as governed reissues');
   const journalHash=hash(JSON.stringify(journalEntries.map(({name,sha256})=>[name,sha256])));
   for(const [table,column] of [['PrintItem','frozenAt'],['PrintSession','frozenItems']]) {
     assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."${table}"','${column}','UPDATE')`),'t');
@@ -130,6 +137,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   const protectedResult=JSON.parse(psql(app,protection));
   assert.equal(protectedResult.protected,12,'uncertain attempts must be durably protected');
   assert.equal(protectedResult.settled,2,'confirmed print and diagnostic history must be verified without freezing them');
+  assert.equal(protectedResult.historicalReissues,1,'governed reissue history remains retained without claiming physical completion');
   assert.equal(protectedResult.protectedItemIds.length,12);
   assert.equal(protectedResult.newlyProtected,12,'nullable dispatch metadata must not skip the first protection write');
   assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');

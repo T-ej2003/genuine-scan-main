@@ -144,9 +144,14 @@ BEGIN
          current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR
          current_value->'upgrade'->'evidence'->>'workDigest' IS DISTINCT FROM p_details->>'workDigest' OR
          coalesce((current_value->'upgrade'->>'expiresAt')::timestamptz,'-infinity')<=clock_timestamp() OR
-         current_value->'upgrade'->>'state' IS DISTINCT FROM (CASE WHEN p_operation='CONSUME' THEN 'AUTHORIZED' ELSE 'CONSUMED' END)
+         (p_operation='CONSUME' AND current_value->'upgrade'->>'state' IS DISTINCT FROM 'AUTHORIZED' AND
+           current_value->'upgrade'->>'state' IS DISTINCT FROM 'CONSUMED') OR
+         (p_operation='VERIFY' AND current_value->'upgrade'->>'state' IS DISTINCT FROM 'CONSUMED')
       THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
       IF p_operation='CONSUME' THEN
+        IF current_value->'upgrade'->>'state'='CONSUMED' THEN
+          RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',true,'idempotent',true);
+        END IF;
         current_value:=jsonb_set(current_value,'{upgrade,state}',to_jsonb('CONSUMED'::text));
       END IF;
     END IF;

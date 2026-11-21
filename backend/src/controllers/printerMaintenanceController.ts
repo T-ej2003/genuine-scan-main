@@ -66,15 +66,17 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
         entries: checkpoint.journal.entries });
       if (!Array.isArray(protectedResult.protectedItemIds) ||
           protectedResult.protectedItemIds.length !== protectedResult.protected ||
-          protectedResult.protected + protectedResult.settled !== checkpoint.journal.count)
+          protectedResult.protected + protectedResult.settled + protectedResult.historicalReissues !== checkpoint.journal.count)
         throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
       protectedItemIds = protectedResult.protectedItemIds;
       snapshot = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
         operation: "MAINTENANCE_INVENTORY", printerId: trusted.printerId, payload: {} });
     }
     const protectedSet = new Set(protectedItemIds);
-    const journalByItem = new Map(checkpoint.journal.entries
-      .filter(entry => protectedSet.has(entry.printItemId)).map(entry => [entry.printItemId, entry]));
+    const entriesByItemAndHash = new Map<string, (typeof checkpoint.journal.entries)[number]>(
+      checkpoint.journal.entries.map(entry => [`${entry.printItemId}:${entry.sha256}`, entry]));
+    const journalByItem = new Map<string, (typeof checkpoint.journal.entries)[number] | undefined>(snapshot.inventory.items.map((item: any) => [item.id,
+      entriesByItemAndHash.get(`${item.id}:${item.dispatchMetadata?.upgradeNoReplay?.entrySha256}`)]));
     if (snapshot.state !== "DISPATCH_FENCED" || snapshot.requestId !== input.binding.fenceRequestId ||
         journalByItem.size !== protectedSet.size || snapshot.inventory.items.length !== journalByItem.size ||
         snapshot.inventory.items.some((item: any) => {

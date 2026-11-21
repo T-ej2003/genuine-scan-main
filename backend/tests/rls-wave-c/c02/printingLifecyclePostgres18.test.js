@@ -1518,7 +1518,7 @@ async function main() {
     let token=authorityResult.data.token;
     await postMaintenance('maker',{action:'consume',token,binding:{...binding,attemptId:randomUUID()}},403);
     const consumeResults=await Promise.all([postMaintenance('maker',{action:'consume',token,binding}),postMaintenance('maker',{action:'consume',token,binding})]);
-    assert.deepEqual(consumeResults.map(result=>result.status).sort(),[200,403],'exactly one concurrent consumption may succeed');
+    assert.deepEqual(consumeResults.map(result=>result.status).sort(),[200,200],'identical concurrent consumption must be safe to retry');
     await postMaintenance('maker',{action:'verify',token,binding},200);
     const expiredToken=token;
     psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,'{upgrade,expiresAt}',to_jsonb((clock_timestamp()-interval '1 second')::text))

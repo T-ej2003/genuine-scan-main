@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea'
+    AND source_contract_sha256='53ff5d91c5a0c2cc9715a7eabf8d3efddab2d8d89f810e1a21ac3d3fcf33cd4d'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:53ff5d91c5a0c2cc9715a7eabf8d3efddab2d8d89f810e1a21ac3d3fcf33cd4d'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:53ff5d91c5a0c2cc9715a7eabf8d3efddab2d8d89f810e1a21ac3d3fcf33cd4d')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8193,9 +8193,14 @@ BEGIN
          current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR
          current_value->'upgrade'->'evidence'->>'workDigest' IS DISTINCT FROM p_details->>'workDigest' OR
          coalesce((current_value->'upgrade'->>'expiresAt')::timestamptz,'-infinity')<=clock_timestamp() OR
-         current_value->'upgrade'->>'state' IS DISTINCT FROM (CASE WHEN p_operation='CONSUME' THEN 'AUTHORIZED' ELSE 'CONSUMED' END)
+         (p_operation='CONSUME' AND current_value->'upgrade'->>'state' IS DISTINCT FROM 'AUTHORIZED' AND
+           current_value->'upgrade'->>'state' IS DISTINCT FROM 'CONSUMED') OR
+         (p_operation='VERIFY' AND current_value->'upgrade'->>'state' IS DISTINCT FROM 'CONSUMED')
       THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
       IF p_operation='CONSUME' THEN
+        IF current_value->'upgrade'->>'state'='CONSUMED' THEN
+          RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',true,'idempotent',true);
+        END IF;
         current_value:=jsonb_set(current_value,'{upgrade,state}',to_jsonb('CONSUMED'::text));
       END IF;
     END IF;
