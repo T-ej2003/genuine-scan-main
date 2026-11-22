@@ -74,7 +74,11 @@ test('upgrade certification derives source digest from a signed installed runtim
   assert.match(job.if, /inputs.execution_mode == 'certify_upgrade'/);
   const authenticate = job.steps.find(step => step.name === 'Authenticate both signed installers').run;
   for (const required of ['gh attestation verify', 'Get-AuthenticodeSignature', 'git merge-base --is-ancestor',
-    'SOURCE_SHA256', 'TARGET_SHA256', '$matching.Count -ne 1']) assert(authenticate.includes(required));
+    'SOURCE_SHA256', 'TARGET_SHA256', '$matching.Count -ne 1', 'offline-upgrade-compatibility.json',
+    '$approvedSources -cnotcontains $env:SOURCE_VERSION']) assert(authenticate.includes(required));
+  const policy = JSON.parse(fs.readFileSync(path.join(__dirname, '../../backend/local-print-agent/packaging/offline-upgrade-compatibility.json')));
+  assert.deepEqual(policy.targets['2026.11.19.1'], ['2026.11.6.2']);
+  assert(!policy.targets['2026.11.19.1'].includes('2026.10.29.1'));
   const source = job.steps.find(step => step.name === 'Verify signed source executable on disposable Windows host').run;
   assert.match(source, /Get-FileHash -LiteralPath \$runtime -Algorithm SHA256/);
   assert.match(source, /\$runtimeVersion -cne \$env:SOURCE_VERSION/);

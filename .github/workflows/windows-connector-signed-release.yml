@@ -640,6 +640,9 @@ jobs:
           $targetVersion = [regex]::Match((Get-Content backend/src/local-print-agent/version.ts -Raw), 'LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"(\d+\.\d+\.\d+(?:\.\d+)?)"').Groups[1].Value
           if (-not $targetVersion -or $env:SOURCE_VERSION -cnotmatch '^\d+\.\d+\.\d+(?:\.\d+)?$' -or
               [version]$env:SOURCE_VERSION -ge [version]$targetVersion) { throw 'Unsupported source or target version.' }
+          $policy = Get-Content backend/local-print-agent/packaging/offline-upgrade-compatibility.json -Raw | ConvertFrom-Json
+          $approvedSources = @($policy.targets.PSObject.Properties[$targetVersion].Value)
+          if ($approvedSources -cnotcontains $env:SOURCE_VERSION) { throw 'Source version is not approved for offline upgrade certification.' }
           foreach ($id in @($env:TARGET_RUN_ID,$env:SOURCE_RUN_ID)) {
             if ($id -cnotmatch '^[1-9][0-9]{0,17}$') { throw 'Signed run ID is required.' }
           }
