@@ -31,10 +31,11 @@ const { generateKeyPairSync, randomUUID } = require('node:crypto');
     assert.equal(validation.status,0,validation.stderr);
     assert.equal(JSON.parse(validation.stdout).agentId,first.agentId);
     const { createUpgradeDeviceChallenge, verifyUpgradeDeviceChallenge } = require('../dist/services/connectorUpgradeDeviceProof');
+    const { LOCAL_PRINT_AGENT_SOURCE_VERSION } = require('../dist/local-print-agent/version');
     const binding = { attemptId: randomUUID(), agentId: first.agentId,
       deviceFingerprint: first.deviceFingerprint, manufacturerId: 'manufacturer-test', tenantId: null,
       printerId: randomUUID(), registrationId: randomUUID(), sourceVersion: '2026.11.6.2',
-      currentVersion: '2026.11.6.2', targetVersion: '2026.11.19.1' };
+      currentVersion: '2026.11.6.2', targetVersion: LOCAL_PRINT_AGENT_SOURCE_VERSION };
     const challenge = createUpgradeDeviceChallenge(binding);
     const signChallenge = (value) => spawnSync(process.execPath,
       [path.resolve(__dirname,'../dist/local-print-agent/index.js'),'--sign-upgrade-challenge'],

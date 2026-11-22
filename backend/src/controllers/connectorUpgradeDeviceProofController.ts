@@ -18,6 +18,27 @@ const newer = (target: string, source: string) => {
   return false;
 };
 
+export const preflightConnectorUpgradeCertification = async (req: AuthRequest, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const input = z.object({ agentId: z.string().min(3), deviceFingerprint: z.string().min(8),
+      sourceVersion: version, sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      targetVersion: version, installerSha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(req.body);
+    const permit = getConnectorUpgradeCertificationPermit();
+    const release = getConnectorReleaseManifest().releases.find(item => item.version === input.targetVersion);
+    if (!permit || release?.publishedAt !== null || release.productionSignedAvailable || release.platforms.windows ||
+        input.agentId !== permit.agentId || input.deviceFingerprint !== permit.deviceFingerprint ||
+        input.sourceVersion !== permit.sourceVersion || input.sourceSha256 !== permit.sourceRuntimeSha256 ||
+        input.targetVersion !== permit.targetVersion || input.installerSha256 !== permit.targetInstallerSha256 ||
+        !newer(input.targetVersion, input.sourceVersion)) throw new Error("CERTIFICATION_PREFLIGHT_DENIED");
+    // This is eligibility only. Manufacturer authentication and device proof
+    // remain mandatory before a maintenance authorization can be issued.
+    return res.json({ success: true });
+  } catch {
+    return res.status(403).json({ success: false, error: "Controlled upgrade certification is unavailable." });
+  }
+};
+
 export const trustedBinding = async (req: AuthRequest) => {
   if (!req.user) throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
   const printerId = z.string().uuid().parse(req.params.id);
@@ -45,7 +66,7 @@ export const issueConnectorUpgradeChallenge = async (req: AuthRequest, res: Resp
     const permit = getConnectorUpgradeCertificationPermit();
     const certificationAttemptId = unpublished && permit &&
       (!attemptId || attemptId === permit.attemptId) &&
-      (!attemptId || [permit.sourceVersion, targetVersion].includes(sourceVersion)) &&
+      (attemptId ? [permit.sourceVersion, targetVersion].includes(sourceVersion) : sourceVersion === permit.sourceVersion) &&
       matchesConnectorUpgradeCertification({ ...binding, sourceVersion: permit.sourceVersion,
         targetVersion, attemptId: permit.attemptId })
       ? permit.attemptId : null;
