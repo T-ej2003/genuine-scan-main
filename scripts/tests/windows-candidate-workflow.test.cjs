@@ -84,6 +84,9 @@ test('upgrade qualification derives source digest without certifying publication
   assert.match(source, /\$runtimeVersion -cne \$env:SOURCE_VERSION/);
   const tests = job.steps.find(step => step.name === 'Run offline upgrade and no-replay regression fixtures').run;
   for (const required of ['windowsConnectorTransaction', 'windowsConnectorJournalBackup', 'windowsConnectorCertifiedSource']) assert(tests.includes(required));
+  assert(job.steps.findIndex(step => step.name === 'Run offline upgrade and no-replay regression fixtures') <
+    job.steps.findIndex(step => step.name === 'Verify signed source executable on disposable Windows host'),
+  'offline fixtures must run before the source installer starts its local connector');
   const stage = job.steps.find(step => step.name === 'Stage controlled upgrade qualification for review').run;
   assert.match(stage, /SOURCE_RUNTIME_SHA256/);
   assert.match(stage, /upgrade-qualification-only/);
