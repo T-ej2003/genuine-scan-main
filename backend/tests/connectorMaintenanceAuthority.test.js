@@ -16,9 +16,21 @@ process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM = authority.publicKey.e
 const proofService = require(path.join(dist, 'services/connectorUpgradeDeviceProof'));
 const attempt = { agentId: 'agent-test', deviceFingerprint: 'device-test', manufacturerId: 'maker-1', tenantId: null,
   printerId: 'd5e8d13e-4d73-411b-9b3f-6d1800e73609', registrationId: '839e55cd-86ea-4523-8544-ff4a62a15158',
-  sourceVersion: '2026.11.19.1', targetVersion: '2026.11.20.1' };
+  sourceVersion: '2026.11.19.1', targetVersion: '2026.11.22.1' };
 const challenge = proofService.createUpgradeDeviceChallenge({ ...attempt, currentVersion: attempt.sourceVersion,
   attemptId: '33045895-4cb7-49ad-81da-0d412d73fa93' });
+const controlledCertification = process.env.MSCQR_TEST_CERTIFICATION === 'true';
+if (controlledCertification) {
+  const sourceSha = '1'.repeat(40);
+  process.env.GIT_SHA = sourceSha;
+  process.env.RELEASE_GIT_SHA = sourceSha;
+  process.env.CONNECTOR_UPGRADE_CERTIFICATION_PERMIT = JSON.stringify({
+    ...attempt, attemptId: challenge.attemptId, sourceRuntimeSha256: hash('certified source'),
+    targetRuntimeSha256: hash('replacement'), targetInstallerSha256: hash('installer'),
+    targetSourceSha: sourceSha, issuedAt: new Date(Date.now() - 1000).toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+}
 const proofSha256 = hash('verified-device-proof');
 const records = new Map([
   [proofService.upgradeProofKey(challenge.challengeId), JSON.stringify({ challenge, proofSha256,
@@ -42,8 +54,10 @@ mock('services/redisService.js', { getRedisClient: async () => redisAvailable ? 
 mock('services/auth/cookieTokenProtectionService.js', { sealCookieToken: value => `sealed:${value}`,
   openCookieToken: value => value.startsWith('sealed:') ? value.slice(7) : null });
 mock('services/connectorReleaseService.js', { getConnectorReleaseManifest: () => ({ releases: [{ version: attempt.targetVersion,
-  productionSignedAvailable: true, platforms: { windows: { installationScope: 'certified-upgrade', sha256: hash('installer') } } }] }),
-  isCertifiedUpgradeSource: (target, source, digest) => target === attempt.targetVersion &&
+  publishedAt: controlledCertification ? null : '2026-11-22T00:00:00.000Z',
+  productionSignedAvailable: !controlledCertification,
+  platforms: { windows: controlledCertification ? null : { installationScope: 'certified-upgrade', sha256: hash('installer') } } }] }),
+  isCertifiedUpgradeSource: (target, source, digest) => !controlledCertification && target === attempt.targetVersion &&
     source === attempt.sourceVersion && digest === hash('certified source') });
 mock('controllers/connectorUpgradeDeviceProofController.js', { trustedBinding: async () => ({
   binding: { agentId: attempt.agentId, deviceFingerprint: attempt.deviceFingerprint,

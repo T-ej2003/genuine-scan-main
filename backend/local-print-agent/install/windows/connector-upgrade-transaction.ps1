@@ -95,13 +95,28 @@ function Get-MscqrInstalledVersion([string]$Live,[string]$Runtime,[string]$Expec
 function Get-MscqrCertifiedSource([Uri]$Authority,[string]$TargetVersion,[string]$InstallerSha256,[string]$Runtime,[string]$Live) {
   $manifest=Invoke-RestMethod -Uri ($Authority.GetLeftPart([UriPartial]::Authority)+'/api/public/connector/releases') -TimeoutSec 20 -MaximumRedirection 0
   $releases=@($manifest.data.releases | Where-Object version -ceq $TargetVersion)
-  if($manifest.success -ne $true -or $releases.Count -ne 1 -or
-     $releases[0].productionSignedAvailable -ne $true -or
-     $releases[0].platforms.windows.installationScope -cne 'certified-upgrade' -or
+  if($manifest.success -ne $true -or $releases.Count -ne 1) {throw 'Target release is unavailable.'}
+  $digest=(Get-FileHash -LiteralPath $Runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+  if($releases[0].platforms.windows.installationScope -cne 'certified-upgrade') {
+    # A signed candidate may proceed only as far as authenticated pairing.
+    # Backend certification permits bind this exact source and installer digest;
+    # no replacement occurs unless that authorization succeeds.
+    Assert-MscqrSignedFile $Runtime $digest
+    $oldAgentVersion=$env:PRINT_AGENT_VERSION;$oldBuildVersion=$env:PRINT_AGENT_BUILD_VERSION
+    try {
+      $env:PRINT_AGENT_VERSION='';$env:PRINT_AGENT_BUILD_VERSION=''
+      $sourceVersion=Get-MscqrRuntimeVersion $Runtime
+    } finally {
+      $env:PRINT_AGENT_VERSION=$oldAgentVersion;$env:PRINT_AGENT_BUILD_VERSION=$oldBuildVersion
+    }
+    if($sourceVersion -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$' -or
+       [version]$sourceVersion -ge [version]$TargetVersion) {throw 'Installed executable is not an older signed connector.'}
+    return Get-MscqrInstalledVersion $Live $Runtime $sourceVersion $digest
+  }
+  if($releases[0].productionSignedAvailable -ne $true -or
      $releases[0].platforms.windows.sha256 -cne $InstallerSha256) {
     throw 'Target installer is not the certified upgrade release.'
   }
-  $digest=(Get-FileHash -LiteralPath $Runtime -Algorithm SHA256).Hash.ToLowerInvariant()
   $sources=@($releases[0].platforms.windows.certifiedUpgradeSources | Where-Object runtimeSha256 -ceq $digest)
   if($sources.Count -ne 1 -or $sources[0].version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
     throw 'Installed executable does not match a certified offline upgrade source.'

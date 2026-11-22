@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
 import { administerPrintingPrinter, readUpgradeDeviceBinding } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { getConnectorReleaseManifest } from "../services/connectorReleaseService";
+import { getConnectorUpgradeCertificationPermit, matchesConnectorUpgradeCertification } from "../services/connectorUpgradeCertification";
 import { getRedisClient } from "../services/redisService";
 import { createUpgradeDeviceChallenge, upgradeAttemptKey, upgradeChallengeSchema, upgradeProofKey, verifyUpgradeDeviceChallenge } from "../services/connectorUpgradeDeviceProof";
 
@@ -39,11 +40,22 @@ export const issueConnectorUpgradeChallenge = async (req: AuthRequest, res: Resp
     const { targetVersion, attemptId } = z.object({ targetVersion: version, attemptId: z.string().uuid().optional() }).strict().parse(req.body);
     const { binding, sourceVersion, historicalSession } = await trustedBinding(req);
     const release = getConnectorReleaseManifest().releases.find(item => item.version === targetVersion);
-    if (!release?.productionSignedAvailable || release.platforms.windows?.installationScope !== "certified-upgrade")
+    const certified = release?.productionSignedAvailable && release.platforms.windows?.installationScope === "certified-upgrade";
+    const unpublished = release?.publishedAt === null && !release.productionSignedAvailable && !release.platforms.windows;
+    const permit = getConnectorUpgradeCertificationPermit();
+    const certificationAttemptId = unpublished && permit &&
+      (!attemptId || attemptId === permit.attemptId) &&
+      (!attemptId || [permit.sourceVersion, targetVersion].includes(sourceVersion)) &&
+      matchesConnectorUpgradeCertification({ ...binding, sourceVersion: permit.sourceVersion,
+        targetVersion, attemptId: permit.attemptId })
+      ? permit.attemptId : null;
+    if (!certified && !certificationAttemptId)
       throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
     const redis = await getRedisClient();
     if (!redis) throw new Error("CONNECTOR_UPGRADE_CHALLENGE_STORE_UNAVAILABLE");
-    const id = attemptId || randomUUID();
+    const id = attemptId || certificationAttemptId || randomUUID();
+    if (certificationAttemptId && id !== certificationAttemptId)
+      throw new Error("CONNECTOR_UPGRADE_ATTEMPT_MISMATCH");
     let immutable = { ...binding, sourceVersion, targetVersion };
     if (attemptId) {
       const raw = await redis.get(upgradeAttemptKey(id));
@@ -91,7 +103,9 @@ export const verifyConnectorUpgradeProof = async (req: AuthRequest, res: Respons
         challenge.currentVersion !== sourceVersion || ![original.sourceVersion, original.targetVersion].includes(sourceVersion))
       throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
     const release = getConnectorReleaseManifest().releases.find(item => item.version === challenge.targetVersion);
-    if (!release?.productionSignedAvailable || release.platforms.windows?.installationScope !== "certified-upgrade" ||
+    const certified = release?.productionSignedAvailable && release.platforms.windows?.installationScope === "certified-upgrade";
+    const unpublished = release?.publishedAt === null && !release.productionSignedAvailable && !release.platforms.windows;
+    if ((!certified && !(unpublished && matchesConnectorUpgradeCertification({ ...original, attemptId: challenge.attemptId }))) ||
         !newer(challenge.targetVersion, original.sourceVersion))
       throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
     const proof = verifyUpgradeDeviceChallenge({ challenge, signature, publicKeyPem,

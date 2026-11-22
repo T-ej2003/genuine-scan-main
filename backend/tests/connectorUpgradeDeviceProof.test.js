@@ -11,7 +11,7 @@ const printerId = 'd5e8d13e-4d73-411b-9b3f-6d1800e73609';
 const registrationId = '839e55cd-86ea-4523-8544-ff4a62a15158';
 const binding = { attemptId: randomUUID(), agentId: 'agent-test', deviceFingerprint: 'device-test', manufacturerId: 'manufacturer-1',
   tenantId: 'tenant-1', printerId, registrationId, sourceVersion: '2026.11.19.1',
-  currentVersion: '2026.11.19.1', targetVersion: '2026.11.20.1' };
+  currentVersion: '2026.11.19.1', targetVersion: '2026.11.22.1' };
 const proof = require(path.join(dist, 'services/connectorUpgradeDeviceProof'));
 
 const challenge = proof.createUpgradeDeviceChallenge(binding, 1000);
@@ -61,7 +61,9 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrint
 } });
 let installationScope = 'certified-upgrade';
 mock('services/connectorReleaseService.js', { getConnectorReleaseManifest: () => ({ releases: [{ version: binding.targetVersion,
-  productionSignedAvailable: true, platforms: { windows: { installationScope } } }] }) });
+  publishedAt: installationScope === 'certified-upgrade' ? '2026-11-22T00:00:00.000Z' : null,
+  productionSignedAvailable: installationScope === 'certified-upgrade',
+  platforms: { windows: installationScope === 'certified-upgrade' ? { installationScope } : null } }] }) });
 mock('services/redisService.js', { getRedisClient: async () => redis });
 const controller = require(path.join(dist, 'controllers/connectorUpgradeDeviceProofController'));
 const request = (body) => ({ body, params: { id: printerId }, user: { userId: binding.manufacturerId }, databaseSessionCapability: 'fixture-capability', requestId: 'fixture-request' });
@@ -112,5 +114,44 @@ const response = () => ({ code: 200, setHeader() {}, status(code) { this.code = 
   const uncertified = response();
   await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), uncertified);
   assert.equal(uncertified.code, 409, 'fresh-install-only artifact cannot receive an upgrade challenge');
+  const candidateAttemptId = randomUUID();
+  const sourceSha = '1'.repeat(40);
+  process.env.GIT_SHA = sourceSha;
+  process.env.RELEASE_GIT_SHA = sourceSha;
+  const permit = { attemptId: candidateAttemptId, agentId: binding.agentId,
+    deviceFingerprint: binding.deviceFingerprint, manufacturerId: binding.manufacturerId,
+    tenantId: binding.tenantId, printerId, registrationId,
+    sourceVersion: binding.sourceVersion, targetVersion: binding.targetVersion,
+    sourceRuntimeSha256: 'a'.repeat(64), targetRuntimeSha256: 'b'.repeat(64),
+    targetInstallerSha256: 'c'.repeat(64), targetSourceSha: sourceSha,
+    issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  process.env.CONNECTOR_UPGRADE_CERTIFICATION_PERMIT = JSON.stringify(permit);
+  const candidate = response();
+  await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), candidate);
+  assert.equal(candidate.code, 200, 'one exact-device certification attempt may start');
+  assert.equal(candidate.body.data.challenge.attemptId, candidateAttemptId);
+  const candidateProof = proof.signUpgradeDeviceChallenge(privateKeyPem, candidate.body.data.challenge);
+  const acceptedCandidate = response();
+  await controller.verifyConnectorUpgradeProof(request({ challengeId: candidate.body.data.challenge.challengeId,
+    signature: candidateProof }), acceptedCandidate);
+  assert.equal(acceptedCandidate.code, 200);
+  const replayCandidate = response();
+  await controller.verifyConnectorUpgradeProof(request({ challengeId: candidate.body.data.challenge.challengeId,
+    signature: candidateProof }), replayCandidate);
+  assert.equal(replayCandidate.code, 403);
+  const secondCandidate = response();
+  await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), secondCandidate);
+  assert.equal(secondCandidate.code, 409, 'certification permit cannot create a second attempt');
+  const crossDevice = response();
+  tenantId = 'other-tenant';
+  await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), crossDevice);
+  assert.equal(crossDevice.code, 409);
+  tenantId = binding.tenantId;
+  process.env.CONNECTOR_UPGRADE_CERTIFICATION_PERMIT = JSON.stringify({ ...permit,
+    expiresAt: new Date(Date.now() - 1).toISOString() });
+  const expired = response();
+  await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), expired);
+  assert.equal(expired.code, 409);
+  delete process.env.CONNECTOR_UPGRADE_CERTIFICATION_PERMIT;
   console.log('connector upgrade device proof tests passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
