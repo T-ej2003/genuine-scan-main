@@ -64,7 +64,7 @@ for (const [name, tamper] of [
   ["unsupported source version", (f) => { f.certification.sources[0].version = f.contract.version; f.staged.releases[0].platforms.windows.certifiedUpgradeSources[0].version = f.contract.version; }],
   ["wrong installer digest", (f) => { fs.writeFileSync(f.installer, "changed"); }],
   ["wrong source commit", (f) => { f.run.head_sha = "f".repeat(40); }],
-  ["uncertified artifact", (f) => { f.artifact.name = "mscqr-fresh-install-distribution-2026.11.20.1"; }],
+  ["qualification-only artifact", (f) => { f.artifact.name = "mscqr-upgrade-qualification-2026.11.20.1"; }],
   ["missing certification metadata", (f) => { f.verify(); fs.rmSync(f.certificate); f.removeCertification(); }],
 ]) {
   test(`rejects ${name}`, () => {

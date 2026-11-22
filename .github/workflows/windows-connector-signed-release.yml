@@ -13,7 +13,7 @@ on:
           - publish
           - certify_fresh_install
           - publish_fresh_install
-          - certify_upgrade
+          - qualify_upgrade
       connector_release_version:
         description: "Optional connector version. Defaults to backend/src/local-print-agent/version.ts and must match that source buildVersion."
         required: false
@@ -607,9 +607,9 @@ jobs:
             backend/local-print-agent/releases/2026.11.19.1/windows
           if-no-files-found: error
 
-  upgrade-certification:
-    name: Certify signed source and target for controlled offline upgrade
-    if: github.event_name == 'workflow_dispatch' && inputs.execution_mode == 'certify_upgrade'
+  upgrade-qualification:
+    name: Qualify signed source and target for offline upgrade testing
+    if: github.event_name == 'workflow_dispatch' && inputs.execution_mode == 'qualify_upgrade'
     runs-on: windows-2022
     environment: production-signing
     permissions:
@@ -741,7 +741,7 @@ jobs:
           node --test backend/tests/connectorOfflineSourcePolicy.test.js backend/tests/windowsConnectorInstallerScript.test.js
           if ($LASTEXITCODE -ne 0) { throw 'Offline upgrade source contract tests failed.' }
 
-      - name: Stage certified upgrade distribution for review
+      - name: Stage controlled upgrade qualification for review
         shell: pwsh
         env:
           TARGET_VERSION: ${{ steps.target.outputs.target_version }}
@@ -751,22 +751,16 @@ jobs:
           SOURCE_SHA256: ${{ inputs.upgrade_source_installer_sha256 }}
           SOURCE_RUNTIME_SHA256: ${{ steps.source.outputs.runtime_sha256 }}
         run: |
-          $record = @(@{version=$env:SOURCE_VERSION;runtimeSha256=$env:SOURCE_RUNTIME_SHA256;installerSha256=$env:SOURCE_SHA256;signedRunId=[long]$env:SOURCE_RUN_ID})
-          $env:WINDOWS_CONNECTOR_CERTIFIED_UPGRADE_SOURCES = ConvertTo-Json -InputObject @(@{version=$env:SOURCE_VERSION;runtimeSha256=$env:SOURCE_RUNTIME_SHA256}) -Compress
-          $env:WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH = $env:TARGET_INSTALLER
-          $env:WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH = Join-Path $env:RUNNER_TEMP 'target\signature-report.json'
-          $env:CONNECTOR_RELEASE_VERSION = $env:TARGET_VERSION
-          node backend/local-print-agent/packaging/publish-windows-connector-release.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Certified upgrade metadata generation failed.' }
-          $certificate = @{targetVersion=$env:TARGET_VERSION;targetSourceSha=$env:GITHUB_SHA;targetInstallerSha256=$env:TARGET_SHA256;sources=$record}
-          $certificate | ConvertTo-Json -Depth 6 | Set-Content backend/local-print-agent/releases/upgrade-certification.json
+          $qualification = @{scope='upgrade-qualification-only';targetVersion=$env:TARGET_VERSION;
+            targetSourceSha=$env:GITHUB_SHA;targetInstallerSha256=$env:TARGET_SHA256;
+            sources=@(@{version=$env:SOURCE_VERSION;runtimeSha256=$env:SOURCE_RUNTIME_SHA256;
+              installerSha256=$env:SOURCE_SHA256;signedRunId=[long]$env:SOURCE_RUN_ID})}
+          $qualification | ConvertTo-Json -Depth 6 | Set-Content "$env:RUNNER_TEMP\upgrade-qualification.json"
 
-      - name: Upload controlled upgrade distribution
+      - name: Upload controlled upgrade qualification
         uses: actions/upload-artifact@v7
         with:
-          name: mscqr-upgrade-distribution-${{ steps.target.outputs.target_version }}
+          name: mscqr-upgrade-qualification-${{ steps.target.outputs.target_version }}
           path: |
-            backend/local-print-agent/releases/manifest.json
-            backend/local-print-agent/releases/upgrade-certification.json
-            backend/local-print-agent/releases/${{ steps.target.outputs.target_version }}/windows
+            ${{ runner.temp }}/upgrade-qualification.json
           if-no-files-found: error
