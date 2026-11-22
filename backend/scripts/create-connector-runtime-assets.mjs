@@ -78,10 +78,11 @@ for (const [platformKey, platform] of Object.entries(latestRelease.platforms || 
 const latestDir = path.join(sourceReleaseRoot, manifest.latestVersion);
 const latestDirFilesCopied = latestRelease.publishedAt ? copyDirectory(latestDir, path.join(outputReleaseRoot, manifest.latestVersion)) : 0;
 
-// Keep the previous published signed installer available while the latest
-// connector is limited to fresh installations.
-const previous = latestRelease.publishedAt && latestRelease.platforms?.windows?.installationScope === "fresh-install-only" &&
-  latestRelease.platforms.windows.signatureStatus === "signed" && latestRelease.platforms.windows.trustLevel === "production" &&
+// Keep the previous download available while the latest has a restricted installation scope.
+const previous = latestRelease.publishedAt &&
+  ["fresh-install-only", "certified-upgrade"].includes(latestRelease.platforms?.windows?.installationScope) &&
+  latestRelease.platforms.windows.signatureStatus === "signed" &&
+  latestRelease.platforms.windows.trustLevel === "production" &&
   manifest.releases.filter((release) =>
     compareVersion(release.version, manifest.latestVersion) < 0 && release.publishedAt &&
     release.platforms?.windows?.signatureStatus === "signed" &&

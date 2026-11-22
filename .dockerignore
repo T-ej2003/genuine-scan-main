@@ -37,10 +37,9 @@ backend/prisma.zip
 # binaries out of the Docker context; do not remove them from the repository.
 backend/local-print-agent/releases/*
 !backend/local-print-agent/releases/manifest.json
-!backend/local-print-agent/releases/2026.10.29.1
-!backend/local-print-agent/releases/2026.10.29.1/**
-!backend/local-print-agent/releases/2026.11.19.1
-!backend/local-print-agent/releases/2026.11.19.1/**
+!backend/local-print-agent/releases/[0-9]*
+!backend/local-print-agent/releases/[0-9]*/windows
+!backend/local-print-agent/releases/[0-9]*/windows/**
 backend/local-print-agent/releases/*/macos
 
 # Local IaC/plugin/debug artifacts

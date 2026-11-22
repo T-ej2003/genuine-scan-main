@@ -67,6 +67,32 @@ test('fresh-install publication reuses only the attested signed candidate after 
   assert(!job.steps.some(step => /azure login|sign staged|compile windows installer/i.test(step.name || '')));
 });
 
+test('upgrade qualification derives source digest without certifying publication', () => {
+  const job = workflow.jobs['upgrade-qualification'];
+  assert.equal(job.environment, 'production-signing');
+  assert.equal(job.permissions.contents, 'read');
+  assert.match(job.if, /inputs.execution_mode == 'qualify_upgrade'/);
+  const authenticate = job.steps.find(step => step.name === 'Authenticate both signed installers').run;
+  for (const required of ['gh attestation verify', 'Get-AuthenticodeSignature', 'git merge-base --is-ancestor',
+    'SOURCE_SHA256', 'TARGET_SHA256', '$matching.Count -ne 1', 'offline-upgrade-compatibility.json',
+    '$approvedSources -cnotcontains $env:SOURCE_VERSION']) assert(authenticate.includes(required));
+  const policy = JSON.parse(fs.readFileSync(path.join(__dirname, '../../backend/local-print-agent/packaging/offline-upgrade-compatibility.json')));
+  assert.deepEqual(policy.targets['2026.11.19.1'], ['2026.11.6.2']);
+  assert(!policy.targets['2026.11.19.1'].includes('2026.10.29.1'));
+  const source = job.steps.find(step => step.name === 'Verify signed source executable on disposable Windows host').run;
+  assert.match(source, /Get-FileHash -LiteralPath \$runtime -Algorithm SHA256/);
+  assert.match(source, /\$runtimeVersion -cne \$env:SOURCE_VERSION/);
+  const tests = job.steps.find(step => step.name === 'Run offline upgrade and no-replay regression fixtures').run;
+  for (const required of ['windowsConnectorTransaction', 'windowsConnectorJournalBackup', 'windowsConnectorCertifiedSource']) assert(tests.includes(required));
+  const stage = job.steps.find(step => step.name === 'Stage controlled upgrade qualification for review').run;
+  assert.match(stage, /SOURCE_RUNTIME_SHA256/);
+  assert.match(stage, /upgrade-qualification-only/);
+  assert(!stage.includes('WINDOWS_CONNECTOR_CERTIFIED_UPGRADE_SOURCES'));
+  assert(!stage.includes('git push'));
+  assert(job.steps.some(step => step.uses?.startsWith('actions/upload-artifact@') && step.with.name.includes('mscqr-upgrade-qualification')));
+  assert(!job.steps.some(step => step.uses?.startsWith('actions/upload-artifact@') && step.with.name.includes('mscqr-upgrade-distribution')));
+});
+
 test('signed source and a policy sibling share only the pinned parent', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-connector-lineage-'));
   const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: {

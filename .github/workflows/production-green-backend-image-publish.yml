@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      connector_upgrade_distribution:
+        description: Include an exact-source certified upgrade distribution artifact
+        required: false
+        type: boolean
+        default: false
       connector_distribution_artifact_id:
         required: false
         type: string
@@ -45,6 +50,11 @@ on:
         type: string
       connector_fresh_install_distribution:
         description: Include an exact-source certified fresh-install distribution artifact
+        required: false
+        type: boolean
+        default: false
+      connector_upgrade_distribution:
+        description: Include an exact-source certified upgrade distribution artifact
         required: false
         type: boolean
         default: false
@@ -93,7 +103,8 @@ jobs:
       BACKEND_ECR_REPO: mscqr-backend
       PLATFORMS: linux/amd64
       RELEASE_SHA: ${{ inputs.release_sha }}
-      CONNECTOR_DISTRIBUTION: ${{ inputs.connector_fresh_install_distribution }}
+      CONNECTOR_DISTRIBUTION: ${{ inputs.connector_fresh_install_distribution || inputs.connector_upgrade_distribution }}
+      CONNECTOR_UPGRADE_DISTRIBUTION: ${{ inputs.connector_upgrade_distribution }}
       COSIGN_EXPERIMENTAL: "1"
       PROVENANCE_ATTESTATION_TYPE: https://mscqr.com/attestations/release-provenance/v1
     steps:
@@ -108,8 +119,8 @@ jobs:
           node scripts/aws/stage-b-release-gate.mjs "$RELEASE_SHA"
           test -z "$(git status --porcelain)"
 
-      - name: Stage certified fresh-install connector distribution
-        if: inputs.connector_fresh_install_distribution
+      - name: Stage certified connector distribution
+        if: inputs.connector_fresh_install_distribution || inputs.connector_upgrade_distribution
         env:
           GH_TOKEN: ${{ github.token }}
           GH_HOST: github.com
@@ -119,7 +130,8 @@ jobs:
           INSTALLER_SHA256: ${{ inputs.connector_installer_sha256 }}
         run: |
           set -euo pipefail
-          node --test backend/tests/verifyFreshInstallDistribution.test.mjs
+          if [[ "${{ inputs.connector_fresh_install_distribution }}" == "true" && "$CONNECTOR_UPGRADE_DISTRIBUTION" == "true" ]]; then exit 1; fi
+          node --test backend/tests/verifyFreshInstallDistribution.test.mjs backend/tests/verifyUpgradeDistribution.test.mjs
           node --input-type=module - <<'NODE'
           import fs from 'node:fs';
           const version = fs.readFileSync('backend/src/local-print-agent/version.ts', 'utf8').match(/LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"([0-9.]+)"/)?.[1];
@@ -128,10 +140,11 @@ jobs:
           for (const name of ['ARTIFACT_ID', 'RUN_ID']) if (!/^[1-9][0-9]{0,17}$/.test(process.env[name] || '')) throw new Error(`Invalid ${name}`);
           for (const name of ['ARTIFACT_ID', 'RUN_ID']) if (!Number.isSafeInteger(Number(process.env[name]))) throw new Error(`Unsafe ${name}`);
           for (const name of ['ARCHIVE_SHA256', 'INSTALLER_SHA256']) if (!/^[a-f0-9]{64}$/.test(process.env[name] || '')) throw new Error(`Invalid ${name}`);
+          if (process.env.CONNECTOR_UPGRADE_DISTRIBUTION === 'true' && process.env.CONNECTOR_DISTRIBUTION !== 'true') throw new Error('Upgrade distribution flag mismatch');
           const contract = { repository: 'T-ej2003/genuine-scan-main', sourceSha: process.env.RELEASE_SHA,
             runId: Number(process.env.RUN_ID), workflowId: 273963817, artifactId: Number(process.env.ARTIFACT_ID),
             artifactDigest: `sha256:${process.env.ARCHIVE_SHA256}`, version, installerSha256: process.env.INSTALLER_SHA256,
-            previousVersion: '2026.10.29.1', previousSha256: 'b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011' };
+            scope: process.env.CONNECTOR_UPGRADE_DISTRIBUTION === 'true' ? 'certified-upgrade' : 'fresh-install-only' };
           fs.writeFileSync(process.env.RUNNER_TEMP + '/connector-contract.json', JSON.stringify(contract));
           fs.writeFileSync(process.env.RUNNER_TEMP + '/connector-version', version);
           fs.appendFileSync(process.env.GITHUB_ENV, `CONNECTOR_VERSION=${version}\n`);
@@ -147,6 +160,38 @@ jobs:
           node backend/scripts/verify-fresh-install-distribution.mjs backend/local-print-agent/releases "$RUNNER_TEMP/connector-distribution" "$RUNNER_TEMP/connector-artifact.json" "$RUNNER_TEMP/connector-run.json" "$RUNNER_TEMP/connector-contract.json"
           cp "$RUNNER_TEMP/connector-distribution/manifest.json" backend/local-print-agent/releases/manifest.json
           cp -R "$RUNNER_TEMP/connector-distribution/$CONNECTOR_VERSION" backend/local-print-agent/releases/
+
+      - name: Preserve current production connector download
+        run: |
+          set -euo pipefail
+          node --test backend/tests/preserveProductionConnectorDownload.test.mjs
+          if [[ "$CONNECTOR_DISTRIBUTION" == "true" ]]; then staged=staged; else staged=backend-only; fi
+          node backend/scripts/preserve-production-connector-download.mjs backend/local-print-agent/releases "$staged" > "$RUNNER_TEMP/current-connector.json"
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const current = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + '/current-connector.json', 'utf8'));
+          fs.appendFileSync(process.env.GITHUB_ENV, `CURRENT_CONNECTOR_VERSION=${current.version}\nCURRENT_CONNECTOR_SHA256=${current.sha256}\n`);
+          NODE
+
+      - name: Limit connector build context to served releases
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const root = 'backend/local-print-agent/releases';
+          const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
+          const keep = new Set([manifest.latestVersion, process.env.CURRENT_CONNECTOR_VERSION]);
+          const previous = manifest.releases.filter(release => release.publishedAt &&
+            release.platforms?.windows?.signatureStatus === 'signed' &&
+            release.version.localeCompare(manifest.latestVersion, 'en', { numeric: true }) < 0)
+            .sort((left, right) => right.version.localeCompare(left.version, 'en', { numeric: true }))[0];
+          if (previous) keep.add(previous.version);
+          for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+            if (entry.isDirectory() && /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(entry.name) && !keep.has(entry.name)) {
+              fs.rmSync(path.join(root, entry.name), { recursive: true });
+            }
+          }
+          NODE
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -186,19 +231,20 @@ jobs:
           echo "- Fixed security-catalogue and compatibility-verifier modules: present in /app/scripts" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify certified connector bytes inside the published image
-        if: inputs.connector_fresh_install_distribution
         env:
           INSTALLER_SHA256: ${{ inputs.connector_installer_sha256 }}
+          CONNECTOR_SCOPE: ${{ inputs.connector_upgrade_distribution && 'certified-upgrade' || 'fresh-install-only' }}
         run: |
           set -euo pipefail
-          docker run --rm --env CONNECTOR_VERSION --env INSTALLER_SHA256 --entrypoint node "$BACKEND_IMAGE" -e '
+          docker run --rm --env CONNECTOR_VERSION --env INSTALLER_SHA256 --env CONNECTOR_DISTRIBUTION --env CONNECTOR_SCOPE --env CURRENT_CONNECTOR_VERSION --env CURRENT_CONNECTOR_SHA256 --entrypoint node "$BACKEND_IMAGE" -e '
             const fs = require("node:fs"), crypto = require("node:crypto"), root = "/app/local-print-agent/releases/";
             const manifest = JSON.parse(fs.readFileSync(root + "manifest.json", "utf8"));
-            if (manifest.latestVersion !== process.env.CONNECTOR_VERSION || manifest.releases.length < 2) process.exit(1);
-            for (const [version, digest] of [[process.env.CONNECTOR_VERSION, process.env.INSTALLER_SHA256], ["2026.10.29.1", "b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011"]]) {
+            const expectedLatest = process.env.CONNECTOR_DISTRIBUTION === "true" ? process.env.CONNECTOR_VERSION : process.env.CURRENT_CONNECTOR_VERSION;
+            if (manifest.latestVersion !== expectedLatest || manifest.releases.length < 2) process.exit(1);
+            for (const [version, digest] of [[process.env.CURRENT_CONNECTOR_VERSION, process.env.CURRENT_CONNECTOR_SHA256], ...(process.env.CONNECTOR_DISTRIBUTION === "true" ? [[process.env.CONNECTOR_VERSION, process.env.INSTALLER_SHA256]] : [])]) {
               const release = manifest.releases.find(item => item.version === version), windows = release?.platforms?.windows;
               if (!windows || windows.sha256 !== digest || !release.publishedAt) process.exit(1);
-              if (version === process.env.CONNECTOR_VERSION && windows.installationScope !== "fresh-install-only") process.exit(1);
+              if (version === process.env.CONNECTOR_VERSION && process.env.CONNECTOR_DISTRIBUTION === "true" && windows.installationScope !== process.env.CONNECTOR_SCOPE) process.exit(1);
               if (crypto.createHash("sha256").update(fs.readFileSync(root + windows.relativePath)).digest("hex") !== digest) process.exit(1);
             }
           '

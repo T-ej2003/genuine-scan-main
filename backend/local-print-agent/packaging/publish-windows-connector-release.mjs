@@ -26,7 +26,19 @@ const signedInstallerSource = normalize(process.env.WINDOWS_CONNECTOR_SIGNED_INS
 const signatureReportSource = normalize(process.env.WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH);
 const publisherName = normalize(process.env.WINDOWS_CONNECTOR_PUBLISHER_NAME) || "L&D Health Ltd";
 const freshInstallOnly = process.env.WINDOWS_CONNECTOR_FRESH_INSTALL_ONLY === "true";
-const minimumBuildVersion = freshInstallOnly
+const upgradeSources = process.env.WINDOWS_CONNECTOR_CERTIFIED_UPGRADE_SOURCES
+  ? JSON.parse(process.env.WINDOWS_CONNECTOR_CERTIFIED_UPGRADE_SOURCES)
+  : null;
+if (upgradeSources) {
+  if (freshInstallOnly || !Array.isArray(upgradeSources) || upgradeSources.length === 0 ||
+      upgradeSources.some((source) => !/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(source.version) ||
+        !/^[a-f0-9]{64}$/.test(source.runtimeSha256) ||
+        source.version.localeCompare(version, "en", { numeric: true }) >= 0) ||
+      new Set(upgradeSources.map((source) => source.version)).size !== upgradeSources.length) {
+    throw new Error("Certified upgrade sources must be distinct, older signed runtime versions.");
+  }
+}
+const minimumBuildVersion = freshInstallOnly || upgradeSources
   ? readLocalAgentProtocolString("LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION", backendRoot)
   : sourceVersion;
 const signedAtRaw = normalize(process.env.WINDOWS_CONNECTOR_SIGNED_AT);
@@ -200,7 +212,9 @@ const nextRelease = {
   minimumBuildVersion,
   transportDiagnosticsVersion,
   capabilities: connectorCapabilities,
-  summary: freshInstallOnly
+  summary: upgradeSources
+    ? "Signed Windows connector with certified in-place upgrade sources."
+    : freshInstallOnly
     ? "Signed Windows connector for new installations only; existing installations require authenticated maintenance."
     : "Install the signed Windows connector once on the printing computer, then the MSCQR Connector starts automatically in the background.",
   notes: [
@@ -213,7 +227,8 @@ const nextRelease = {
   platforms: {
     windows: {
       label: freshInstallOnly ? "Windows installer (fresh installation only)" : "Windows installer",
-      ...(freshInstallOnly ? { installationScope: "fresh-install-only" } : {}),
+      ...(freshInstallOnly ? { installationScope: "fresh-install-only" } :
+        upgradeSources ? { installationScope: "certified-upgrade", certifiedUpgradeSources: upgradeSources } : {}),
       installerKind,
       artifactType: "windows-signed-installer",
       trustLevel: "production",
