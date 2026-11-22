@@ -8,6 +8,7 @@ import { MAX_MAINTENANCE_CHECKPOINT_CHARS, upgradeAttemptKey, upgradeAuthorizati
 import { verifyMaintenanceCheckpoint } from "../services/connectorUpgradeDeviceProof";
 import { trustedBinding } from "./connectorUpgradeDeviceProofController";
 import { getConnectorReleaseManifest, isCertifiedUpgradeSource } from "../services/connectorReleaseService";
+import { getConnectorUpgradeCertificationPermit, matchesConnectorUpgradeCertification } from "../services/connectorUpgradeCertification";
 import { getRedisClient } from "../services/redisService";
 import { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } from "../services/localAgentProtocol";
 import { openCookieToken, sealCookieToken } from "../services/auth/cookieTokenProtectionService";
@@ -128,8 +129,12 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
     if (!attemptRaw) throw new Error("CONNECTOR_UPGRADE_ATTEMPT_NOT_FOUND");
     const attempt = JSON.parse(attemptRaw);
     const release = getConnectorReleaseManifest().releases.find(item => item.version === challenge.targetVersion);
-    if (!release?.productionSignedAvailable || release.platforms.windows?.installationScope !== "certified-upgrade" ||
-        !release.platforms.windows?.sha256 ||
+    const certified = release?.productionSignedAvailable && release.platforms.windows?.installationScope === "certified-upgrade";
+    const unpublished = release?.publishedAt === null && !release.productionSignedAvailable && !release.platforms.windows;
+    const certification = unpublished && matchesConnectorUpgradeCertification(input.binding, Date.now(), true)
+      ? getConnectorUpgradeCertificationPermit() : null;
+    const expectedInstallerSha256 = certified ? release.platforms.windows?.sha256 : certification?.targetInstallerSha256;
+    if (!expectedInstallerSha256 ||
         challenge.manufacturerId !== req.user.userId || challenge.printerId !== req.params.id ||
         ["agentId", "deviceFingerprint", "manufacturerId", "tenantId", "printerId", "registrationId"]
           .some(key => input.binding[key] !== challenge[key as keyof typeof challenge]) ||
@@ -138,10 +143,10 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
         attempt.targetVersion !== challenge.targetVersion ||
         input.binding.attemptId !== challenge.attemptId || input.binding.sourceVersion !== challenge.sourceVersion ||
         input.binding.targetVersion !== challenge.targetVersion ||
-        input.binding.installerSha256 !== release.platforms.windows.sha256 ||
+        input.binding.installerSha256 !== expectedInstallerSha256 ||
         typeof attempt.historicalSession !== "boolean" ||
         (attempt.historicalSession === true &&
-          !isCertifiedUpgradeSource(challenge.targetVersion, challenge.sourceVersion, String(input.binding.sourceSha256 || ""))) ||
+          !(certification || isCertifiedUpgradeSource(challenge.targetVersion, challenge.sourceVersion, String(input.binding.sourceSha256 || "")))) ||
         input.binding.publicKeySha256 !== createHash("sha256").update(String(proof.publicKeyPem || "")).digest("hex") ||
         input.binding.protocolVersion !== LOCAL_AGENT_DIRECT_PROTOCOL_VERSION ||
         (attempt.fenceRequestId && input.binding.fenceRequestId !== attempt.fenceRequestId))
@@ -274,7 +279,8 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
           Object.entries(JSON.parse(attemptRaw)).some(([key, value]) => !["fenceRequestId", "historicalSession"].includes(key) && binding[key] !== value))
         throw new Error("CONNECTOR_UPGRADE_ATTEMPT_MISMATCH");
       if (JSON.parse(attemptRaw).historicalSession === true &&
-          !isCertifiedUpgradeSource(binding.targetVersion, binding.sourceVersion, binding.sourceSha256))
+          !isCertifiedUpgradeSource(binding.targetVersion, binding.sourceVersion, binding.sourceSha256) &&
+          !matchesConnectorUpgradeCertification(binding, Date.now(), true))
         throw new Error("CONNECTOR_UPGRADE_SOURCE_NOT_CERTIFIED");
       // The database gate serializes AUTHORIZE and rejects a second live token.
       // Keep the short-lived proof retryable until that transaction commits.

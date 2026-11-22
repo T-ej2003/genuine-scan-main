@@ -1,5 +1,5 @@
 import { completeConnectorUpgradePairing, createConnectorUpgradePairing, issueVerifiedConnectorMaintenanceEvidence, issueVerifiedPostInstallEvidence, pollConnectorUpgradePairing, readConnectorUpgradePairing, redeemConnectorMaintenanceHandoff, requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
-import { issueConnectorUpgradeChallenge, verifyConnectorUpgradeProof } from "../controllers/connectorUpgradeDeviceProofController";
+import { issueConnectorUpgradeChallenge, preflightConnectorUpgradeCertification, verifyConnectorUpgradeProof } from "../controllers/connectorUpgradeDeviceProofController";
 import { Request, type RequestHandler, Router } from "express";
 import {
   authenticate,
@@ -1370,6 +1370,7 @@ publicReadRouter.get("/public/connector/releases/latest", connectorManifestIpLim
 publicReadRouter.get("/public/connector/download/:version/:platform", connectorDownloadIpLimiter, connectorDownloadActorLimiter, downloadConnectorReleaseController);
 publicMutationRouter.post("/connector-upgrade/handoff", connectorHandoffIpLimiter, redeemConnectorMaintenanceHandoff);
 publicMutationRouter.post("/connector-upgrade/pairing", connectorHandoffIpLimiter, createConnectorUpgradePairing);
+publicMutationRouter.post("/connector-upgrade/certification-preflight", connectorHandoffIpLimiter, preflightConnectorUpgradeCertification);
 publicMutationRouter.post("/connector-upgrade/pairing/poll", connectorHandoffIpLimiter, pollConnectorUpgradePairing);
 publicMutationRouter.post(
   "/public/request-access",

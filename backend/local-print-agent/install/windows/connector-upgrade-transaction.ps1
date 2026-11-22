@@ -92,16 +92,35 @@ function Get-MscqrInstalledVersion([string]$Live,[string]$Runtime,[string]$Expec
   }
   return $ExpectedVersion
 }
-function Get-MscqrCertifiedSource([Uri]$Authority,[string]$TargetVersion,[string]$InstallerSha256,[string]$Runtime,[string]$Live) {
+function Get-MscqrCertifiedSource([Uri]$Authority,[string]$TargetVersion,[string]$InstallerSha256,[string]$Runtime,[string]$Live,[string]$AgentId,[string]$DeviceFingerprint) {
   $manifest=Invoke-RestMethod -Uri ($Authority.GetLeftPart([UriPartial]::Authority)+'/api/public/connector/releases') -TimeoutSec 20 -MaximumRedirection 0
   $releases=@($manifest.data.releases | Where-Object version -ceq $TargetVersion)
-  if($manifest.success -ne $true -or $releases.Count -ne 1 -or
-     $releases[0].productionSignedAvailable -ne $true -or
-     $releases[0].platforms.windows.installationScope -cne 'certified-upgrade' -or
+  if($manifest.success -ne $true -or $releases.Count -ne 1) {throw 'Target release is unavailable.'}
+  $digest=(Get-FileHash -LiteralPath $Runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+  if($releases[0].platforms.windows.installationScope -cne 'certified-upgrade') {
+    if($releases[0].publishedAt -ne $null -or $releases[0].productionSignedAvailable -eq $true -or
+       $null -ne $releases[0].platforms.windows) {throw 'Target release is not an unpublished certification candidate.'}
+    Assert-MscqrSignedFile $Runtime $digest
+    $oldAgentVersion=$env:PRINT_AGENT_VERSION;$oldBuildVersion=$env:PRINT_AGENT_BUILD_VERSION
+    try {
+      $env:PRINT_AGENT_VERSION='';$env:PRINT_AGENT_BUILD_VERSION=''
+      $sourceVersion=Get-MscqrRuntimeVersion $Runtime
+    } finally {
+      $env:PRINT_AGENT_VERSION=$oldAgentVersion;$env:PRINT_AGENT_BUILD_VERSION=$oldBuildVersion
+    }
+    if($sourceVersion -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$' -or
+       [version]$sourceVersion -ge [version]$TargetVersion) {throw 'Installed executable is not an older signed connector.'}
+    $sourceVersion=Get-MscqrInstalledVersion $Live $Runtime $sourceVersion $digest
+    $body=@{agentId=$AgentId;deviceFingerprint=$DeviceFingerprint;sourceVersion=$sourceVersion;
+      sourceSha256=$digest;targetVersion=$TargetVersion;installerSha256=$InstallerSha256}|ConvertTo-Json -Compress
+    $reply=Invoke-RestMethod -Uri ($Authority.GetLeftPart([UriPartial]::Authority)+'/api/connector-upgrade/certification-preflight') -Method Post -Body $body -ContentType 'application/json' -TimeoutSec 20 -MaximumRedirection 0
+    if($reply.success -ne $true) {throw 'Controlled upgrade certification is unavailable.'}
+    return $sourceVersion
+  }
+  if($releases[0].productionSignedAvailable -ne $true -or
      $releases[0].platforms.windows.sha256 -cne $InstallerSha256) {
     throw 'Target installer is not the certified upgrade release.'
   }
-  $digest=(Get-FileHash -LiteralPath $Runtime -Algorithm SHA256).Hash.ToLowerInvariant()
   $sources=@($releases[0].platforms.windows.certifiedUpgradeSources | Where-Object runtimeSha256 -ceq $digest)
   if($sources.Count -ne 1 -or $sources[0].version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
     throw 'Installed executable does not match a certified offline upgrade source.'
@@ -265,7 +284,7 @@ function Acquire-MscqrUpgradeAuthorization([string]$Live,[string]$Payload,[strin
   if($authority.Scheme -cne 'https' -or $authority.UserInfo -or $authority.Query -or $authority.Fragment -or
      $authority.GetLeftPart([UriPartial]::Authority) -cne '__MSCQR_MAINTENANCE_API_ORIGIN__') {throw 'Connector backend does not match the signed maintenance authority.'}
   $installerSha256=(Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
-  $sourceVersion=if($offline){Get-MscqrCertifiedSource $authority $Version $installerSha256 $runtime $Live}else{Get-MscqrRuntimeVersion $runtime}
+  $sourceVersion=if($offline){Get-MscqrCertifiedSource $authority $Version $installerSha256 $runtime $Live $identity.agentId $identity.deviceFingerprint}else{Get-MscqrRuntimeVersion $runtime}
   $startup=Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
   $bridge=$null
   if($offline) {
