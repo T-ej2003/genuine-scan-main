@@ -703,6 +703,20 @@ jobs:
           "SOURCE_INSTALLER=$sourceInstaller" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "TARGET_INSTALLER=$(Join-Path $env:RUNNER_TEMP "target\MSCQR-Connector-Windows-$targetVersion.exe")" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Run offline upgrade and no-replay regression fixtures
+        shell: pwsh
+        run: |
+          npm --prefix backend ci --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'Backend dependencies failed.' }
+          npm --prefix backend run build
+          if ($LASTEXITCODE -ne 0) { throw 'Backend build failed.' }
+          foreach ($fixture in @('windowsConnectorTransaction','windowsConnectorJournalBackup','windowsConnectorCertifiedSource')) {
+            & "./backend/tests/$fixture.test.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "Offline upgrade fixture failed: $fixture" }
+          }
+          node --test backend/tests/connectorOfflineSourcePolicy.test.js backend/tests/windowsConnectorInstallerScript.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Offline upgrade source contract tests failed.' }
+
       - name: Verify signed source executable on disposable Windows host
         id: source
         shell: pwsh
@@ -726,20 +740,6 @@ jobs:
           if ($runtimeVersion -cne $env:SOURCE_VERSION) { throw 'Signed source runtime version mismatch.' }
           $digest=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
           "runtime_sha256=$digest" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Run offline upgrade and no-replay regression fixtures
-        shell: pwsh
-        run: |
-          npm --prefix backend ci --ignore-scripts
-          if ($LASTEXITCODE -ne 0) { throw 'Backend dependencies failed.' }
-          npm --prefix backend run build
-          if ($LASTEXITCODE -ne 0) { throw 'Backend build failed.' }
-          foreach ($fixture in @('windowsConnectorTransaction','windowsConnectorJournalBackup','windowsConnectorCertifiedSource')) {
-            & "./backend/tests/$fixture.test.ps1"
-            if ($LASTEXITCODE -ne 0) { throw "Offline upgrade fixture failed: $fixture" }
-          }
-          node --test backend/tests/connectorOfflineSourcePolicy.test.js backend/tests/windowsConnectorInstallerScript.test.js
-          if ($LASTEXITCODE -ne 0) { throw 'Offline upgrade source contract tests failed.' }
 
       - name: Stage controlled upgrade qualification for review
         shell: pwsh
