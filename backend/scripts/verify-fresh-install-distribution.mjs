@@ -7,8 +7,9 @@ const sha256 = (file) => crypto.createHash("sha256").update(fs.readFileSync(file
 const read = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 
 export function verifyFreshInstallDistribution(sourceRoot, distributionRoot, artifact, run, contract) {
+  const upgrade = contract.scope === "certified-upgrade";
   assert.equal(artifact.id, contract.artifactId);
-  assert.equal(artifact.name, `mscqr-fresh-install-distribution-${contract.version}`);
+  assert.equal(artifact.name, `mscqr-${upgrade ? "upgrade" : "fresh-install"}-distribution-${contract.version}`);
   assert.equal(artifact.digest, contract.artifactDigest);
   assert.equal(artifact.expired, false);
   assert.equal(artifact.workflow_run?.id, contract.runId);
@@ -39,15 +40,33 @@ export function verifyFreshInstallDistribution(sourceRoot, distributionRoot, art
     pending,
   );
   assert.deepEqual(capabilities, source.capabilities);
-  assert.match(published.summary, /new installations only/i);
-  assert.match(notes.join(" "), /existing connector upgrades.*MSCQRAUTH/i);
+  if (!upgrade) {
+    assert.match(published.summary, /new installations only/i);
+    assert.match(notes.join(" "), /existing connector upgrades.*MSCQRAUTH/i);
+  }
   assert.deepEqual(
     staged.releases.filter((release) => release.version !== contract.version),
     source.releases.filter((release) => release.version !== contract.version),
   );
   const windows = published.platforms?.windows;
   assert.equal(Object.keys(published.platforms).join(","), "windows");
-  assert.equal(windows?.installationScope, "fresh-install-only");
+  assert.equal(windows?.installationScope, upgrade ? "certified-upgrade" : "fresh-install-only");
+  if (upgrade) {
+    const certification = read(path.join(distributionRoot, "upgrade-certification.json"));
+    assert.equal(certification.targetVersion, contract.version);
+    assert.equal(certification.targetInstallerSha256, contract.installerSha256);
+    assert.equal(certification.targetSourceSha, contract.sourceSha);
+    assert.ok(Array.isArray(certification.sources) && certification.sources.length > 0);
+    assert.deepEqual(windows.certifiedUpgradeSources,
+      certification.sources.map(({ version, runtimeSha256 }) => ({ version, runtimeSha256 })));
+    assert.equal(new Set(certification.sources.map((source) => source.version)).size, certification.sources.length);
+    for (const source of certification.sources) {
+      assert.match(source.runtimeSha256, /^[a-f0-9]{64}$/);
+      assert.match(source.installerSha256, /^[a-f0-9]{64}$/);
+      assert.ok(source.version.localeCompare(contract.version, "en", { numeric: true }) < 0);
+      assert.ok(Number.isSafeInteger(source.signedRunId) && source.signedRunId > 0);
+    }
+  }
   assert.equal(windows?.signatureStatus, "signed");
   assert.equal(windows?.trustLevel, "production");
   assert.equal(windows?.artifactType, "windows-signed-installer");
@@ -57,9 +76,11 @@ export function verifyFreshInstallDistribution(sourceRoot, distributionRoot, art
   const installer = path.join(distributionRoot, windows.relativePath);
   assert.equal(fs.statSync(installer).size, windows.bytes);
   assert.equal(sha256(installer), contract.installerSha256);
-  const previous = source.releases.find((release) => release.version === contract.previousVersion)?.platforms?.windows;
-  assert.equal(previous?.sha256, contract.previousSha256);
-  assert.equal(sha256(path.join(sourceRoot, previous.relativePath)), contract.previousSha256);
+  if (contract.previousVersion) {
+    const previous = source.releases.find((release) => release.version === contract.previousVersion)?.platforms?.windows;
+    assert.equal(previous?.sha256, contract.previousSha256);
+    assert.equal(sha256(path.join(sourceRoot, previous.relativePath)), contract.previousSha256);
+  }
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {

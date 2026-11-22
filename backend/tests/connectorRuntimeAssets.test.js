@@ -16,6 +16,7 @@ const release = (version, { scope, published = true, signature = 'signed', trust
 
 const cases = [
   { name: 'published fresh-only retains newest eligible predecessor', releases: [release(older), release(latest, { scope: 'fresh-install-only' }), release(predecessor)], expected: [latest, predecessor] },
+  { name: 'certified upgrade retains current production download', releases: [release(latest, { scope: 'certified-upgrade' }), release(predecessor)], expected: [latest, predecessor] },
   { name: 'normal upgrade keeps latest only', releases: [release(latest), release(predecessor)], expected: [latest] },
   { name: 'missing scope keeps latest only', releases: [release(latest), release(predecessor)], expected: [latest] },
   { name: 'pending latest exposes no installer', releases: [release(latest, { scope: 'fresh-install-only', published: false }), release(predecessor)], expected: [latest], noLatestFile: true },

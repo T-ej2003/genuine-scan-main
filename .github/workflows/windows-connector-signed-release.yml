@@ -13,6 +13,7 @@ on:
           - publish
           - certify_fresh_install
           - publish_fresh_install
+          - certify_upgrade
       connector_release_version:
         description: "Optional connector version. Defaults to backend/src/local-print-agent/version.ts and must match that source buildVersion."
         required: false
@@ -32,6 +33,18 @@ on:
         type: string
       signed_installer_sha256:
         description: "SHA-256 of that run's signed Windows installer (certification modes only)."
+        required: false
+        type: string
+      upgrade_source_version:
+        description: "Installed signed source version to certify for offline upgrade."
+        required: false
+        type: string
+      upgrade_source_run_id:
+        description: "Successful signed source installer run."
+        required: false
+        type: string
+      upgrade_source_installer_sha256:
+        description: "SHA-256 of the signed source installer."
         required: false
         type: string
   push:
@@ -592,4 +605,165 @@ jobs:
           path: |
             backend/local-print-agent/releases/manifest.json
             backend/local-print-agent/releases/2026.11.19.1/windows
+          if-no-files-found: error
+
+  upgrade-certification:
+    name: Certify signed source and target for controlled offline upgrade
+    if: github.event_name == 'workflow_dispatch' && inputs.execution_mode == 'certify_upgrade'
+    runs-on: windows-2022
+    environment: production-signing
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Authenticate both signed installers
+        id: target
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_RUN_ID: ${{ inputs.signed_candidate_run_id }}
+          TARGET_SHA256: ${{ inputs.signed_installer_sha256 }}
+          SOURCE_VERSION: ${{ inputs.upgrade_source_version }}
+          SOURCE_RUN_ID: ${{ inputs.upgrade_source_run_id }}
+          SOURCE_SHA256: ${{ inputs.upgrade_source_installer_sha256 }}
+        run: |
+          if ($env:GITHUB_REF -cne 'refs/heads/main' -or (git rev-parse HEAD) -cne $env:GITHUB_SHA) {
+            throw 'Upgrade certification requires exact protected main.'
+          }
+          $targetVersion = [regex]::Match((Get-Content backend/src/local-print-agent/version.ts -Raw), 'LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"(\d+\.\d+\.\d+(?:\.\d+)?)"').Groups[1].Value
+          if (-not $targetVersion -or $env:SOURCE_VERSION -cnotmatch '^\d+\.\d+\.\d+(?:\.\d+)?$' -or
+              [version]$env:SOURCE_VERSION -ge [version]$targetVersion) { throw 'Unsupported source or target version.' }
+          foreach ($id in @($env:TARGET_RUN_ID,$env:SOURCE_RUN_ID)) {
+            if ($id -cnotmatch '^[1-9][0-9]{0,17}$') { throw 'Signed run ID is required.' }
+          }
+          foreach ($digest in @($env:TARGET_SHA256,$env:SOURCE_SHA256)) {
+            if ($digest -cnotmatch '^[a-f0-9]{64}$') { throw 'Signed installer digest is required.' }
+          }
+          $sources = @(
+            @{ role='target'; version=$targetVersion; runId=$env:TARGET_RUN_ID; digest=$env:TARGET_SHA256 },
+            @{ role='source'; version=$env:SOURCE_VERSION; runId=$env:SOURCE_RUN_ID; digest=$env:SOURCE_SHA256 }
+          )
+          foreach ($item in $sources) {
+            $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($item.runId)" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Signed run lookup failed.' }
+            $artifacts = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($item.runId)/artifacts" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw 'Signed artifact lookup failed.' }
+            $name = "mscqr-windows-candidate-$($item.version)-$($run.head_sha)"
+            $matching = @($artifacts.artifacts | Where-Object {
+              $_.name -ceq $name -and $_.workflow_run.id -eq [long]$item.runId -and -not $_.expired
+            })
+            if ($run.repository.full_name -cne $env:GITHUB_REPOSITORY -or $run.workflow_id -ne 273963817 -or
+                $run.path -cne '.github/workflows/windows-connector-signed-release.yml' -or
+                $run.event -cne 'workflow_dispatch' -or $run.conclusion -cne 'success' -or
+                $run.head_branch -cne 'main' -or $matching.Count -ne 1) {
+              throw 'Signed installer provenance mismatch.'
+            }
+            git merge-base --is-ancestor $run.head_sha $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0 -or ($item.role -eq 'target' -and $run.head_sha -cne $env:GITHUB_SHA)) {
+              throw 'Signed installer source mismatch.'
+            }
+            $folder = Join-Path $env:RUNNER_TEMP $item.role
+            New-Item -ItemType Directory -Path $folder | Out-Null
+            gh run download $item.runId --repo $env:GITHUB_REPOSITORY --name $name --dir $folder
+            if ($LASTEXITCODE -ne 0) { throw 'Signed installer download failed.' }
+            $installer = Join-Path $folder "MSCQR-Connector-Windows-$($item.version).exe"
+            if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.digest) {
+              throw 'Signed installer digest mismatch.'
+            }
+            $attestations = @(gh attestation verify $installer --repo $env:GITHUB_REPOSITORY --format json | ConvertFrom-Json)
+            if ($LASTEXITCODE -ne 0 -or -not @($attestations | Where-Object {
+              $_.verificationResult.statement.predicateType -ceq 'https://slsa.dev/provenance/v1' -and
+              $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.repository -ceq "https://github.com/$env:GITHUB_REPOSITORY" -and
+              $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.path -ceq '.github/workflows/windows-connector-signed-release.yml' -and
+              $_.verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit -ceq $run.head_sha -and
+              @($_.verificationResult.statement.subject | Where-Object { $_.name -ceq (Split-Path -Leaf $installer) -and $_.digest.sha256 -ceq $item.digest }).Count -eq 1
+            }).Count) { throw 'Signed installer attestation mismatch.' }
+            $signature = Get-AuthenticodeSignature -LiteralPath $installer
+            $report = Get-Content (Join-Path $folder 'signature-report.json') -Raw | ConvertFrom-Json
+            if ($signature.Status -cne 'Valid' -or -not $signature.TimeStamperCertificate -or -not $signature.SignerCertificate) {
+              throw 'Signed installer Authenticode verification failed.'
+            }
+            if ($signature.SignerCertificate.Thumbprint -cne $report.thumbprint -or
+                $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) -cne 'L&D Health Ltd') {
+              throw 'Unexpected signed installer publisher.'
+            }
+            if ($item.role -eq 'source') { $sourceInstaller = $installer }
+          }
+          "target_version=$targetVersion" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "SOURCE_INSTALLER=$sourceInstaller" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "TARGET_INSTALLER=$(Join-Path $env:RUNNER_TEMP "target\MSCQR-Connector-Windows-$targetVersion.exe")" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify signed source executable on disposable Windows host
+        id: source
+        shell: pwsh
+        env:
+          SOURCE_VERSION: ${{ inputs.upgrade_source_version }}
+        run: |
+          $setup = Start-Process -FilePath $env:SOURCE_INSTALLER -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru
+          if (-not $setup.WaitForExit(120000) -or $setup.ExitCode -ne 0) { throw 'Signed source installer could not establish a disposable installation.' }
+          $runtime = Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent\bin\mscqr-local-print-agent.exe'
+          if (-not (Test-Path -LiteralPath $runtime)) { throw 'Signed source runtime is missing.' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $runtime
+          if ($signature.Status -cne 'Valid' -or -not $signature.TimeStamperCertificate -or
+              $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) -cne 'L&D Health Ltd') {
+            throw 'Installed source runtime signature mismatch.'
+          }
+          $oldVersion=$env:PRINT_AGENT_VERSION; $oldBuild=$env:PRINT_AGENT_BUILD_VERSION
+          try {
+            $env:PRINT_AGENT_VERSION=''; $env:PRINT_AGENT_BUILD_VERSION=''
+            $runtimeVersion=(& $runtime --version).Trim()
+          } finally { $env:PRINT_AGENT_VERSION=$oldVersion; $env:PRINT_AGENT_BUILD_VERSION=$oldBuild }
+          if ($runtimeVersion -cne $env:SOURCE_VERSION) { throw 'Signed source runtime version mismatch.' }
+          $digest=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+          "runtime_sha256=$digest" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Run offline upgrade and no-replay regression fixtures
+        shell: pwsh
+        run: |
+          npm --prefix backend ci --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'Backend dependencies failed.' }
+          npm --prefix backend run build
+          if ($LASTEXITCODE -ne 0) { throw 'Backend build failed.' }
+          foreach ($fixture in @('windowsConnectorTransaction','windowsConnectorJournalBackup','windowsConnectorCertifiedSource')) {
+            & "./backend/tests/$fixture.test.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "Offline upgrade fixture failed: $fixture" }
+          }
+          node --test backend/tests/connectorOfflineSourcePolicy.test.js backend/tests/windowsConnectorInstallerScript.test.js
+          if ($LASTEXITCODE -ne 0) { throw 'Offline upgrade source contract tests failed.' }
+
+      - name: Stage certified upgrade distribution for review
+        shell: pwsh
+        env:
+          TARGET_VERSION: ${{ steps.target.outputs.target_version }}
+          TARGET_SHA256: ${{ inputs.signed_installer_sha256 }}
+          SOURCE_VERSION: ${{ inputs.upgrade_source_version }}
+          SOURCE_RUN_ID: ${{ inputs.upgrade_source_run_id }}
+          SOURCE_SHA256: ${{ inputs.upgrade_source_installer_sha256 }}
+          SOURCE_RUNTIME_SHA256: ${{ steps.source.outputs.runtime_sha256 }}
+        run: |
+          $record = @(@{version=$env:SOURCE_VERSION;runtimeSha256=$env:SOURCE_RUNTIME_SHA256;installerSha256=$env:SOURCE_SHA256;signedRunId=[long]$env:SOURCE_RUN_ID})
+          $env:WINDOWS_CONNECTOR_CERTIFIED_UPGRADE_SOURCES = ConvertTo-Json -InputObject @(@{version=$env:SOURCE_VERSION;runtimeSha256=$env:SOURCE_RUNTIME_SHA256}) -Compress
+          $env:WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH = $env:TARGET_INSTALLER
+          $env:WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH = Join-Path $env:RUNNER_TEMP 'target\signature-report.json'
+          $env:CONNECTOR_RELEASE_VERSION = $env:TARGET_VERSION
+          node backend/local-print-agent/packaging/publish-windows-connector-release.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Certified upgrade metadata generation failed.' }
+          $certificate = @{targetVersion=$env:TARGET_VERSION;targetSourceSha=$env:GITHUB_SHA;targetInstallerSha256=$env:TARGET_SHA256;sources=$record}
+          $certificate | ConvertTo-Json -Depth 6 | Set-Content backend/local-print-agent/releases/upgrade-certification.json
+
+      - name: Upload controlled upgrade distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: mscqr-upgrade-distribution-${{ steps.target.outputs.target_version }}
+          path: |
+            backend/local-print-agent/releases/manifest.json
+            backend/local-print-agent/releases/upgrade-certification.json
+            backend/local-print-agent/releases/${{ steps.target.outputs.target_version }}/windows
           if-no-files-found: error
