@@ -103,7 +103,7 @@ jobs:
           $out = Join-Path $env:RUNNER_TEMP 'extracted'
           & $extractor --extract --include 'app/bin/mscqr-local-print-agent.exe' --include 'mscqr-payload/installer-build.json' --output-dir $out $installer
           if ($LASTEXITCODE -ne 0) { throw 'Signed installer payload extraction failed.' }
-          $runtime = Join-Path $out 'app/bin/mscqr-local-print-agent.exe'
+          $runtime = (Get-Item -LiteralPath (Join-Path $out 'app/bin/mscqr-local-print-agent.exe') -ErrorAction Stop).FullName
           $runtimes = @(Get-ChildItem -LiteralPath $out -Filter 'mscqr-local-print-agent.exe' -File -Recurse)
           if ($runtimes.Count -ne 1 -or $runtimes[0].FullName -cne $runtime) {
             throw 'Signed installer runtime is missing or ambiguous.'
