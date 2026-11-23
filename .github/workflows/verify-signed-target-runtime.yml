@@ -47,6 +47,8 @@ jobs:
           $attestations = @(gh attestation verify $installer --repo $env:GITHUB_REPOSITORY --format json | ConvertFrom-Json)
           if ($LASTEXITCODE -ne 0 -or -not @($attestations | Where-Object {
             $_.verificationResult.statement.predicateType -ceq 'https://slsa.dev/provenance/v1' -and
+            $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.repository -ceq "https://github.com/$env:GITHUB_REPOSITORY" -and
+            $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.path -ceq '.github/workflows/windows-connector-signed-release.yml' -and
             $_.verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit -ceq $source -and
             @($_.verificationResult.statement.subject | Where-Object {
               $_.name -ceq (Split-Path -Leaf $installer) -and $_.digest.sha256 -ceq $expectedInstaller
@@ -66,6 +68,7 @@ jobs:
               $toolAsset[0].digest -cne "sha256:$expectedExtractor") {
             throw 'Pinned extractor release mismatch.'
           }
+          Remove-Item Env:GH_TOKEN
           Invoke-WebRequest 'https://github.com/crazy-max/innoextract/releases/download/v1.13.0/innoextract-windows-amd64.exe' -OutFile $extractor
           if ((Get-FileHash -LiteralPath $extractor -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedExtractor) {
             throw 'Pinned extractor SHA-256 mismatch.'
