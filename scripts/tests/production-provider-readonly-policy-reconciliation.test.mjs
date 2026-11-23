@@ -439,12 +439,13 @@ test("workflow is authorization-only and target contract exposes no arbitrary po
   assert.doesNotMatch(executeWorkflow, /policy_arn|policy_document|executor-profile/);
 });
 
-test("executor policy is exact and grants no deletion, default setter, or arbitrary IAM mutation", () => {
+test("executor policy deletion is restricted to exact ProviderReadOnly and no default setter or arbitrary IAM mutation", () => {
   const policy = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8"));
   const actions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   const targetCreate = policy.Statement.filter(({ Action, Resource }) => Action === "iam:CreatePolicyVersion" && Resource === CONTRACT.policyArn);
   assert.equal(targetCreate.length, 1);
-  for (const forbidden of ["iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:CreatePolicy", "iam:AttachRolePolicy", "iam:*"]) assert.equal(actions.includes(forbidden), false);
+  assert.deepEqual(policy.Statement.filter(s => [s.Action].flat().includes("iam:DeletePolicyVersion")), [{Sid:"RetireExactProviderReadOnlyPolicyVersion", Effect:"Allow", Action:"iam:DeletePolicyVersion", Resource:CONTRACT.policyArn}]);
+  for (const forbidden of [ "iam:SetDefaultPolicyVersion", "iam:CreatePolicy", "iam:AttachRolePolicy", "iam:*"]) assert.equal(actions.includes(forbidden), false);
   const readJournal = policy.Statement.find(({ Sid }) => Sid === "ReadExactProviderReadOnlyReconciliationJournal");
   const listJournal = policy.Statement.find(({ Sid }) => Sid === "ListExactProviderReadOnlyReconciliationJournal");
   const writeJournal = policy.Statement.find(({ Sid }) => Sid === "PersistExactProviderReadOnlyReconciliationJournal");

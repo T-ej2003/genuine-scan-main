@@ -4110,7 +4110,8 @@
         "*"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4129,7 +4130,8 @@
         "*"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -4148,7 +4150,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4167,7 +4170,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -4186,7 +4190,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4205,7 +4210,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -4224,7 +4230,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4243,7 +4250,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -4262,7 +4270,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4281,7 +4290,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "ROOT_OPERATOR",
       "sourcePolicyPresent": true,
@@ -4300,7 +4310,8 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4319,7 +4330,8 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4338,7 +4350,8 @@
         "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*"
       ],
       "reachableMode": [
-        "PROVIDER_READONLY_POLICY_RECONCILIATION"
+        "PROVIDER_READONLY_POLICY_RECONCILIATION",
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4358,6 +4371,25 @@
       ],
       "reachableMode": [
         "PROVIDER_READONLY_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs",
+      "action": "iam:DeletePolicyVersion",
+      "capabilityId": "provider-readonly-retire-exact-v1",
+      "identity": "INITIAL_ACTIVATION_RECONCILER",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "reachableMode": [
+        "provider-readonly-v1-retirement"
       ],
       "executionPrincipal": "INITIAL_ACTIVATION_RECONCILER",
       "sourcePolicyPresent": true,
@@ -4892,6 +4924,7 @@
     "app-only-backend-activation": "PASS",
     "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "PASS",
     "PROVIDER_READONLY_POLICY_RECONCILIATION": "PASS",
+    "provider-readonly-v1-retirement": "PASS",
     "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION": "PASS",
     "MIXED_DUAL_SLOT_RECOVERY": "PASS",
     "NORMAL": "PASS",
@@ -4913,6 +4946,7 @@
     "STAGE_A_PRODUCTION_ARTIFACTS_POLICY_RECOVERY": "the governed P0-to-P2 production-artifacts recovery uses its exact root/release journal, policy, lock, and attestation boundaries",
     "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION": "the independently authorized exact refresh-only plan uses its exact release journal, live-policy read, Stage-A state object, and canonical outer lock boundary",
     "INITIAL_ACTIVATION_POLICY_RECONCILIATION": "root performs read-only preparation; the purpose-bound INITIAL_ACTIVATION_RECONCILER GitHub Actions OIDC principal (arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler) publishes only the exact InitialActivationLifecycle managed-policy version after production environment approval",
+    "provider-readonly-v1-retirement": "separately approved fixed-v1 retirement archives all five exact versions in the protected journal, preserves default v5 and retained v2-v5, and never creates a policy version or retries uncertain deletion",
     "PROVIDER_READONLY_POLICY_RECONCILIATION": "root performs exact target read-only preparation; independently approved execution uses the allowlisted reconciler and conditional S3 journal to publish at most one exact ProviderReadOnly managed-policy version",
     "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION": "root readback and protected authorization permit one exact MFA-gated verifier-role AssumeRole addition to the bootstrap user's sole inline policy; no verifier operational permission is granted directly",
     "MIXED_DUAL_SLOT_RECOVERY": "the protected recovery executor removes only AWSCURRENT from the seven exact reviewed historical versions under the source-bound capability and authorization contracts",

@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { authenticateProviderReadonlyLiveState, createProviderReadonlyJournal, createProviderReadonlyPreparation, executeProviderReadonlyReconciliation, providerReadonlyProductionSleep, PROVIDER_READONLY_RECONCILIATION, readProviderReadonlyDesiredPolicy, resolveProviderReadonlyAuthorizationArtifact } from "./production-provider-readonly-policy-reconciliation.mjs";
+import { authenticateProviderReadonlyLiveState, createProviderReadonlyRetirementPreparation, executeProviderReadonlyRetirement, createProviderReadonlyJournal, createProviderReadonlyPreparation, executeProviderReadonlyReconciliation, providerReadonlyProductionSleep, PROVIDER_READONLY_RECONCILIATION, readProviderReadonlyDesiredPolicy, resolveProviderReadonlyAuthorizationArtifact } from "./production-provider-readonly-policy-reconciliation.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 
@@ -47,6 +47,15 @@ export function readProviderReadonlyLiveState(run) {
   };
 }
 
+export function readProviderReadonlyVersionArchive(run) {
+  const versions=paged(run,["iam","list-policy-versions","--policy-arn",PROVIDER_READONLY_RECONCILIATION.policyArn],["Versions"]).Versions;
+  return {policyArn:PROVIDER_READONLY_RECONCILIATION.policyArn,versions:versions.sort((a,b)=>Number(a.VersionId.slice(1))-Number(b.VersionId.slice(1))).map(v=>{
+    const document=json(run,["iam","get-policy-version","--policy-arn",PROVIDER_READONLY_RECONCILIATION.policyArn,"--version-id",v.VersionId]).PolicyVersion;
+    if(document.VersionId!==v.VersionId||document.IsDefaultVersion!==v.IsDefaultVersion||new Date(document.CreateDate).toISOString()!==new Date(v.CreateDate).toISOString())throw new Error("Archived version metadata changed during readback.");
+    return {versionId:v.VersionId,isDefault:v.IsDefaultVersion,createDate:new Date(v.CreateDate).toISOString(),document:typeof document.Document==="string"?JSON.parse(decodeURIComponent(document.Document)):document.Document};
+  })};
+}
+
 export const readProviderReadonlyJournalObject = (run, key) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-provider-readonly-journal-")); const output = path.join(directory, "record.json");
   try {
@@ -72,32 +81,33 @@ const s3Create = (run, key, bytes) => {
 };
 
 export function createProviderReadonlyCommandRunner({ exec = execFileSync, ...options } = {}) {
-  return createProductionAwsCommandRunner({ ...options, exec: (file, args, execution) => exec(file, args, { ...execution, env: args[0] === "iam" && args[1] === "create-policy-version" ? { ...execution.env, AWS_MAX_ATTEMPTS: "1" } : execution.env }) });
+  return createProductionAwsCommandRunner({ ...options, exec: (file, args, execution) => exec(file, args, { ...execution, env: args[0] === "iam" && ["create-policy-version", "delete-policy-version"].includes(args[1]) ? { ...execution.env, AWS_MAX_ATTEMPTS: "1" } : execution.env }) });
 }
 
 export async function runProviderReadonlyReconciliation(argv = process.argv.slice(2), deps = {}) {
   const mode = required(argv, "--mode");
-  if (!['prepare', 'execute'].includes(mode)) throw new Error("--mode must be prepare or execute; there is no mutating default.");
-  if (mode === "execute" && argv.includes("--admin-profile")) throw new Error("ProviderReadOnly execution does not accept an administrator profile.");
-  if (mode === "execute" && argv.includes("--executor-profile")) throw new Error("ProviderReadOnly execution does not accept a local executor profile.");
-  assertExactOptions(argv, new Set(mode === "prepare" ? ["--mode", "--source-sha", "--preparation-out", "--admin-profile"] : ["--mode", "--source-sha", "--preparation", "--preparation-file-sha256", "--authorization-workflow-run-id", "--authorization-workflow-run-attempt", "--result-out"]));
+  if (!['prepare', 'execute', 'prepare-retirement', 'execute-retirement'].includes(mode)) throw new Error("--mode must be prepare or execute; there is no mutating default.");
+  if (mode.startsWith("execute") && argv.includes("--admin-profile")) throw new Error("ProviderReadOnly execution does not accept an administrator profile.");
+  if (mode.startsWith("execute") && argv.includes("--executor-profile")) throw new Error("ProviderReadOnly execution does not accept a local executor profile.");
+  assertExactOptions(argv, new Set(mode.startsWith("prepare") ? ["--mode", "--source-sha", "--preparation-out", "--admin-profile"] : ["--mode", "--source-sha", "--preparation", "--preparation-file-sha256", "--authorization-workflow-run-id", "--authorization-workflow-run-attempt", "--result-out"]));
   const sourceSha = required(argv, "--source-sha");
   const checkout = (deps.readProtectedCheckout || readStageBProtectedMainCheckout)({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
   if (checkout.toolingSha !== sourceSha) throw new Error("ProviderReadOnly reconciler is not at the exact protected source.");
   const desired = readProviderReadonlyDesiredPolicy({ repositoryRoot: root });
-  if (mode === "prepare") {
+  if (mode.startsWith("prepare")) {
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--preparation-out")), repositoryRoot: root, label: "ProviderReadOnly preparation", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "ProviderReadOnly preparation directory" });
     const run = deps.awsRun || createProviderReadonlyCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(argv, "--admin-profile") });
     if (json(run, ["sts", "get-caller-identity"])?.Arn !== "arn:aws:iam::368992683803:root") throw new Error("ProviderReadOnly preparation requires the authenticated root operator.");
     const liveState = readProviderReadonlyLiveState(run);
     const preparedAt = typeof deps.now === "function" ? deps.now() : deps.now || new Date();
-    const preparation = createProviderReadonlyPreparation({ sourceSha, liveState, desired, preparedAt: preparedAt.toISOString() });
+    const preparation = mode === "prepare-retirement" ? createProviderReadonlyRetirementPreparation({sourceSha,liveState,desired,preparedAt:preparedAt.toISOString(),archive:readProviderReadonlyVersionArchive(run)}) : createProviderReadonlyPreparation({ sourceSha, liveState, desired, preparedAt: preparedAt.toISOString() });
     writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`), repositoryRoot: root, label: "ProviderReadOnly preparation" });
     return Object.freeze({ mode, preparation, preparationFile: output, iamWriteCount: 0 });
   }
   const environment = deps.env || process.env;
   if (environment.GITHUB_ACTIONS !== "true" || environment.GITHUB_REPOSITORY !== "T-ej2003/genuine-scan-main" || environment.GITHUB_WORKFLOW_REF !== PROVIDER_READONLY_RECONCILIATION.executionWorkflowRef || environment.GITHUB_EVENT_NAME !== "workflow_dispatch" || environment.GITHUB_RUN_ATTEMPT !== "1") throw new Error("ProviderReadOnly execution is reachable only from the exact protected execution workflow.");
+  if (mode === "execute-retirement" && environment.OPERATION !== "retire-v1") throw new Error("Retirement requires the explicit workflow operation.");
   const preparationFile = path.resolve(required(argv, "--preparation")); const preparationFileSha256 = required(argv, "--preparation-file-sha256");
   const preparation = readBoundStageBPrivateJson({ filePath: preparationFile, expectedSha256: preparationFileSha256, repositoryRoot: root, label: "ProviderReadOnly preparation" });
   const resolved = await (deps.resolveAuthorization || resolveProviderReadonlyAuthorizationArtifact)({ workflowRunId: required(argv, "--authorization-workflow-run-id"), workflowRunAttempt: required(argv, "--authorization-workflow-run-attempt"), sourceSha, preparation, run: deps.githubRun, now: deps.now || new Date(), allowExpired: true });
@@ -109,7 +119,7 @@ export async function runProviderReadonlyReconciliation(argv = process.argv.slic
     const current = (deps.readProtectedCheckout || readStageBProtectedMainCheckout)({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
     if (current.toolingSha !== sourceSha) throw new Error("ProviderReadOnly source changed after authorization.");
   };
-  const result = await (deps.execute || executeProviderReadonlyReconciliation)({ sourceSha, preparation, ...resolved, reauthenticateSource, readLiveState: async () => readProviderReadonlyLiveState(run), createPolicyVersion: async ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), ...(SetAsDefault ? ["--set-as-default"] : [])]), journal, now: deps.clock || (() => new Date()), sleep: providerReadonlyProductionSleep });
+  const result = await (deps.execute || (mode === "execute-retirement" ? executeProviderReadonlyRetirement : executeProviderReadonlyReconciliation))({ sourceSha, preparation, ...resolved, reauthenticateSource, readLiveState: async () => readProviderReadonlyLiveState(run), readVersionArchive: async () => readProviderReadonlyVersionArchive(run), deletePolicyVersion: async () => run(["iam","delete-policy-version","--policy-arn",PROVIDER_READONLY_RECONCILIATION.policyArn,"--version-id","v1"]), createPolicyVersion: async ({ PolicyArn, PolicyDocument, SetAsDefault }) => json(run, ["iam", "create-policy-version", "--policy-arn", PolicyArn, "--policy-document", JSON.stringify(PolicyDocument), ...(SetAsDefault ? ["--set-as-default"] : [])]), journal, now: deps.clock || (() => new Date()), sleep: providerReadonlyProductionSleep });
   if (option(argv, "--result-out")) {
     const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--result-out")), repositoryRoot: root, label: "ProviderReadOnly result", allowExisting: false });
     ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "ProviderReadOnly result directory" });

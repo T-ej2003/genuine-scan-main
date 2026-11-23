@@ -199,14 +199,19 @@ export const installationPermissionsPreviousCurrent = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);
   for (const sid of appOnlyWriterSids) if (desired.Statement.filter((statement) => statement.Sid === sid).length !== 1)
     throw new Error("App-only boundary writer source is not exact.");
-  return { ...desired, Statement: desired.Statement.filter((statement) => !appOnlyWriterSids.includes(statement.Sid)) };
+  return { ...desired, Statement: desired.Statement.filter((statement) => !appOnlyWriterSids.includes(statement.Sid) && statement.Sid !== "RetireExactProviderReadOnlyPolicyVersion") };
 };
 export const installationPermissionsPredecessor = () => {
   const desired = installationPermissionsPreviousCurrent();
   const readOnlyAuthorizer = scopedAuthorizerPermissionsPredecessor();
   return { ...desired, Statement: [...desired.Statement, ...readOnlyAuthorizer.Statement.filter(({ Sid }) => Sid !== "IdentifyCurrentSession")] };
 };
-export const installationPermissionsPredecessors = () => [installationPermissionsPreviousCurrent(), installationPermissionsPredecessor()];
+export const installationPermissionsPredecessors = () => {
+  const desired=sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);
+  const grant=desired.Statement.filter(s=>s.Sid==="RetireExactProviderReadOnlyPolicyVersion");
+  if(canonicalJson(grant)!==canonicalJson([{Sid:"RetireExactProviderReadOnlyPolicyVersion",Effect:"Allow",Action:"iam:DeletePolicyVersion",Resource:"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"}]))throw new Error("Retirement installation grant is not exact.");
+  return [installationPermissionsPreviousCurrent(), installationPermissionsPredecessor(), {...desired,Statement:desired.Statement.filter(s=>s.Sid!=="RetireExactProviderReadOnlyPolicyVersion")}];
+};
 export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessor = () => {
   const scoped = scopedAuthorizerPermissionsPredecessor();
   return { ...scoped, Statement: scoped.Statement.map((statement) => statement.Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization" ? { ...statement, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] } : statement) };

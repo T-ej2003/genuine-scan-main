@@ -83,7 +83,8 @@ test("runtime policy has exact target mutation and readback-only companion actio
   const actions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   const create = policy.Statement.find(({ Sid }) => Sid === "CreateExactInitialActivationLifecyclePolicyVersion");
   assert.deepEqual(create, { Sid: "CreateExactInitialActivationLifecyclePolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn });
-  for (const action of ["iam:CreatePolicy", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:DeleteRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:CreateRole", "iam:DeleteRole"]) assert.equal(actions.includes(action), false, action);
+  for (const action of ["iam:CreatePolicy", "iam:DeletePolicy", "iam:SetDefaultPolicyVersion", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:DeleteRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:CreateRole", "iam:DeleteRole"]) assert.equal(actions.includes(action), false, action);
+  assert.deepEqual(policy.Statement.filter(s=>s.Action === "iam:DeletePolicyVersion"),[{Sid:"RetireExactProviderReadOnlyPolicyVersion",Effect:"Allow",Action:"iam:DeletePolicyVersion",Resource:"arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"}]);
   const verifierBoundaryArn = "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary";
   const verifierRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher";
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "VersionExactAppOnlyVerifierBoundary").Resource, verifierBoundaryArn);
@@ -175,6 +176,7 @@ test("capability contract defines the role and records the PR #448 runtime migra
   assert.deepEqual(capability.capabilities.filter(({ mutation }) => mutation), [
     { action: "iam:CreatePolicyVersion", resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn, mutation: true },
     { action: "iam:CreatePolicyVersion", resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", mutation: true },
+    { action: "iam:DeletePolicyVersion", resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", mutation: true },
     { action: "s3:PutObject", resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/*", mutation: true },
   ]);
   assert.equal(capability.installation.runtimeSelfInstallation, false);
