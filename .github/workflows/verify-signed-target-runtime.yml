@@ -1,0 +1,113 @@
+name: Verify signed MSCQR target runtime (one time)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  attestations: read
+  contents: read
+
+jobs:
+  verify:
+    if: github.repository == 'T-ej2003/genuine-scan-main' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    steps:
+      - name: Authenticate installer and inspect packaged runtime without starting it
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = '4e0a238977266aa4ab820be82e922c4ae8ea9f62'
+          $runId = 45083647820
+          $artifactId = 14779320612
+          $version = '2026.11.22.1'
+          $expectedInstaller = '623bb018f8212e4b245feab7b860d1569e7fb172289b6cb6cd30d5693c9cb470'
+          $expectedRuntime = '24dffef7e8441fce900559e194ccd9bd04686515e7ee29679f04336f8c379f27'
+          $expectedExtractor = '5700fb1e82e6812bb341b964470537161e07a127d29eecfe176f5198cf215a59'
+          $ghVersionLine = gh version | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0 -or $ghVersionLine -notmatch '^gh version (\d+\.\d+\.\d+)') {
+            throw 'GitHub CLI version could not be verified.'
+          }
+          if ([version]$Matches[1] -lt [version]'2.102.0') {
+            throw 'GitHub CLI 2.102.0 or newer is required for attestation verification.'
+          }
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $run.conclusion -cne 'success' -or
+              $run.head_sha -cne $source -or $run.head_branch -cne 'main' -or
+              $run.workflow_id -ne 273963817 -or
+              $run.path -cne '.github/workflows/windows-connector-signed-release.yml') {
+            throw 'Signed candidate run provenance mismatch.'
+          }
+          $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$artifactId" | ConvertFrom-Json
+          $name = "mscqr-windows-candidate-$version-$source"
+          if ($LASTEXITCODE -ne 0 -or $artifact.expired -or $artifact.name -cne $name -or
+              $artifact.workflow_run.id -ne $runId) { throw 'Signed artifact mismatch.' }
+          $candidate = Join-Path $env:RUNNER_TEMP 'candidate'
+          New-Item -ItemType Directory -Path $candidate | Out-Null
+          gh run download $runId --repo $env:GITHUB_REPOSITORY --name $name --dir $candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Signed installer download failed.' }
+          $installer = Join-Path $candidate "MSCQR-Connector-Windows-$version.exe"
+          $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($installerHash -cne $expectedInstaller) { throw 'Signed installer SHA-256 mismatch.' }
+          $attestations = @(gh attestation verify $installer --repo $env:GITHUB_REPOSITORY `
+            --signer-workflow 'T-ej2003/genuine-scan-main/.github/workflows/windows-connector-signed-release.yml' `
+            --source-digest $source --predicate-type 'https://slsa.dev/provenance/v1' --format json | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0 -or -not @($attestations | Where-Object {
+            $_.verificationResult.statement.predicateType -ceq 'https://slsa.dev/provenance/v1' -and
+            $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.repository -ceq "https://github.com/$env:GITHUB_REPOSITORY" -and
+            $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.path -ceq '.github/workflows/windows-connector-signed-release.yml' -and
+            $_.verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit -ceq $source -and
+            @($_.verificationResult.statement.subject | Where-Object {
+              $_.name -ceq (Split-Path -Leaf $installer) -and $_.digest.sha256 -ceq $expectedInstaller
+            }).Count -eq 1
+          }).Count) { throw 'Installer attestation mismatch.' }
+          $installerSignature = Get-AuthenticodeSignature -LiteralPath $installer
+          $publisher = 'L&D Health Ltd'
+          if ($installerSignature.Status -ne 'Valid' -or -not $installerSignature.TimeStamperCertificate -or
+              $installerSignature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne $publisher) {
+            throw 'Installer Authenticode verification failed.'
+          }
+          $extractor = Join-Path $env:RUNNER_TEMP 'innoextract-windows-amd64.exe'
+          $toolRelease = gh api 'repos/crazy-max/innoextract/releases/tags/v1.13.0' | ConvertFrom-Json
+          $toolAsset = @($toolRelease.assets | Where-Object name -CEQ 'innoextract-windows-amd64.exe')
+          if ($LASTEXITCODE -ne 0 -or $toolRelease.draft -or $toolRelease.prerelease -or
+              $toolAsset.Count -ne 1 -or $toolAsset[0].id -ne 519954316 -or
+              $toolAsset[0].digest -cne "sha256:$expectedExtractor") {
+            throw 'Pinned extractor release mismatch.'
+          }
+          Remove-Item Env:GH_TOKEN
+          Invoke-WebRequest 'https://github.com/crazy-max/innoextract/releases/download/v1.13.0/innoextract-windows-amd64.exe' -OutFile $extractor
+          if ((Get-FileHash -LiteralPath $extractor -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedExtractor) {
+            throw 'Pinned extractor SHA-256 mismatch.'
+          }
+          $out = Join-Path $env:RUNNER_TEMP 'extracted'
+          & $extractor --extract --include 'app/bin/mscqr-local-print-agent.exe' --include 'app/installer-build.json' --output-dir $out $installer
+          if ($LASTEXITCODE -ne 0) { throw 'Signed installer payload extraction failed.' }
+          $runtime = Join-Path $out 'app/bin/mscqr-local-print-agent.exe'
+          $metadata = Get-Content (Join-Path $out 'app/installer-build.json') -Raw | ConvertFrom-Json
+          if ($metadata.version -cne $version) { throw 'Packaged connector version mismatch.' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $runtime
+          if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate -or
+              $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne $publisher -or
+              $signature.SignerCertificate.Thumbprint -cne $installerSignature.SignerCertificate.Thumbprint) {
+            throw 'Packaged runtime Authenticode verification failed.'
+          }
+          $report = [ordered]@{
+            sourceSha = $source; signingRun = $runId; signedArtifact = $artifactId
+            installerSha256 = $installerHash; packagedVersion = $metadata.version
+            runtimeSha256 = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+            runtimeAuthenticode = [string]$signature.Status; publisher = $publisher
+            fileVersion = (Get-Item -LiteralPath $runtime).VersionInfo.FileVersion
+            productVersion = (Get-Item -LiteralPath $runtime).VersionInfo.ProductVersion
+          }
+          if ($report.runtimeSha256 -cne $expectedRuntime) { throw 'Packaged runtime SHA-256 mismatch.' }
+          $report | ConvertTo-Json | Set-Content (Join-Path $env:RUNNER_TEMP 'target-runtime-verification.json') -Encoding utf8
+      - name: Upload minimal verification report
+        uses: actions/upload-artifact@v7
+        with:
+          name: mscqr-target-runtime-verification-2026.11.22.1
+          path: ${{ runner.temp }}/target-runtime-verification.json
+          if-no-files-found: error
+          retention-days: 7
