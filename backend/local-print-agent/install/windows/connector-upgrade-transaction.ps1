@@ -247,10 +247,21 @@ function Assert-MscqrBackupBindings($Journal) {
 function Get-MscqrUninstallSnapshot([string]$Live) {
   $path='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1'
   $matches=@(foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
-    if(Test-Path -LiteralPath $root) {Get-ChildItem -LiteralPath $root | Where-Object { $_.GetValue('DisplayName') -eq 'MSCQR Connector' }}
+    if(Test-Path -LiteralPath $root) {Get-ChildItem -LiteralPath $root | Where-Object {
+      $name=[string]$_.GetValue('DisplayName')
+      $name -ceq 'MSCQR Connector' -or $name -clike 'MSCQR Connector version *' -or
+      ([string]$_.Name).EndsWith('\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1',[StringComparison]::OrdinalIgnoreCase)
+    }}
   })
   if($matches.Count -ne 1 -or -not (Test-Path -LiteralPath $path)) {throw 'Expected exactly one owned uninstall entry.'}
   $key=Get-Item -LiteralPath $path
+  $version=[string]$key.GetValue('DisplayVersion')
+  $name=[string]$key.GetValue('DisplayName')
+  if($matches[0].Name -ine $key.Name -or
+     ($name -cne 'MSCQR Connector' -and
+      ($version -cnotmatch '^\d+\.\d+\.\d+(?:\.\d+)?$' -or $name -cne "MSCQR Connector version $version"))) {
+    throw 'Uninstall registration ownership mismatch.'
+  }
   if([IO.Path]::GetFullPath([string]$key.GetValue('InstallLocation')).TrimEnd('\') -ine $Live) {throw 'Uninstall registration ownership mismatch.'}
   $uninstaller=Join-Path $Live 'unins000.exe'
   if([string]$key.GetValue('UninstallString') -notin @($uninstaller,('"'+$uninstaller+'"'))) {throw 'Uninstall command does not target the canonical owned uninstaller.'}
