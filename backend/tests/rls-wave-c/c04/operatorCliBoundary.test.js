@@ -29,7 +29,8 @@ assert(!enterpriseFixture.includes("process.env.DATABASE_URL"));
 
 const qualityGate=read("../.github/workflows/quality-gate.yml");
 const approvedPostgres = JSON.parse(read("../docker/base-image-identities.json")).images.postgres.reference;
-assert(qualityGate.includes(`image: ${approvedPostgres}`));
+const postgresDigest = approvedPostgres.split("@")[1];
+assert(qualityGate.includes(`image: docker.io/library/postgres@${postgresDigest}`));
 assert(qualityGate.includes("node scripts/enterprise-e2e-db.mjs prepare"));
 assert(qualityGate.includes("node scripts/enterprise-e2e-db.mjs cleanup"));
 console.log("operator and CLI shared-boundary tests passed");
