@@ -1,5 +1,51 @@
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\..\local-print-agent\install\windows\connector-upgrade-transaction.ps1"
+& {
+  $live=Join-Path ([IO.Path]::GetTempPath()) 'mscqr-owned-installation'
+  $root='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
+  $otherRoot='HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
+  $path="$root\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1"
+  function New-UninstallKey($Name,$Root,$DisplayName,$Version,$Location,$Command) {
+    $key=[pscustomobject]@{Name=$Name;Root=$Root;Values=@{
+      DisplayName=$DisplayName;DisplayVersion=$Version;InstallLocation=$Location;UninstallString=$Command
+    }}
+    $key | Add-Member ScriptMethod GetValue {param($Name,$Default,$Options) return $this.Values[$Name]}
+    $key | Add-Member ScriptMethod GetValueNames {return @($this.Values.Keys)}
+    $key | Add-Member ScriptMethod GetValueKind {param($Name) return [Microsoft.Win32.RegistryValueKind]::String}
+    return $key
+  }
+  function Test-Path {param($LiteralPath) return ($LiteralPath -eq $path -or $LiteralPath -in @($root,$otherRoot))}
+  function Get-ChildItem {param($LiteralPath) return @($registrations | Where-Object Root -eq $LiteralPath)}
+  function Get-Item {param($LiteralPath) return $canonical}
+  $uninstaller=Join-Path $live 'unins000.exe'
+  foreach($case in @(
+    @{name='unversioned';display='MSCQR Connector';version='2026.11.6.2';accept=$true},
+    @{name='Inno versioned';display='MSCQR Connector version 2026.11.6.2';version='2026.11.6.2';accept=$true},
+    @{name='version mismatch';display='MSCQR Connector version 2026.11.6.3';version='2026.11.6.2';accept=$false},
+    @{name='unrelated name';display='Other Connector';version='2026.11.6.2';accept=$false},
+    @{name='wrong install location';display='MSCQR Connector version 2026.11.6.2';version='2026.11.6.2';location='other';accept=$false},
+    @{name='wrong uninstaller';display='MSCQR Connector version 2026.11.6.2';version='2026.11.6.2';command='other';accept=$false},
+    @{name='duplicate registration';display='MSCQR Connector version 2026.11.6.2';version='2026.11.6.2';duplicate=$true;accept=$false},
+    @{name='duplicate AppId';display='MSCQR Connector version 2026.11.6.2';version='2026.11.6.2';duplicate=$true;otherName="$otherRoot\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1";otherDisplay='Other Connector';accept=$false},
+    @{name='other key owns name';display='Other Connector';version='2026.11.6.2';duplicate=$true;accept=$false}
+  )) {
+    $location=if($case.location){$case.location}else{$live}
+    $command=if($case.command){$case.command}else{$uninstaller}
+    $canonical=New-UninstallKey $path $root $case.display $case.version $location $command
+    $registrations=@($canonical)
+    if($case.duplicate){
+      $otherName=if($case.otherName){$case.otherName}else{"$otherRoot\Unrelated_is1"}
+      $otherDisplay=if($case.otherDisplay){$case.otherDisplay}else{'MSCQR Connector version 2026.11.6.2'}
+      $registrations+=New-UninstallKey $otherName $otherRoot $otherDisplay '2026.11.6.2' $live $uninstaller
+    }
+    $accepted=$true
+    try { $snapshot=Get-MscqrUninstallSnapshot $live } catch { $accepted=$false }
+    if($accepted -ne $case.accept -or ($accepted -and @($snapshot | Where-Object name -eq 'DisplayName').Count -ne 1)) {
+      throw "Uninstall registration fixture failed: $($case.name)"
+    }
+    Write-Host "PASS uninstall registration $($case.name)"
+  }
+}
 $realWriteTransaction=(Get-Command Write-MscqrTransaction).ScriptBlock
 $realFlushSnapshot=(Get-Command Flush-MscqrUpgradeSnapshot).ScriptBlock
 function Flush-MscqrUpgradeSnapshot {
