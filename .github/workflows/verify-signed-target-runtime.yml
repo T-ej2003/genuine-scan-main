@@ -13,6 +13,22 @@ jobs:
     if: github.repository == 'T-ej2003/genuine-scan-main' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
     steps:
+      - name: Install pinned GitHub CLI for attestation verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'gh_2.105.0_windows_amd64.zip'
+          Invoke-WebRequest 'https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_windows_amd64.zip' -OutFile $zip
+          $expected = '8813a72c899900afaa10e3fec8fbc64b908c89dbfe837e95ed2fa500fc140627'
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) {
+            throw 'Pinned GitHub CLI release SHA-256 mismatch.'
+          }
+          $cli = Join-Path $env:RUNNER_TEMP 'gh_2.105.0'
+          Expand-Archive -LiteralPath $zip -DestinationPath $cli
+          if (-not (Test-Path -LiteralPath (Join-Path $cli 'bin/gh.exe') -PathType Leaf)) {
+            throw 'Pinned GitHub CLI release is missing gh.exe.'
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $cli 'bin')
       - name: Authenticate installer and inspect packaged runtime without starting it
         shell: pwsh
         env:
@@ -26,8 +42,10 @@ jobs:
           $expectedInstaller = '623bb018f8212e4b245feab7b860d1569e7fb172289b6cb6cd30d5693c9cb470'
           $expectedRuntime = '24dffef7e8441fce900559e194ccd9bd04686515e7ee29679f04336f8c379f27'
           $expectedExtractor = '5700fb1e82e6812bb341b964470537161e07a127d29eecfe176f5198cf215a59'
-          $ghVersionLine = gh version | Select-Object -First 1
-          if ($LASTEXITCODE -ne 0 -or $ghVersionLine -notmatch '^gh version (\d+\.\d+\.\d+)') {
+          $ghVersionOutput = @(gh --version)
+          $ghExitCode = $LASTEXITCODE
+          if ($ghExitCode -ne 0 -or $ghVersionOutput.Count -eq 0 -or
+              $ghVersionOutput[0] -notmatch '^gh version (\d+\.\d+\.\d+)') {
             throw 'GitHub CLI version could not be verified.'
           }
           if ([version]$Matches[1] -lt [version]'2.102.0') {
