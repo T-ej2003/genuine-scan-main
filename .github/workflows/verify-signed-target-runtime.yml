@@ -26,6 +26,13 @@ jobs:
           $expectedInstaller = '623bb018f8212e4b245feab7b860d1569e7fb172289b6cb6cd30d5693c9cb470'
           $expectedRuntime = '24dffef7e8441fce900559e194ccd9bd04686515e7ee29679f04336f8c379f27'
           $expectedExtractor = '5700fb1e82e6812bb341b964470537161e07a127d29eecfe176f5198cf215a59'
+          $ghVersionLine = gh version | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0 -or $ghVersionLine -notmatch '^gh version (\d+\.\d+\.\d+)') {
+            throw 'GitHub CLI version could not be verified.'
+          }
+          if ([version]$Matches[1] -lt [version]'2.102.0') {
+            throw 'GitHub CLI 2.102.0 or newer is required for attestation verification.'
+          }
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $run.conclusion -cne 'success' -or
               $run.head_sha -cne $source -or $run.head_branch -cne 'main' -or
@@ -44,7 +51,9 @@ jobs:
           $installer = Join-Path $candidate "MSCQR-Connector-Windows-$version.exe"
           $installerHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($installerHash -cne $expectedInstaller) { throw 'Signed installer SHA-256 mismatch.' }
-          $attestations = @(gh attestation verify $installer --repo $env:GITHUB_REPOSITORY --format json | ConvertFrom-Json)
+          $attestations = @(gh attestation verify $installer --repo $env:GITHUB_REPOSITORY `
+            --signer-workflow 'T-ej2003/genuine-scan-main/.github/workflows/windows-connector-signed-release.yml' `
+            --source-digest $source --predicate-type 'https://slsa.dev/provenance/v1' --format json | ConvertFrom-Json)
           if ($LASTEXITCODE -ne 0 -or -not @($attestations | Where-Object {
             $_.verificationResult.statement.predicateType -ceq 'https://slsa.dev/provenance/v1' -and
             $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.repository -ceq "https://github.com/$env:GITHUB_REPOSITORY" -and
