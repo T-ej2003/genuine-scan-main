@@ -59,10 +59,10 @@ function Assert-MscqrSignedFile([string]$Path, [string]$Sha256) {
       (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ine $Sha256) { throw 'Upgrade executable signature, publisher, timestamp or hash is invalid.' }
 }
 function Get-MscqrRuntimeProcesses {
-  return ,@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+  Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
     $_.Name -in @('mscqr-local-print-agent.exe','local-print-agent.exe','mscqr-print-agent.exe') -or
     ($_.Name -ieq 'node.exe' -and $_.CommandLine -match 'local-print-agent')
-  })
+  }
 }
 function Get-MscqrRuntimeVersion([string]$Runtime) {
   $value = (& $Runtime --version | Out-String).Trim()
