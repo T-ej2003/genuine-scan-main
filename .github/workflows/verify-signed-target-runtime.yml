@@ -101,10 +101,14 @@ jobs:
             throw 'Pinned extractor SHA-256 mismatch.'
           }
           $out = Join-Path $env:RUNNER_TEMP 'extracted'
-          & $extractor --extract --include 'app/bin/mscqr-local-print-agent.exe' --include 'app/installer-build.json' --output-dir $out $installer
+          & $extractor --extract --include 'app/bin/mscqr-local-print-agent.exe' --include 'mscqr-payload/installer-build.json' --output-dir $out $installer
           if ($LASTEXITCODE -ne 0) { throw 'Signed installer payload extraction failed.' }
           $runtime = Join-Path $out 'app/bin/mscqr-local-print-agent.exe'
-          $metadata = Get-Content (Join-Path $out 'app/installer-build.json') -Raw | ConvertFrom-Json
+          $runtimes = @(Get-ChildItem -LiteralPath $out -Filter 'mscqr-local-print-agent.exe' -File -Recurse)
+          if ($runtimes.Count -ne 1 -or $runtimes[0].FullName -cne $runtime) {
+            throw 'Signed installer runtime is missing or ambiguous.'
+          }
+          $metadata = Get-Content (Join-Path $out 'mscqr-payload/installer-build.json') -Raw | ConvertFrom-Json
           if ($metadata.version -cne $version) { throw 'Packaged connector version mismatch.' }
           $signature = Get-AuthenticodeSignature -LiteralPath $runtime
           if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate -or
