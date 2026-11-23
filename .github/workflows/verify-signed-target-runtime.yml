@@ -101,22 +101,34 @@ jobs:
             throw 'Pinned extractor SHA-256 mismatch.'
           }
           $out = Join-Path $env:RUNNER_TEMP 'extracted'
-          & $extractor --extract --include 'app/bin/mscqr-local-print-agent.exe' --include 'mscqr-payload/installer-build.json' --output-dir $out $installer
+          & $extractor --extract --output-dir $out $installer
           if ($LASTEXITCODE -ne 0) { throw 'Signed installer payload extraction failed.' }
           $runtimes = @(Get-ChildItem -LiteralPath $out -Filter 'mscqr-local-print-agent.exe' -File -Recurse)
-          if ($runtimes.Count -ne 1) { throw "Expected one extracted runtime, found $($runtimes.Count)." }
-          $runtimePath = [IO.Path]::GetRelativePath($out, $runtimes[0].FullName).Replace('\', '/')
-          if ($runtimePath -cnotin @('app/bin/mscqr-local-print-agent.exe', 'mscqr-payload/bin/mscqr-local-print-agent.exe')) {
-            throw "Unexpected signed installer runtime path: $runtimePath"
+          $runtimePaths = @($runtimes | ForEach-Object { [IO.Path]::GetRelativePath($out, $_.FullName).Replace('\', '/') })
+          $expectedRuntimePaths = @('app/bin/mscqr-local-print-agent.exe', 'mscqr-payload/bin/mscqr-local-print-agent.exe')
+          if ($runtimePaths.Count -ne 2 -or @($runtimePaths | Where-Object { $_ -cnotin $expectedRuntimePaths }).Count -ne 0 -or
+              @($expectedRuntimePaths | Where-Object { $_ -cnotin $runtimePaths }).Count -ne 0) {
+            throw "Signed installer runtime aliases differ from the Inno manifest: $($runtimePaths -join ', ')"
           }
-          $runtime = $runtimes[0].FullName
+          $runtime = Join-Path $out 'app/bin/mscqr-local-print-agent.exe'
+          $runtimeHash = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($runtimeHash -cne $expectedRuntime -or
+              (Get-FileHash -LiteralPath (Join-Path $out 'mscqr-payload/bin/mscqr-local-print-agent.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $runtimeHash) {
+            throw 'Signed installer runtime aliases do not match the expected SHA-256.'
+          }
           $metadataFiles = @(Get-ChildItem -LiteralPath $out -Filter 'installer-build.json' -File -Recurse)
-          if ($metadataFiles.Count -ne 1) { throw "Expected one extracted build manifest, found $($metadataFiles.Count)." }
-          $metadataPath = [IO.Path]::GetRelativePath($out, $metadataFiles[0].FullName).Replace('\', '/')
-          if ($metadataPath -cnotin @('app/installer-build.json', 'mscqr-payload/installer-build.json')) {
-            throw "Unexpected signed installer build manifest path: $metadataPath"
+          $metadataPaths = @($metadataFiles | ForEach-Object { [IO.Path]::GetRelativePath($out, $_.FullName).Replace('\', '/') })
+          $expectedMetadataPaths = @('app/installer-build.json', 'mscqr-payload/installer-build.json')
+          if ($metadataPaths.Count -ne 2 -or @($metadataPaths | Where-Object { $_ -cnotin $expectedMetadataPaths }).Count -ne 0 -or
+              @($expectedMetadataPaths | Where-Object { $_ -cnotin $metadataPaths }).Count -ne 0) {
+            throw "Signed installer build manifest aliases differ from the Inno manifest: $($metadataPaths -join ', ')"
           }
-          $metadata = Get-Content -LiteralPath $metadataFiles[0].FullName -Raw | ConvertFrom-Json
+          $metadataFile = Join-Path $out 'app/installer-build.json'
+          if ((Get-FileHash -LiteralPath $metadataFile -Algorithm SHA256).Hash -cne
+              (Get-FileHash -LiteralPath (Join-Path $out 'mscqr-payload/installer-build.json') -Algorithm SHA256).Hash) {
+            throw 'Signed installer build manifest aliases differ.'
+          }
+          $metadata = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
           if ($metadata.version -cne $version) { throw 'Packaged connector version mismatch.' }
           $signature = Get-AuthenticodeSignature -LiteralPath $runtime
           if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate -or
@@ -127,8 +139,8 @@ jobs:
           $report = [ordered]@{
             sourceSha = $source; signingRun = $runId; signedArtifact = $artifactId
             installerSha256 = $installerHash; packagedVersion = $metadata.version
-            extractedRuntimePath = $runtimePath; extractedBuildManifestPath = $metadataPath
-            runtimeSha256 = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+            extractedRuntimePaths = $runtimePaths; extractedBuildManifestPaths = $metadataPaths
+            runtimeSha256 = $runtimeHash
             runtimeAuthenticode = [string]$signature.Status; publisher = $publisher
             fileVersion = (Get-Item -LiteralPath $runtime).VersionInfo.FileVersion
             productVersion = (Get-Item -LiteralPath $runtime).VersionInfo.ProductVersion
