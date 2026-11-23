@@ -131,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ inputs.connector_fresh_install_distribution }}" == "true" && "$CONNECTOR_UPGRADE_DISTRIBUTION" == "true" ]]; then exit 1; fi
-          node --test backend/tests/verifyFreshInstallDistribution.test.mjs backend/tests/verifyUpgradeDistribution.test.mjs
+          node --test backend/tests/verifyFreshInstallDistribution.test.mjs backend/tests/verifyUpgradeDistribution.test.mjs backend/tests/connectorCandidatePublisher.test.mjs
           node --input-type=module - <<'NODE'
           import fs from 'node:fs';
           const version = fs.readFileSync('backend/src/local-print-agent/version.ts', 'utf8').match(/LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"([0-9.]+)"/)?.[1];
@@ -165,6 +165,7 @@ jobs:
         run: |
           set -euo pipefail
           node --test backend/tests/preserveProductionConnectorDownload.test.mjs
+          node backend/tests/connectorRuntimeAssets.test.js
           if [[ "$CONNECTOR_DISTRIBUTION" == "true" ]]; then staged=staged; else staged=backend-only; fi
           node backend/scripts/preserve-production-connector-download.mjs backend/local-print-agent/releases "$staged" > "$RUNNER_TEMP/current-connector.json"
           node --input-type=module - <<'NODE'

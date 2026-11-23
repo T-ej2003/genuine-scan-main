@@ -208,6 +208,7 @@ const relativePath = path.relative(releaseRoot, artifactPath).replace(/\\/g, "/"
 const nextRelease = {
   version,
   publishedAt,
+  ...(existingRelease?.certification ? { certification: existingRelease.certification } : {}),
   requiredProtocolVersion,
   minimumBuildVersion,
   transportDiagnosticsVersion,

@@ -21,7 +21,9 @@ function fixture() {
   const contract = { repository: "T-ej2003/genuine-scan-main", sourceSha: "a".repeat(40), runId: 2,
     workflowId: 3, artifactId: 4, artifactDigest: `sha256:${"b".repeat(64)}`, version,
     installerSha256: sha(installer), previousVersion, previousSha256: sha(previousInstaller), scope: "certified-upgrade" };
-  const pending = { version, publishedAt: null, summary: "Pending release", platforms: {} };
+  const pending = { version, publishedAt: null, summary: "Pending release", platforms: {},
+    certification: { targetSourceSha: contract.sourceSha, installerSha256: contract.installerSha256,
+      runtimeSha256: "e".repeat(64) } };
   const previous = { version: previousVersion, publishedAt: new Date().toISOString(), platforms: {
     windows: { relativePath: previousPath, sha256: contract.previousSha256 } } };
   const source = { latestVersion: version, releases: [pending, previous] };
@@ -59,6 +61,7 @@ test("accepts authenticated certified upgrade distribution", () => {
 });
 
 for (const [name, tamper] of [
+  ["candidate provenance lost", (f) => { delete f.staged.releases[0].certification; }],
   ["fresh-only scope", (f) => { f.staged.releases[0].platforms.windows.installationScope = "fresh-install-only"; }],
   ["wrong runtime digest", (f) => { f.staged.releases[0].platforms.windows.certifiedUpgradeSources[0].runtimeSha256 = "e".repeat(64); }],
   ["unsupported source version", (f) => { f.certification.sources[0].version = f.contract.version; f.staged.releases[0].platforms.windows.certifiedUpgradeSources[0].version = f.contract.version; }],

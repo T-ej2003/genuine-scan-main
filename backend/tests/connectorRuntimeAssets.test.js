@@ -5,7 +5,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const script = path.join(__dirname, '../scripts/create-connector-runtime-assets.mjs');
-const latest = '2026.11.6.2', predecessor = '2026.10.29.1', older = '2026.6.26';
+const latest = '2026.11.6.2', predecessor = '2026.10.29.1', older = '2026.6.26', candidate = '2026.11.22.1';
 const release = (version, { scope, published = true, signature = 'signed', trust = 'production', packageMissing = false, fileMissing = false } = {}) => ({
   version, publishedAt: published ? '2026-11-06T00:00:00Z' : null, fileMissing,
   platforms: packageMissing ? {} : { windows: {
@@ -15,6 +15,12 @@ const release = (version, { scope, published = true, signature = 'signed', trust
 });
 
 const cases = [
+  { name: 'unpublished verified candidate survives without a download', releases: [release(latest, { scope: 'fresh-install-only' }), release(predecessor),
+    { ...release(candidate, { published: false, packageMissing: true }), certification: {
+      targetSourceSha: '1'.repeat(40), installerSha256: '2'.repeat(64), runtimeSha256: '3'.repeat(64) } }],
+    expected: [latest, predecessor, candidate] },
+  { name: 'unverified placeholder is not retained', releases: [release(latest, { scope: 'fresh-install-only' }), release(predecessor),
+    release(candidate, { published: false, packageMissing: true })], expected: [latest, predecessor] },
   { name: 'published fresh-only retains newest eligible predecessor', releases: [release(older), release(latest, { scope: 'fresh-install-only' }), release(predecessor)], expected: [latest, predecessor] },
   { name: 'certified upgrade retains current production download', releases: [release(latest, { scope: 'certified-upgrade' }), release(predecessor)], expected: [latest, predecessor] },
   { name: 'normal upgrade keeps latest only', releases: [release(latest), release(predecessor)], expected: [latest] },
@@ -51,12 +57,17 @@ for (const testCase of cases) {
     }
     assert.equal(result.status, 0, `${testCase.name}: ${result.stderr}`);
     const packaged = JSON.parse(readFileSync(path.join(output, 'releases/manifest.json')));
+    assert.equal(packaged.latestVersion, testCase.latestVersion || latest, testCase.name);
     assert.deepEqual(packaged.releases.map((item) => item.version), testCase.expected, testCase.name);
+    if (testCase.expected.includes(candidate)) {
+      assert.equal(packaged.releases.find((item) => item.version === candidate).publishedAt, null);
+      assert.deepEqual(packaged.releases.find((item) => item.version === candidate).platforms, {});
+    }
     assert.equal(Boolean(packaged.releases[0].platforms.windows), !testCase.noLatestFile, testCase.name);
     assert.equal(existsSync(path.join(output, 'releases', latest, 'windows', `${latest}.exe`)), !testCase.noLatestFile, testCase.name);
     for (const item of testCase.releases.filter((item) => item.version !== (testCase.latestVersion || latest))) {
       const retained = testCase.expected.includes(item.version);
-      assert.equal(existsSync(path.join(output, 'releases', item.version, 'windows', `${item.version}.exe`)), retained, testCase.name);
+      assert.equal(existsSync(path.join(output, 'releases', item.version, 'windows', `${item.version}.exe`)), retained && Boolean(item.platforms.windows), testCase.name);
       assert.equal(packaged.releases.some((entry) => entry.version === item.version), retained, `${testCase.name}: direct versioned URL scope`);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }

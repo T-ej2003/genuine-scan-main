@@ -4,7 +4,7 @@ const crypto = require("node:crypto");
 const os = require("node:os");
 const { spawnSync } = require("node:child_process");
 const JSZip = require("jszip");
-const { getLatestConnectorRelease, resolveConnectorDownload } = require("../dist/services/connectorReleaseService");
+const { getConnectorReleaseManifest, getLatestConnectorRelease, resolveConnectorDownload } = require("../dist/services/connectorReleaseService");
 const { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } = require("../dist/services/localAgentProtocol");
 
 const assert = (condition, message) => {
@@ -66,6 +66,9 @@ const run = async () => {
     latestPackagedRelease && (latestPackagedRelease.platforms.windows || latestPackagedRelease.platforms.windowsUnsignedTest);
   assert(latestPackagedRelease && latestPackagedWindows, "At least one installable Windows connector release should remain available");
   const latest = getLatestConnectorRelease("https://mscqr.example.com/api");
+  const publishedWithoutCandidate = getConnectorReleaseManifest().releases.find((release) => release.version === "2026.10.29.1");
+  assert(publishedWithoutCandidate && !Object.hasOwn(publishedWithoutCandidate, "certification"),
+    "Ordinary published releases must omit certification metadata during manifest round-trips");
   const latestInternal = getLatestConnectorRelease("https://mscqr.example.com/api", { includeInternalArtifacts: true });
   const latestFromWebOrigin = getLatestConnectorRelease("https://mscqr.example.com");
   assert(latest.latestVersion === manifest.latestVersion, "Latest connector version should come from manifest.json");

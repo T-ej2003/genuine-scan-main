@@ -99,7 +99,10 @@ if (previous) {
 
 const runtimeManifest = {
   ...manifest,
-  releases: [latestRuntimeRelease, ...(previousRuntimeRelease ? [previousRuntimeRelease] : [])],
+  releases: [latestRuntimeRelease, ...(previousRuntimeRelease ? [previousRuntimeRelease] : []),
+    ...manifest.releases.filter((release) => release.version !== manifest.latestVersion &&
+      release.version !== previousRuntimeRelease?.version && release.publishedAt === null &&
+      Object.keys(release.platforms || {}).length === 0 && release.certification)],
 };
 fs.writeFileSync(path.join(outputReleaseRoot, "manifest.json"), `${JSON.stringify(runtimeManifest, null, 2)}\n`);
 

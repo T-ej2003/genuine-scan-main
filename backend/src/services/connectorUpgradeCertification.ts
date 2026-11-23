@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LOCAL_PRINT_AGENT_SOURCE_VERSION } from "../local-print-agent/version";
+import { getConnectorReleaseManifest } from "./connectorReleaseService";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const permitSchema = z.object({
@@ -11,7 +12,8 @@ const permitSchema = z.object({
   sourceRuntimeSha256: digest,
   targetVersion: z.string().regex(/^\d+\.\d+\.\d+(?:\.\d+)?$/),
   targetRuntimeSha256: digest, targetInstallerSha256: digest,
-  targetSourceSha: z.string().regex(/^[a-f0-9]{40}$/), issuedAt: z.string().datetime(), expiresAt: z.string().datetime(),
+  targetSourceSha: z.string().regex(/^[a-f0-9]{40}$/), backendSourceSha: z.string().regex(/^[a-f0-9]{40}$/),
+  issuedAt: z.string().datetime(), expiresAt: z.string().datetime(),
 }).strict();
 
 type Permit = z.infer<typeof permitSchema>;
@@ -24,10 +26,16 @@ export const getConnectorUpgradeCertificationPermit = (now = Date.now()): Permit
   try {
     const permit = permitSchema.parse(JSON.parse(raw));
     const issued = Date.parse(permit.issuedAt), expires = Date.parse(permit.expiresAt);
+    const release = getConnectorReleaseManifest().releases.find(item => item.version === permit.targetVersion);
     if (issued > now || expires <= now || expires - issued > 4 * 60 * 60_000 ||
         permit.targetVersion !== LOCAL_PRINT_AGENT_SOURCE_VERSION ||
-        permit.targetSourceSha !== process.env.GIT_SHA ||
-        permit.targetSourceSha !== process.env.RELEASE_GIT_SHA ||
+        permit.backendSourceSha !== process.env.GIT_SHA ||
+        permit.backendSourceSha !== process.env.RELEASE_GIT_SHA ||
+        release?.publishedAt !== null || release.productionSignedAvailable ||
+        Object.values(release.platforms).some(Boolean) ||
+        release.certification?.targetSourceSha !== permit.targetSourceSha ||
+        release.certification.installerSha256 !== permit.targetInstallerSha256 ||
+        release.certification.runtimeSha256 !== permit.targetRuntimeSha256 ||
         permit.sourceVersion === permit.targetVersion) return null;
     return permit;
   } catch { return null; }

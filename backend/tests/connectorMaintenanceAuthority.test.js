@@ -21,13 +21,13 @@ const challenge = proofService.createUpgradeDeviceChallenge({ ...attempt, curren
   attemptId: '33045895-4cb7-49ad-81da-0d412d73fa93' });
 const controlledCertification = process.env.MSCQR_TEST_CERTIFICATION === 'true';
 if (controlledCertification) {
-  const sourceSha = '1'.repeat(40);
-  process.env.GIT_SHA = sourceSha;
-  process.env.RELEASE_GIT_SHA = sourceSha;
+  const backendSourceSha = '1'.repeat(40);
+  process.env.GIT_SHA = backendSourceSha;
+  process.env.RELEASE_GIT_SHA = backendSourceSha;
   process.env.CONNECTOR_UPGRADE_CERTIFICATION_PERMIT = JSON.stringify({
     ...attempt, attemptId: challenge.attemptId, sourceRuntimeSha256: hash('certified source'),
     targetRuntimeSha256: hash('replacement'), targetInstallerSha256: hash('installer'),
-    targetSourceSha: sourceSha, issuedAt: new Date(Date.now() - 1000).toISOString(),
+    targetSourceSha: '2'.repeat(40), backendSourceSha, issuedAt: new Date(Date.now() - 1000).toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   });
 }
@@ -56,7 +56,9 @@ mock('services/auth/cookieTokenProtectionService.js', { sealCookieToken: value =
 mock('services/connectorReleaseService.js', { getConnectorReleaseManifest: () => ({ releases: [{ version: attempt.targetVersion,
   publishedAt: controlledCertification ? null : '2026-11-22T00:00:00.000Z',
   productionSignedAvailable: !controlledCertification,
-  platforms: { windows: controlledCertification ? null : { installationScope: 'certified-upgrade', sha256: hash('installer') } } }] }),
+  platforms: { windows: controlledCertification ? null : { installationScope: 'certified-upgrade', sha256: hash('installer') } },
+  certification: controlledCertification ? { targetSourceSha: '2'.repeat(40),
+    installerSha256: hash('installer'), runtimeSha256: hash('replacement') } : null }] }),
   isCertifiedUpgradeSource: (target, source, digest) => !controlledCertification && target === attempt.targetVersion &&
     source === attempt.sourceVersion && digest === hash('certified source') });
 mock('controllers/connectorUpgradeDeviceProofController.js', { trustedBinding: async () => ({
