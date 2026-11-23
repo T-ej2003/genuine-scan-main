@@ -61,10 +61,13 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrint
 } });
 let installationScope = 'certified-upgrade';
 let publishedFreshOnly = false;
+let candidateAvailable = true;
+let candidateProvenance = null;
 mock('services/connectorReleaseService.js', { getConnectorReleaseManifest: () => ({ releases: [{ version: binding.targetVersion,
   publishedAt: installationScope === 'certified-upgrade' || publishedFreshOnly ? '2026-11-22T00:00:00.000Z' : null,
   productionSignedAvailable: installationScope === 'certified-upgrade' || publishedFreshOnly,
-  platforms: { windows: installationScope === 'certified-upgrade' || publishedFreshOnly ? { installationScope } : null } }] }) });
+  platforms: { windows: installationScope === 'certified-upgrade' || publishedFreshOnly ? { installationScope } : null },
+  certification: candidateAvailable ? candidateProvenance : null }] }) });
 mock('services/redisService.js', { getRedisClient: async () => redis });
 const controller = require(path.join(dist, 'controllers/connectorUpgradeDeviceProofController'));
 const request = (body) => ({ body, params: { id: printerId }, user: { userId: binding.manufacturerId }, databaseSessionCapability: 'fixture-capability', requestId: 'fixture-request' });
@@ -116,16 +119,18 @@ const response = () => ({ code: 200, setHeader() {}, status(code) { this.code = 
   await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), uncertified);
   assert.equal(uncertified.code, 409, 'fresh-install-only artifact cannot receive an upgrade challenge');
   const candidateAttemptId = randomUUID();
-  const sourceSha = '1'.repeat(40);
-  process.env.GIT_SHA = sourceSha;
-  process.env.RELEASE_GIT_SHA = sourceSha;
+  const backendSourceSha = '1'.repeat(40), targetSourceSha = '2'.repeat(40);
+  process.env.GIT_SHA = backendSourceSha;
+  process.env.RELEASE_GIT_SHA = backendSourceSha;
   const permit = { attemptId: candidateAttemptId, agentId: binding.agentId,
     deviceFingerprint: binding.deviceFingerprint, manufacturerId: binding.manufacturerId,
     tenantId: binding.tenantId, printerId, registrationId,
     sourceVersion: binding.sourceVersion, targetVersion: binding.targetVersion,
     sourceRuntimeSha256: 'a'.repeat(64), targetRuntimeSha256: 'b'.repeat(64),
-    targetInstallerSha256: 'c'.repeat(64), targetSourceSha: sourceSha,
+    targetInstallerSha256: 'c'.repeat(64), targetSourceSha, backendSourceSha,
     issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  candidateProvenance = { targetSourceSha, installerSha256: permit.targetInstallerSha256,
+    runtimeSha256: permit.targetRuntimeSha256 };
   process.env.CONNECTOR_UPGRADE_CERTIFICATION_PERMIT = JSON.stringify(permit);
   const preflightBody = { agentId: binding.agentId, deviceFingerprint: binding.deviceFingerprint,
     sourceVersion: binding.sourceVersion, sourceSha256: permit.sourceRuntimeSha256,
@@ -133,6 +138,17 @@ const response = () => ({ code: 200, setHeader() {}, status(code) { this.code = 
   const preflight = response();
   await controller.preflightConnectorUpgradeCertification(request(preflightBody), preflight);
   assert.equal(preflight.code, 200);
+  candidateAvailable = false;
+  const missingCandidate = response();
+  await controller.preflightConnectorUpgradeCertification(request(preflightBody), missingCandidate);
+  assert.equal(missingCandidate.code, 403);
+  candidateAvailable = true;
+  candidateProvenance = { ...candidateProvenance, targetSourceSha: '3'.repeat(40) };
+  const forgedSource = response();
+  await controller.preflightConnectorUpgradeCertification(request(preflightBody), forgedSource);
+  assert.equal(forgedSource.code, 403);
+  candidateProvenance = { targetSourceSha, installerSha256: permit.targetInstallerSha256,
+    runtimeSha256: permit.targetRuntimeSha256 };
   publishedFreshOnly = true;
   const published = response();
   await controller.preflightConnectorUpgradeCertification(request(preflightBody), published);

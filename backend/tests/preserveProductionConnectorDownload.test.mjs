@@ -53,8 +53,13 @@ test("preserves current signed download alongside a newer target", async () => {
 test("backend-only publication retains the existing release as latest", async () => {
   const f = await fixture();
   try {
+    f.target.certification = { targetSourceSha: "1".repeat(40), installerSha256: "2".repeat(64), runtimeSha256: "3".repeat(64) };
+    fs.writeFileSync(f.file, JSON.stringify({ latestVersion: f.target.version, releases: [f.target,
+      { version: currentVersion, publishedAt: null, platforms: {} }] }));
     await preserveProductionConnectorDownload(f.root, f.origin);
-    assert.equal(JSON.parse(fs.readFileSync(f.file, "utf8")).latestVersion, currentVersion);
+    const manifest = JSON.parse(fs.readFileSync(f.file, "utf8"));
+    assert.equal(manifest.latestVersion, currentVersion);
+    assert.deepEqual(manifest.releases.find((release) => release.version === f.target.version), f.target);
   } finally { await f.close(); }
 });
 
