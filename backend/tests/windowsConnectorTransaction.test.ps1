@@ -1,6 +1,32 @@
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\..\local-print-agent\install\windows\connector-upgrade-transaction.ps1"
 & {
+  function Get-CimInstance {param($ClassName) return $fixtureProcesses}
+  function Get-NetTCPConnection {param($LocalPort,$State) return $fixtureListeners}
+  $connector=[pscustomobject]@{Name='mscqr-local-print-agent.exe';ProcessId=1234}
+  foreach($case in @(
+    @{name='null';processes=$null;count=0;stopped=$true},
+    @{name='empty array';processes=@();count=0;stopped=$true},
+    @{name='unrelated process';processes=@([pscustomobject]@{Name='notepad.exe';ProcessId=5678});count=0;stopped=$true},
+    @{name='one connector';processes=@($connector);count=1;stopped=$false},
+    @{name='two connectors';processes=@($connector,$connector);count=2;stopped=$false}
+  )) {
+    $fixtureProcesses=$case.processes
+    $fixtureListeners=@()
+    $actual=@(Get-MscqrRuntimeProcesses).Count
+    $stopped=$true
+    try {Assert-MscqrStoppedInstallation} catch {$stopped=$false}
+    if($actual -ne $case.count -or $stopped -ne $case.stopped) {
+      throw "Stopped connector fixture failed: $($case.name)"
+    }
+  }
+  $fixtureProcesses=@()
+  $fixtureListeners=@([pscustomobject]@{LocalPort=17866;State='Listen'})
+  try {Assert-MscqrStoppedInstallation; throw 'Listener was accepted as stopped.'}
+  catch {if($_.Exception.Message -ne 'Offline upgrade requires the installed connector and its local listener to be stopped.') {throw}}
+  Write-Host 'PASS stopped connector process and listener cardinality'
+}
+& {
   $live=Join-Path ([IO.Path]::GetTempPath()) 'mscqr-owned-installation'
   $root='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
   $otherRoot='HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
