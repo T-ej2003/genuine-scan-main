@@ -103,12 +103,20 @@ jobs:
           $out = Join-Path $env:RUNNER_TEMP 'extracted'
           & $extractor --extract --include 'app/bin/mscqr-local-print-agent.exe' --include 'mscqr-payload/installer-build.json' --output-dir $out $installer
           if ($LASTEXITCODE -ne 0) { throw 'Signed installer payload extraction failed.' }
-          $runtime = (Get-Item -LiteralPath (Join-Path $out 'app/bin/mscqr-local-print-agent.exe') -ErrorAction Stop).FullName
           $runtimes = @(Get-ChildItem -LiteralPath $out -Filter 'mscqr-local-print-agent.exe' -File -Recurse)
-          if ($runtimes.Count -ne 1 -or $runtimes[0].FullName -cne $runtime) {
-            throw 'Signed installer runtime is missing or ambiguous.'
+          if ($runtimes.Count -ne 1) { throw "Expected one extracted runtime, found $($runtimes.Count)." }
+          $runtimePath = [IO.Path]::GetRelativePath($out, $runtimes[0].FullName).Replace('\', '/')
+          if ($runtimePath -cnotin @('app/bin/mscqr-local-print-agent.exe', 'mscqr-payload/bin/mscqr-local-print-agent.exe')) {
+            throw "Unexpected signed installer runtime path: $runtimePath"
           }
-          $metadata = Get-Content (Join-Path $out 'mscqr-payload/installer-build.json') -Raw | ConvertFrom-Json
+          $runtime = $runtimes[0].FullName
+          $metadataFiles = @(Get-ChildItem -LiteralPath $out -Filter 'installer-build.json' -File -Recurse)
+          if ($metadataFiles.Count -ne 1) { throw "Expected one extracted build manifest, found $($metadataFiles.Count)." }
+          $metadataPath = [IO.Path]::GetRelativePath($out, $metadataFiles[0].FullName).Replace('\', '/')
+          if ($metadataPath -cnotin @('app/installer-build.json', 'mscqr-payload/installer-build.json')) {
+            throw "Unexpected signed installer build manifest path: $metadataPath"
+          }
+          $metadata = Get-Content -LiteralPath $metadataFiles[0].FullName -Raw | ConvertFrom-Json
           if ($metadata.version -cne $version) { throw 'Packaged connector version mismatch.' }
           $signature = Get-AuthenticodeSignature -LiteralPath $runtime
           if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate -or
@@ -119,6 +127,7 @@ jobs:
           $report = [ordered]@{
             sourceSha = $source; signingRun = $runId; signedArtifact = $artifactId
             installerSha256 = $installerHash; packagedVersion = $metadata.version
+            extractedRuntimePath = $runtimePath; extractedBuildManifestPath = $metadataPath
             runtimeSha256 = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
             runtimeAuthenticode = [string]$signature.Status; publisher = $publisher
             fileVersion = (Get-Item -LiteralPath $runtime).VersionInfo.FileVersion
