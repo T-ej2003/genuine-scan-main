@@ -216,7 +216,7 @@ const toPublicRelease = (release: ConnectorRelease, baseUrl?: string | null, opt
     transportDiagnosticsVersion: release.transportDiagnosticsVersion || LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
     capabilities: release.capabilities || LOCAL_AGENT_CAPABILITIES,
     summary: release.summary,
-    certification: release.certification || null,
+    ...(release.certification ? { certification: release.certification } : {}),
     notes: release.notes || [],
     productionSignedAvailable: signedWindowsAvailable,
     productionSignedMessage: signedWindowsAvailable
