@@ -26,7 +26,13 @@ try {
   $files=@(@($state,$journal,$config) | ForEach-Object {
     [pscustomobject]@{path=[IO.Path]::GetFullPath($_);sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()}
   })
-  [IO.File]::WriteAllText($snapshotFile,(@{live=$live;startup=$startup;files=$files}|ConvertTo-Json -Depth 8))
+  [IO.File]::WriteAllText($snapshotFile,(@{live=$live;wrapper=$wrapper;startup=$startup;files=$files}|ConvertTo-Json -Depth 8))
+  New-Item -ItemType Directory -Path (Split-Path $wrapper) -Force | Out-Null
+  [IO.File]::WriteAllText($wrapper,'synthetic generated wrapper')
+  $leftoverRejected=$false
+  try {Invoke-MscqrUninstallComplete} catch {$leftoverRejected=$true}
+  if(-not $leftoverRejected) {throw 'Uninstall completion accepted a leftover generated wrapper.'}
+  Microsoft.PowerShell.Management\Remove-Item -LiteralPath $wrapper -Force
   Invoke-MscqrUninstallComplete
   $result=Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
   if($result.outcome -ne 'success' -or $result.operation -ne 'uninstall' -or

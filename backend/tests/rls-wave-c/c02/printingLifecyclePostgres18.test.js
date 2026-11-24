@@ -2409,6 +2409,12 @@ async function main() {
   const retireSql=(capability)=>`SELECT app_rls.printing_printer_administration(
     '${capability}','printing-printer-admin','${requestId()}','RETIRE','${ids.retirementPrinter}','{}'::jsonb)`;
   denied(app,retireSql(caps.outsider),/PRINTING_BOUNDARY_DENIED/);
+  psql(admin, `UPDATE public."User" SET role='MANUFACTURER_ADMIN' WHERE id='${ids.outsider}'`);
+  denied(app,retireSql(caps.outsider),/PRINTING_BOUNDARY_DENIED/);
+  psql(admin, `UPDATE public."User" SET role='LICENSEE_ADMIN' WHERE id='${ids.outsider}'`);
+  denied(app, `SELECT app_rls.printing_printer_administration(
+    '${caps.maker}','printing-printer-admin','${requestId()}','RETIRE',
+    '50000000-0000-4000-8000-000000009999','{}'::jsonb)`,/PRINTING_BOUNDARY_DENIED/);
   const historicalItems=psql(admin,`SELECT count(*) FROM public."PrintItem"`);
   assert.deepEqual(json(app,retireSql(caps.maker)),{
     printerId:ids.retirementPrinter,registrationId:ids.retirementRegistration,

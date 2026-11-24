@@ -6,6 +6,7 @@ $logFile=Join-Path $lifecycleRoot 'uninstall.log'
 $snapshotFile=Join-Path $lifecycleRoot 'uninstall-preservation.json'
 $live=Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
 $runtime=Join-Path $live 'bin\mscqr-local-print-agent.exe'
+$wrapper=Join-Path $live 'bin\start-local-print-agent.cmd'
 $startup=Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
 $journalDirectory=Join-Path $env:USERPROFILE '.mscqr\dispatch-journal'
 
@@ -62,7 +63,11 @@ function Invoke-MscqrUninstallPreflight {
   $environmentFile=Join-Path $live 'agent.env'
   $hash=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash
   Assert-MscqrSignedFile $runtime $hash
-  $wrapper=Join-Path $live 'bin\start-local-print-agent.cmd'
+  Assert-MscqrPlainPath $wrapper
+  if(-not(Test-Path -LiteralPath $wrapper -PathType Leaf) -or
+     -not (Get-Content -LiteralPath $wrapper -Raw).Contains($runtime)) {
+    throw 'Owned startup wrapper is missing or does not target the verified connector.'
+  }
   if(-not (Get-Content -LiteralPath $startup -Raw).Contains($wrapper)) {throw 'Startup launcher is not owned by the installed connector.'}
   $before=@(Get-MscqrPreservedHashes $stateFile $environmentFile)
   if(@(Get-MscqrRuntimeProcesses).Count -eq 0) {
@@ -77,9 +82,12 @@ function Invoke-MscqrUninstallPreflight {
     throw 'Persistent evidence changed during connector shutdown.'
   }
   [IO.Directory]::CreateDirectory($lifecycleRoot) | Out-Null
-  [IO.File]::WriteAllText($snapshotFile,(@{files=$before;live=$live;startup=$startup} | ConvertTo-Json -Depth 8),[Text.Encoding]::UTF8)
+  [IO.File]::WriteAllText($snapshotFile,(@{files=$before;live=$live;wrapper=$wrapper;startup=$startup} | ConvertTo-Json -Depth 8),[Text.Encoding]::UTF8)
   Remove-Item -LiteralPath $startup -Force -ErrorAction Stop
-  if(Test-Path -LiteralPath $startup) {throw 'Owned startup launcher could not be removed.'}
+  if(Test-Path -LiteralPath $wrapper -PathType Leaf) {Remove-Item -LiteralPath $wrapper -Force -ErrorAction Stop}
+  if((Test-Path -LiteralPath $startup) -or (Test-Path -LiteralPath $wrapper)) {
+    throw 'Owned startup files could not be removed.'
+  }
   Write-MscqrUninstallResult 'preflight' 'NONE' 'Connector stopped; Inno can remove owned application files. Persistent state is retained.' $false $false 'ready'
 }
 
@@ -87,10 +95,12 @@ function Invoke-MscqrUninstallComplete {
   if(-not(Test-Path -LiteralPath $snapshotFile -PathType Leaf)) {throw 'Uninstall preservation record is missing.'}
   $snapshot=[IO.File]::ReadAllText($snapshotFile) | ConvertFrom-Json -ErrorAction Stop
   if([IO.Path]::GetFullPath([string]$snapshot.live).TrimEnd('\') -ine [IO.Path]::GetFullPath($live).TrimEnd('\') -or
-     [IO.Path]::GetFullPath([string]$snapshot.startup) -ine [IO.Path]::GetFullPath($startup)) {throw 'Uninstall preservation record does not match this installation.'}
+     [IO.Path]::GetFullPath([string]$snapshot.startup) -ine [IO.Path]::GetFullPath($startup) -or
+     [IO.Path]::GetFullPath([string]$snapshot.wrapper) -ine [IO.Path]::GetFullPath($wrapper)) {throw 'Uninstall preservation record does not match this installation.'}
   $registry='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1'
-  if((Test-Path -LiteralPath $runtime) -or (Test-Path -LiteralPath $startup) -or (Test-Path -LiteralPath $registry)) {
-    throw 'Inno did not remove every owned executable, startup launcher and registration.'
+  if((Test-Path -LiteralPath $runtime) -or (Test-Path -LiteralPath $wrapper) -or
+     (Test-Path -LiteralPath $startup) -or (Test-Path -LiteralPath $registry)) {
+    throw 'Inno did not remove every owned executable, startup file and registration.'
   }
   foreach($record in @($snapshot.files)) {
     if(-not(Test-Path -LiteralPath $record.path -PathType Leaf) -or

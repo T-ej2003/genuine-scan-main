@@ -104,7 +104,8 @@ BEGIN
       p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
       p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
       p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
-      INTO STRICT printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
+      INTO printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     scope_licensee:=printer_row."licenseeId";
     scope_org:=printer_row."orgId";
     IF actor.role='LICENSEE_ADMIN' AND (
