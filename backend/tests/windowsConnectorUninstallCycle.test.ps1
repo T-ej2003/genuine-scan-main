@@ -81,10 +81,14 @@ try {
   $parseErrors=$null
   $ast=[Management.Automation.Language.Parser]::ParseFile($installSource,[ref]$null,[ref]$parseErrors)
   if(@($parseErrors).Count) {throw 'Installer source has a PowerShell parse error.'}
+  $preflight=@($ast.FindAll({param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Assert-RetainedReinstallFence'},$true))
   $release=@($ast.FindAll({param($node)
     $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
     $node.Name -eq 'Complete-RetainedReinstallFence'},$true))
-  if($release.Count -ne 1) {throw 'Retained reinstall fence release function was not found.'}
+  if($preflight.Count -ne 1 -or $release.Count -ne 1) {throw 'Retained reinstall fence functions were not found.'}
+  Invoke-Expression $preflight[0].Extent.Text
   Invoke-Expression $release[0].Extent.Text
   $RetainedReinstall=$true;$script:RetainedStateFile=$state
   $LifecycleDir=Join-Path $env:LOCALAPPDATA 'MSCQR\lifecycle'
@@ -104,29 +108,39 @@ try {
   function Assert-PostInstallProcessState {}
   function Write-UpgradeLog {param($Message)}
   $verified=[pscustomobject]@{setupVerification=[pscustomobject]@{state='READY'}}
+  Assert-RetainedReinstallFence
+  if(-not $script:RetainedFencePresent) {throw 'Completed uninstall fence was not detected before runtime start.'}
+  # The runtime may repair the selected printer in state while serving /status.
+  # Preservation is verified before startup, then the verified fence is released.
+  [IO.File]::WriteAllText($state,'{"agentId":"synthetic-only","selectedPrinter":"repaired"}')
   $result=Complete-RetainedReinstallFence -VerifiedStatus $verified
   $marker=Join-Path (Split-Path $state) 'maintenance-fence.json'
   if($result.setupVerification.state -ne 'READY' -or $script:stopCount -ne 1 -or $script:startCount -ne 1 -or
      (Test-Path -LiteralPath $marker) -or (Test-Path -LiteralPath "$marker.release-pending")) {
     throw 'Retained reinstall did not complete verified fence release.'
   }
-  for($i=0;$i -lt $preserved.Count;$i++) {
+  if(([IO.File]::ReadAllText($state)) -cne '{"agentId":"synthetic-only","selectedPrinter":"repaired"}') {
+    throw 'Reinstall discarded the runtime state repair.'
+  }
+  for($i=1;$i -lt $preserved.Count;$i++) {
     if((Get-FileHash -LiteralPath $preserved[$i] -Algorithm SHA256).Hash -ne $hashes[$i]) {
       throw "Reinstall changed preserved state: $($preserved[$i])"
     }
   }
+  [IO.File]::WriteAllText($state,'{"agentId":"synthetic-only"}')
   [IO.File]::WriteAllText($marker,'{"version":1,"state":"FENCED"}')
   [IO.File]::WriteAllText($script:journal,'tampered synthetic journal')
-  try {Complete-RetainedReinstallFence -VerifiedStatus $verified | Out-Null;throw 'Tampered journal was accepted.'}
+  try {Assert-RetainedReinstallFence;throw 'Tampered journal was accepted.'}
   catch {if($_.Exception.Message -ne 'Retained identity, configuration or journal changed since uninstall.'){throw}}
   if($script:stopCount -ne 1 -or -not (Test-Path -LiteralPath $marker)) {throw 'Tampered journal changed the fence.'}
   [IO.File]::WriteAllText($script:journal,'{"journalVersion":3,"state":"ATTEMPT_RESERVED"}')
   [IO.File]::WriteAllText($marker,'{"version":1,"state":"FENCED","createdAt":"foreign"}')
-  try {Complete-RetainedReinstallFence -VerifiedStatus $verified | Out-Null;throw 'Foreign fence was accepted.'}
+  try {Assert-RetainedReinstallFence;throw 'Foreign fence was accepted.'}
   catch {if($_.Exception.Message -ne 'Retained fence is not bound to this completed uninstall.'){throw}}
   if($script:stopCount -ne 1) {throw 'Foreign fence reached runtime shutdown.'}
   [IO.File]::WriteAllText($marker,'{"version":1,"state":"FENCED"}')
   $script:failRestart=$true
+  Assert-RetainedReinstallFence
   try {Complete-RetainedReinstallFence -VerifiedStatus $verified | Out-Null;throw 'Failed restart was accepted.'}
   catch {if($_.Exception.Message -ne 'synthetic restart failure'){throw}}
   if(-not (Test-Path -LiteralPath $marker) -or (Test-Path -LiteralPath "$marker.release-pending")) {

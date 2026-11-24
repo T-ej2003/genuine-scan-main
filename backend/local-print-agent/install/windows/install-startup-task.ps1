@@ -615,16 +615,16 @@ function Assert-PostInstallProcessState {
   }
 }
 
-function Complete-RetainedReinstallFence {
-  param($VerifiedStatus)
-  if (-not $RetainedReinstall) { return $VerifiedStatus }
+function Assert-RetainedReinstallFence {
+  if (-not $RetainedReinstall) { return }
+  $script:RetainedFencePresent = $false
   if ([string]::IsNullOrWhiteSpace([string]$script:RetainedStateFile)) { throw 'Retained connector state path was not verified.' }
   $marker = Join-Path ([IO.Path]::GetDirectoryName($script:RetainedStateFile)) 'maintenance-fence.json'
   $pending = "$marker.release-pending"
   Assert-MscqrPlainPath $marker
   Assert-MscqrPlainPath $pending
   if (Test-Path -LiteralPath $pending) { throw 'Interrupted maintenance fence release requires reviewed recovery.' }
-  if (-not (Test-Path -LiteralPath $marker)) { return $VerifiedStatus }
+  if (-not (Test-Path -LiteralPath $marker)) { return }
   $fence = Read-MscqrJson $marker
   if ($fence.version -ne 1 -or $fence.state -cne 'FENCED') { throw 'Retained maintenance fence is invalid.' }
 
@@ -657,7 +657,21 @@ function Complete-RetainedReinstallFence {
     }
   }
   if (-not $stateRecorded) { throw 'Retained identity is missing from the uninstall preservation record.' }
+  $script:RetainedFenceHash = $snapshot.fenceSha256
+  $script:RetainedFencePresent = $true
+}
 
+function Complete-RetainedReinstallFence {
+  param($VerifiedStatus)
+  if (-not $RetainedReinstall -or -not $script:RetainedFencePresent) { return $VerifiedStatus }
+  $marker = Join-Path ([IO.Path]::GetDirectoryName($script:RetainedStateFile)) 'maintenance-fence.json'
+  $pending = "$marker.release-pending"
+  Assert-MscqrPlainPath $marker
+  Assert-MscqrPlainPath $pending
+  if (-not (Test-Path -LiteralPath $marker -PathType Leaf) -or (Test-Path -LiteralPath $pending) -or
+      (Get-FileHash -LiteralPath $marker -Algorithm SHA256).Hash -ine $script:RetainedFenceHash) {
+    throw 'Retained uninstall fence changed before verified release.'
+  }
   $runtimeHash = (Get-FileHash -LiteralPath $CanonicalAgentExe -Algorithm SHA256).Hash
   Stop-MscqrVerifiedRuntime $CanonicalAgentExe $runtimeHash
   [IO.File]::Move($marker, $pending)
@@ -758,9 +772,8 @@ Remove-LegacyStartupEntries
   $script:InstallStage = 'identity'
   Initialize-AgentIdentity
   if ($RetainedReinstall) {
-    $pendingFence = Join-Path ([IO.Path]::GetDirectoryName($script:RetainedStateFile)) 'maintenance-fence.json.release-pending'
-    Assert-MscqrPlainPath $pendingFence
-    if (Test-Path -LiteralPath $pendingFence) { throw 'Interrupted maintenance fence release requires reviewed recovery.' }
+    $script:InstallStage = 'retained-state-preflight'
+    Assert-RetainedReinstallFence
   }
   $script:InstallStage = 'startup'
   Register-StartupLauncher
