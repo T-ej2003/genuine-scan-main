@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='4eaa9652cba0492f611d289fe5318a3a176535a67c1412f2cf8ac7bcad348adf'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:4eaa9652cba0492f611d289fe5318a3a176535a67c1412f2cf8ac7bcad348adf'
+    AND source_contract_sha256='86123f390b71b2015e4f4969fb22375f8d61c88c288faf020aa3dca9dd36c82f'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:86123f390b71b2015e4f4969fb22375f8d61c88c288faf020aa3dca9dd36c82f'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:4eaa9652cba0492f611d289fe5318a3a176535a67c1412f2cf8ac7bcad348adf')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:86123f390b71b2015e4f4969fb22375f8d61c88c288faf020aa3dca9dd36c82f')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8992,7 +8992,8 @@ BEGIN
       p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
       p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
       p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
-      INTO STRICT printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
+      INTO printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     scope_licensee:=printer_row."licenseeId";
     scope_org:=printer_row."orgId";
     IF actor.role='LICENSEE_ADMIN' AND (
