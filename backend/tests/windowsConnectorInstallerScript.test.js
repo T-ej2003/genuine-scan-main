@@ -248,6 +248,19 @@ const run = async () => {
       installerTemplate.includes("-Operation Complete"),
     "Windows removal must finish safety preflight before Inno deletes owned files and verify preservation afterwards"
   );
+  const uninstallInitialization = installerTemplate.split("function InitializeUninstall(): Boolean;")[1]
+    ?.split("procedure CurUninstallStepChanged")[0] || "";
+  const uninstallStart = installerTemplate.split("if CurUninstallStep = usUninstall then begin")[1]
+    ?.split("if CurUninstallStep <> usPostUninstall then exit;")[0] || "";
+  assert(/Result := True;/.test(uninstallInitialization),
+    "Uninstall initialization must permit the standard Inno confirmation");
+  assert(!/CopyFile|Exec\(|-Operation Preflight|UninstallPrepared := True/.test(uninstallInitialization),
+    "Declining the Inno uninstall confirmation must leave the installed connector usable");
+  assert(uninstallStart.indexOf('CopyFile(ScriptPath, CompletionCopy') >= 0 &&
+    uninstallStart.indexOf('-Operation Preflight') > uninstallStart.indexOf('CopyFile(ScriptPath, CompletionCopy') &&
+    uninstallStart.indexOf('UninstallPrepared := True') > uninstallStart.indexOf('-Operation Preflight') &&
+    uninstallStart.includes('RaiseException('),
+  "Uninstall preflight must start only after the user confirms removal and fail before Inno deletes files");
   assert(installScript.includes("setupVerification"), "Canonical Windows installer should inspect setupVerification from the local agent status payload");
   assert(
     installScript.includes('state -eq "READY"'),

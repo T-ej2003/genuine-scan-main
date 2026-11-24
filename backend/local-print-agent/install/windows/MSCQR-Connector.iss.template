@@ -76,33 +76,32 @@ begin
 end;
 
 function InitializeUninstall(): Boolean;
-var Code: Integer; Params, ScriptPath, CompletionCopy: String;
 begin
-  Result := False;
-  ScriptPath := ExpandConstant('{app}\uninstall-startup-task.ps1');
-  CompletionCopy := ExpandConstant('{tmp}\mscqr-uninstall-complete.ps1');
-  if not CopyFile(ScriptPath, CompletionCopy, False) then begin
-    WriteLifecycleFailure('uninstall', 'preflight-copy', 'UNINSTALL_CHECK_COPY_FAILED',
-      'Removal could not preserve the completion check. No application files were removed.', True, True);
-    if not UninstallSilent then MsgBox('Connector removal could not preserve its completion check. No application files were removed.', mbError, MB_OK);
-    exit;
-  end;
-  Params := '-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "' + ScriptPath + '" -Operation Preflight';
-  Code := -1;
-  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
-    ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code);
-  Result := Result and (Code = 0);
-  UninstallPrepared := Result;
-  if not Result then
-    WriteLifecycleFailure('uninstall', 'preflight', 'UNINSTALL_PREFLIGHT_FAILED',
-      'Removal stopped before deleting files. Review the local uninstall result.', True, True);
-  if not Result and not UninstallSilent then
-    MsgBox('Connector removal stopped before deleting files. Review %LOCALAPPDATA%\MSCQR\lifecycle\uninstall-result.json and uninstall.log.', mbError, MB_OK);
+  Result := True;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var Code: Integer; Params: String;
+var Code: Integer; Params, ScriptPath, CompletionCopy: String;
 begin
+  if CurUninstallStep = usUninstall then begin
+    ScriptPath := ExpandConstant('{app}\uninstall-startup-task.ps1');
+    CompletionCopy := ExpandConstant('{tmp}\mscqr-uninstall-complete.ps1');
+    if not CopyFile(ScriptPath, CompletionCopy, False) then begin
+      WriteLifecycleFailure('uninstall', 'preflight-copy', 'UNINSTALL_CHECK_COPY_FAILED',
+        'Removal could not preserve the completion check. No application files were removed.', True, True);
+      RaiseException('Connector removal could not preserve its completion check. No application files were removed.');
+    end;
+    Params := '-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "' + ScriptPath + '" -Operation Preflight';
+    Code := -1;
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then begin
+      WriteLifecycleFailure('uninstall', 'preflight', 'UNINSTALL_PREFLIGHT_FAILED',
+        'Removal stopped before Inno deleted files. The connector may remain fenced; review the local uninstall result.', False, True);
+      RaiseException('Connector removal stopped before Inno deleted files. Review %LOCALAPPDATA%\MSCQR\lifecycle\uninstall-result.json and uninstall.log.');
+    end;
+    UninstallPrepared := True;
+    exit;
+  end;
   if CurUninstallStep <> usPostUninstall then exit;
   Params := '-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "' +
     ExpandConstant('{tmp}\mscqr-uninstall-complete.ps1') + '" -Operation Complete';
