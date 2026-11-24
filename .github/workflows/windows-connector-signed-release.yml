@@ -28,11 +28,19 @@ on:
         default: "https://mscqr.com"
         type: string
       signed_candidate_run_id:
-        description: "Successful signed-candidate run on this exact protected-main commit (certification modes only)."
+        description: "Successful signed-candidate run on protected main (certification modes only)."
+        required: false
+        type: string
+      signed_candidate_source_sha:
+        description: "Exact protected-main source commit of the signed candidate (certification modes only)."
         required: false
         type: string
       signed_installer_sha256:
         description: "SHA-256 of that run's signed Windows installer (certification modes only)."
+        required: false
+        type: string
+      signed_runtime_sha256:
+        description: "SHA-256 of the runtime inside the signed installer (certification modes only)."
         required: false
         type: string
       upgrade_source_version:
@@ -493,23 +501,54 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Install pinned GitHub CLI for attestation verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'gh_2.105.0_windows_amd64.zip'
+          Invoke-WebRequest 'https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_windows_amd64.zip' -OutFile $zip
+          $expected = '8813a72c899900afaa10e3fec8fbc64b908c89dbfe837e95ed2fa500fc140627'
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) {
+            throw 'Pinned GitHub CLI release SHA-256 mismatch.'
+          }
+          $cli = Join-Path $env:RUNNER_TEMP 'gh_2.105.0'
+          Expand-Archive -LiteralPath $zip -DestinationPath $cli
+          if (-not (Test-Path -LiteralPath (Join-Path $cli 'bin/gh.exe') -PathType Leaf)) {
+            throw 'Pinned GitHub CLI release is missing gh.exe.'
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value (Join-Path $cli 'bin')
       - name: Authenticate and download the existing signed candidate
         id: candidate
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_SIGNED_CANDIDATE_RUN_ID: ${{ inputs.signed_candidate_run_id }}
+          INPUT_SIGNED_CANDIDATE_SOURCE_SHA: ${{ inputs.signed_candidate_source_sha }}
           INPUT_SIGNED_INSTALLER_SHA256: ${{ inputs.signed_installer_sha256 }}
+          INPUT_SIGNED_RUNTIME_SHA256: ${{ inputs.signed_runtime_sha256 }}
         run: |
           if ($env:GITHUB_REF -cne 'refs/heads/main') { throw 'Fresh-install certification requires protected main.' }
-          $source = $env:GITHUB_SHA
+          $source = "$env:INPUT_SIGNED_CANDIDATE_SOURCE_SHA".Trim().ToLowerInvariant()
           $expected = "$env:INPUT_SIGNED_INSTALLER_SHA256".Trim().ToLowerInvariant()
+          $expectedRuntime = "$env:INPUT_SIGNED_RUNTIME_SHA256".Trim().ToLowerInvariant()
           if ($env:INPUT_SIGNED_CANDIDATE_RUN_ID -cnotmatch '^[1-9][0-9]{0,17}$' -or
-              $expected -cnotmatch '^[0-9a-f]{64}$') { throw 'Exact signed run ID and installer SHA-256 are required.' }
+              $source -cnotmatch '^[0-9a-f]{40}$' -or $expected -cnotmatch '^[0-9a-f]{64}$' -or
+              $expectedRuntime -cnotmatch '^[0-9a-f]{64}$') { throw 'Exact signed source, run ID, installer and runtime SHA-256 are required.' }
           $runId = [long]$env:INPUT_SIGNED_CANDIDATE_RUN_ID
+          if ((git rev-parse HEAD) -cne $env:GITHUB_SHA -or $LASTEXITCODE -ne 0) { throw 'Checked-out certification source mismatch.' }
+          git merge-base --is-ancestor $source $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Signed source is not an ancestor of protected main.' }
           $versionSource = Get-Content backend/src/local-print-agent/version.ts -Raw
           $version = [regex]::Match($versionSource, 'LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"(\d+\.\d+\.\d+(?:\.\d+)?)"').Groups[1].Value
           if (-not $version) { throw 'Release source version is unavailable.' }
+          $signedVersionSource = git show "${source}:backend/src/local-print-agent/version.ts"
+          if ($LASTEXITCODE -ne 0 -or
+              [regex]::Match(($signedVersionSource -join "`n"), 'LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"(\d+\.\d+\.\d+(?:\.\d+)?)"').Groups[1].Value -cne $version) {
+            throw 'Signed candidate source version differs from certification source.'
+          }
+          if ('${{ inputs.execution_mode }}' -ceq 'publish_fresh_install' -and $source -cne $env:GITHUB_SHA) {
+            throw 'Fresh-install publication requires an exact-current-main signed candidate.'
+          }
           $name = "mscqr-windows-candidate-$version-$source"
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Signed candidate run lookup failed.' }
@@ -523,13 +562,18 @@ jobs:
               $run.event -cne 'workflow_dispatch' -or $run.conclusion -cne 'success' -or
               $run.head_branch -cne 'main' -or $run.head_sha -cne $source -or
               $matching.Count -ne 1) { throw 'Signed candidate provenance mismatch.' }
-          if ((git rev-parse HEAD) -cne $source -or $LASTEXITCODE -ne 0) { throw 'Checked-out source mismatch.' }
           New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\candidate" | Out-Null
           gh run download $runId --repo $env:GITHUB_REPOSITORY --name $name --dir "$env:RUNNER_TEMP\candidate"
           if ($LASTEXITCODE -ne 0) { throw 'Signed candidate download failed.' }
           $installer = "$env:RUNNER_TEMP\candidate\MSCQR-Connector-Windows-$version.exe"
           if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw 'Signed installer digest mismatch.' }
-          $attestations = @(gh attestation verify $installer --repo $env:GITHUB_REPOSITORY --format json | ConvertFrom-Json)
+          $ghVersion = @(gh --version)
+          if ($LASTEXITCODE -ne 0 -or $ghVersion.Count -eq 0 -or
+              $ghVersion[0] -notmatch '^gh version (\d+\.\d+\.\d+)' -or
+              [version]$Matches[1] -lt [version]'2.102.0') { throw 'GitHub CLI 2.102.0 or newer is required.' }
+          $attestations = @(gh attestation verify $installer --repo $env:GITHUB_REPOSITORY `
+            --signer-workflow 'T-ej2003/genuine-scan-main/.github/workflows/windows-connector-signed-release.yml' `
+            --source-digest $source --predicate-type 'https://slsa.dev/provenance/v1' --format json | ConvertFrom-Json)
           if ($LASTEXITCODE -ne 0 -or -not @($attestations | Where-Object {
             $_.verificationResult.statement.predicateType -ceq 'https://slsa.dev/provenance/v1' -and
             $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.repository -ceq "https://github.com/$env:GITHUB_REPOSITORY" -and
@@ -546,14 +590,24 @@ jobs:
           }
           "MSCQR_SIGNED_INSTALLER=$installer" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "MSCQR_TARGET_VERSION=$version" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "MSCQR_SIGNED_SOURCE_SHA=$source" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "MSCQR_EXPECTED_INSTALLER_SHA256=$expected" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "MSCQR_EXPECTED_RUNTIME_SHA256=$expectedRuntime" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "target_version=$version" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Certify first installation without maintenance authorization
         shell: pwsh
         run: |
           $installRoot = Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
-          if ((Test-Path $installRoot) -or (Test-Path (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')) -or
-              (Test-Path (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json'))) {
+          $stateFile = Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json'
+          $journal = Join-Path $env:USERPROFILE '.mscqr\dispatch-journal'
+          $startup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
+          $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1'
+          if ((Test-Path $installRoot) -or (Test-Path $stateFile) -or
+              (Test-Path (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json')) -or
+              (Test-Path $journal) -or (Test-Path $startup) -or (Test-Path $uninstallKey) -or
+              @(Get-CimInstance Win32_Process | Where-Object Name -ceq 'mscqr-local-print-agent.exe').Count -ne 0 -or
+              @(Get-NetTCPConnection -LocalPort 17866 -State Listen -ErrorAction SilentlyContinue).Count -ne 0) {
             throw 'Runner is not a clean first-install host.'
           }
           $setupLog = Join-Path $env:RUNNER_TEMP 'mscqr-fresh-install.log'
@@ -570,7 +624,6 @@ jobs:
             throw "Fresh installer failed with exit $($setup.ExitCode)."
           }
           $result = Get-Content (Join-Path $installRoot 'install-result.json') -Raw | ConvertFrom-Json
-          $startup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
           $wrapper = Join-Path $installRoot 'bin\start-local-print-agent.cmd'
           if (-not (Test-Path -LiteralPath $startup) -or -not (Test-Path -LiteralPath $wrapper) -or
               -not (Get-Content -LiteralPath $startup -Raw).Contains($wrapper)) {
@@ -582,7 +635,61 @@ jobs:
               $status.protocolVersion -cne 'local-agent-direct-v2' -or -not $status.agentId -or -not $status.deviceFingerprint) {
             throw 'Fresh installer did not establish the verified source runtime.'
           }
+          $runtime = Join-Path $installRoot 'bin\mscqr-local-print-agent.exe'
+          $runtimeHash = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+          $signature = Get-AuthenticodeSignature -LiteralPath $runtime
+          if ($runtimeHash -cne $env:MSCQR_EXPECTED_RUNTIME_SHA256 -or $signature.Status -cne 'Valid' -or
+              -not $signature.TimeStamperCertificate -or
+              $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne 'L&D Health Ltd') {
+            throw 'Installed runtime digest or Authenticode identity differs from the signed candidate.'
+          }
+          $identity = & $runtime --validate-state | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $identity.ok -or -not (Test-Path -LiteralPath $stateFile) -or
+              $identity.agentId -cne $status.agentId -or $identity.deviceFingerprint -cne $status.deviceFingerprint -or
+              -not $identity.publicKeySha256 -or -not $identity.stateSha256) {
+            throw 'Fresh installation did not create a valid persistent device identity.'
+          }
+          $identityAgain = & $runtime --validate-state | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $identityAgain.stateSha256 -cne $identity.stateSha256 -or
+              $identityAgain.publicKeySha256 -cne $identity.publicKeySha256) {
+            throw 'Fresh device identity changed between independent runtime reads.'
+          }
+          if (-not (Test-Path -LiteralPath $setupLog) -or (Get-Item -LiteralPath $setupLog).Length -eq 0 -or
+              ((Test-Path -LiteralPath $journal) -and @(Get-ChildItem -LiteralPath $journal -File).Count -ne 0)) {
+            throw 'Fresh installer logging or empty dispatch journal verification failed.'
+          }
+          $upgradeRoot = Join-Path $env:LOCALAPPDATA 'MSCQR\connector-upgrade'
+          if ((Test-Path -LiteralPath (Join-Path $upgradeRoot 'authorization.json')) -or
+              (Test-Path -LiteralPath (Join-Path $upgradeRoot 'transaction.json')) -or
+              (Test-Path -LiteralPath (Join-Path (Split-Path $stateFile) 'maintenance-fence.json'))) {
+            throw 'Fresh installation left upgrade authorization or maintenance state.'
+          }
+          $report = [ordered]@{
+            scope = 'fresh-install-only-disposable'
+            certificationSourceSha = $env:GITHUB_SHA
+            signedSourceSha = $env:MSCQR_SIGNED_SOURCE_SHA
+            installerSha256 = $env:MSCQR_EXPECTED_INSTALLER_SHA256
+            installedRuntimeSha256 = $runtimeHash
+            runtimeAuthenticode = [string]$signature.Status
+            publisher = 'L&D Health Ltd'
+            installedVersion = $status.buildVersion
+            startupRegistered = $true
+            newDeviceIdentity = $true
+            persistentIdentity = $true
+            installerLogSha256 = (Get-FileHash -LiteralPath $setupLog -Algorithm SHA256).Hash.ToLowerInvariant()
+            journalRecordCount = 0
+            upgradeArtifactsAbsent = $true
+            printerReadiness = [string]$result.state
+          }
+          $report | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'fresh-install-certification.json') -Encoding utf8
           Write-Host 'PASS: signed fresh installation without MSCQRAUTH; printer readiness remains a separate check.'
+
+      - name: Upload fresh-install certification evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: mscqr-fresh-install-certification-${{ steps.candidate.outputs.target_version }}-${{ inputs.signed_candidate_run_id }}
+          path: ${{ runner.temp }}/fresh-install-certification.json
+          if-no-files-found: error
 
       - uses: actions/setup-node@v6
         if: inputs.execution_mode == 'publish_fresh_install'
