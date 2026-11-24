@@ -81,11 +81,14 @@ function Get-MscqrInstallationClassification([string]$UserProfile,[string]$LiveD
   $registered=Test-Path -LiteralPath $registry
   $modern=Join-Path $UserProfile '.mscqr\local-print-agent-state.json'
   $legacy=Join-Path $UserProfile '.authenticqr\local-print-agent-state.json'
-  $identityPresent=(Test-Path -LiteralPath $modern) -or (Test-Path -LiteralPath $legacy)
   $environment=Join-Path $live 'agent.env'
+  # A configured custom state path is validated by the existing discovery
+  # function; the configuration file is sufficient to enter that path.
+  $identityCandidatePresent=(Test-Path -LiteralPath $modern) -or (Test-Path -LiteralPath $legacy) -or
+    (Test-Path -LiteralPath $environment)
   $journal=Join-Path $UserProfile '.mscqr\dispatch-journal'
   if($present.Count -eq $required.Count -and $registered) {
-    if(-not $identityPresent) {throw 'INCONSISTENT_INSTALLATION: installed connector identity is missing.'}
+    if(-not $identityCandidatePresent) {throw 'INCONSISTENT_INSTALLATION: installed connector identity is missing.'}
     Get-MscqrUninstallSnapshot $live | Out-Null
     $discovery=Resolve-MscqrUpgradeState $UserProfile $live $Candidate
     Get-MscqrDispatchJournalFiles $journal | Out-Null
@@ -103,13 +106,13 @@ function Get-MscqrInstallationClassification([string]$UserProfile,[string]$LiveD
     }
   }
   Assert-MscqrStoppedInstallation
-  if($identityPresent) {
+  if($identityCandidatePresent) {
     $discovery=Resolve-MscqrUpgradeState $UserProfile $live $Candidate
     if(Test-Path -LiteralPath $environment) {Assert-MscqrPlainPath $environment}
     Get-MscqrDispatchJournalFiles $journal | Out-Null
     return 'RETAINED_STATE_REINSTALL'
   }
-  if((Test-Path -LiteralPath $environment) -or (Test-Path -LiteralPath $journal)) {
+  if(Test-Path -LiteralPath $journal) {
     throw 'INCONSISTENT_INSTALLATION: retained configuration or journal exists without a valid identity.'
   }
   return 'CLEAN_INSTALL'

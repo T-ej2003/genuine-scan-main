@@ -16,7 +16,13 @@ function Get-MscqrUninstallSnapshot {param($Live) return @([pscustomobject]@{nam
 function Resolve-MscqrUpgradeState {
   param($UserProfile,$LiveDirectory,$Candidate)
   if($script:corruptState) {throw 'Synthetic retained identity is invalid.'}
-  return [pscustomobject]@{selectedPath=(Join-Path $UserProfile '.mscqr\local-print-agent-state.json')}
+  $configured=Join-Path $UserProfile 'custom-connector-state.json'
+  if($script:customState -and (Test-Path -LiteralPath $configured -PathType Leaf)) {
+    return [pscustomobject]@{selectedPath=$configured}
+  }
+  $modern=Join-Path $UserProfile '.mscqr\local-print-agent-state.json'
+  if(-not (Test-Path -LiteralPath $modern -PathType Leaf)) {throw 'Synthetic connector identity is missing.'}
+  return [pscustomobject]@{selectedPath=$modern}
 }
 function Get-MscqrDispatchJournalFiles {param($Directory) return @()}
 function Assert-MscqrStoppedInstallation {if($script:running){throw 'Synthetic connector is running.'}}
@@ -25,6 +31,9 @@ try {
     @{name='clean';expected='CLEAN_INSTALL'},
     @{name='retained';identity=$true;config=$true;expected='RETAINED_STATE_REINSTALL'},
     @{name='installed';identity=$true;complete=$true;registry=$true;expected='EXISTING_INSTALL_UPGRADE'},
+    @{name='custom installed';custom=$true;config=$true;complete=$true;registry=$true;expected='EXISTING_INSTALL_UPGRADE'},
+    @{name='custom retained';custom=$true;config=$true;expected='RETAINED_STATE_REINSTALL'},
+    @{name='config without identity';config=$true;expected='INCONSISTENT_INSTALLATION'},
     @{name='partial';identity=$true;partial=$true;expected='INCONSISTENT_INSTALLATION'},
     @{name='orphan journal';journal=$true;expected='INCONSISTENT_INSTALLATION'},
     @{name='orphan payload';orphan=$true;expected='INCONSISTENT_INSTALLATION'},
@@ -38,6 +47,7 @@ try {
     $env:PRINT_AGENT_STATE_FILE=$null
     $script:registryPresent=[bool]$case.registry
     $script:corruptState=[bool]$case.corrupt
+    $script:customState=[bool]$case.custom
     $script:running=[bool]$case.running
     New-Item -ItemType Directory -Path $live,$env:APPDATA -Force | Out-Null
     if($case.identity) {
@@ -45,7 +55,12 @@ try {
       New-Item -ItemType Directory -Path (Split-Path $state) -Force | Out-Null
       [IO.File]::WriteAllText($state,'{"agentId":"synthetic-only"}')
     }
-    if($case.config) {[IO.File]::WriteAllText((Join-Path $live 'agent.env'),'PRINT_AGENT_STATE_FILE=synthetic')}
+    if($case.custom) {[IO.File]::WriteAllText((Join-Path $profile 'custom-connector-state.json'),'synthetic custom identity')}
+    if($case.config) {
+      $configuration=if($case.custom) {"PRINT_AGENT_STATE_FILE=$(Join-Path $profile 'custom-connector-state.json')"}
+        else {'PRINT_GATEWAY_BACKEND_URL=https://isolated.example.invalid'}
+      [IO.File]::WriteAllText((Join-Path $live 'agent.env'),$configuration)
+    }
     if($case.journal) {New-Item -ItemType Directory -Path (Join-Path $profile '.mscqr\dispatch-journal') -Force | Out-Null}
     if($case.orphan) {[IO.File]::WriteAllText((Join-Path $live 'unknown.exe'),'synthetic fixture')}
     if($case.complete) {
