@@ -2521,6 +2521,8 @@ async function main() {
       '${ids.orgA}','${ids.licenseeA}','${ids.maker}','${ids.maker}',true,now());`);
   const retireSql=(capability)=>`SELECT app_rls.printing_printer_administration(
     '${capability}','printing-printer-admin','${requestId()}','RETIRE','${ids.retirementPrinter}','{}'::jsonb)`;
+  const retirementFenceSql=`SELECT app_rls.printing_printer_administration(
+    '${caps.maker}','printing-printer-admin','${requestId()}','MAINTENANCE_REQUEST','${ids.retirementPrinter}','{}'::jsonb)`;
   boundaryDenied(app,retireSql(caps.outsider));
   psql(admin, `UPDATE public."User" SET role='MANUFACTURER_ADMIN' WHERE id='${ids.outsider}'`);
   boundaryDenied(app,retireSql(caps.outsider));
@@ -2528,6 +2530,28 @@ async function main() {
   boundaryDenied(app, `SELECT app_rls.printing_printer_administration(
     '${caps.maker}','printing-printer-admin','${requestId()}','RETIRE',
     '50000000-0000-4000-8000-000000009999','{}'::jsonb)`,/PRINTING_BOUNDARY_DENIED/);
+  denied(app,retireSql(caps.maker),/CONNECTOR_RETIREMENT_FENCE_REQUIRED/);
+  assert.equal(json(app,retirementFenceSql).state,'DISPATCH_FENCED');
+  const inFlightJobId=randomUUID(), inFlightSessionId=randomUUID();
+  const inFlightQrId=randomUUID(), inFlightItemId=randomUUID();
+  psql(admin, `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")
+    VALUES('${inFlightJobId}','${ids.raceBatch}','${ids.maker}','${ids.retirementSiblingPrinter}','SENT','LOCAL_AGENT','SENT_TO_PRINTER',1,now());
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+    VALUES('${inFlightQrId}','synthetic-retirement-${inFlightQrId}','${ids.licenseeA}','${ids.raceBatch}','${inFlightJobId}','ALLOCATED',now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","issuedItems","updatedAt")
+    VALUES('${inFlightSessionId}','${inFlightJobId}','${ids.raceBatch}','${ids.maker}','${ids.retirementRegistration}','${ids.retirementSiblingPrinter}','ACTIVE',1,1,now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","issuedAt","updatedAt")
+    VALUES('${inFlightItemId}','${inFlightSessionId}','${inFlightQrId}','synthetic-retirement','ISSUED','SENT_TO_PRINTER',now(),now());`);
+  denied(app,retireSql(caps.maker),/CONNECTOR_RETIREMENT_RECONCILIATION_REQUIRED/);
+  psql(admin, `UPDATE public."PrintItem" SET state='AGENT_ACKED',"pipelineState"='PRINTER_ACKNOWLEDGED',
+    "agentAckedAt"=now() WHERE id='${inFlightItemId}'`);
+  denied(app,retireSql(caps.maker),/CONNECTOR_RETIREMENT_RECONCILIATION_REQUIRED/);
+  assert.equal(psql(admin,`SELECT "trustStatus"::text FROM public."PrinterRegistration"
+    WHERE id='${ids.retirementRegistration}'`),'TRUSTED');
+  assert.equal(psql(admin,`SELECT "isActive"::text FROM public."Printer"
+    WHERE id='${ids.retirementSiblingPrinter}'`),'true');
+  psql(admin, `UPDATE public."PrintItem" SET state='FROZEN',"pipelineState"='NEEDS_OPERATOR_ACTION'
+    WHERE id='${inFlightItemId}'`);
   const historicalItems=psql(admin,`SELECT count(*) FROM public."PrintItem"`);
   assert.deepEqual(json(app,retireSql(caps.maker)),{
     printerId:ids.retirementPrinter,registrationId:ids.retirementRegistration,
@@ -2541,6 +2565,7 @@ async function main() {
   assert.equal(psql(admin,`SELECT "isActive"::text FROM public."Printer"
     WHERE id='${ids.retirementSiblingPrinter}'`),'false');
   assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem"`),historicalItems);
+  assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${inFlightItemId}'`),'FROZEN');
   denied(app,`SELECT app_rls.printing_connector_event('${ids.retirementRegistration}',
     'retirement-fixture-agent','retirement-fixture-device','retirement_claim_nonce',now()::timestamp,
     '${requestId()}','CLAIM',NULL,NULL,'${ids.retirementPrinter}',NULL,NULL,'{}'::jsonb)`,

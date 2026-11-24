@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='4904ce4423774e3e4076b99604d23be4af774d66d399c1d624a9ed86462ef5d1'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:4904ce4423774e3e4076b99604d23be4af774d66d399c1d624a9ed86462ef5d1'
+    AND source_contract_sha256='780fdd12db2abeeb89295e2a69623cb2c2389207a84ed7c02dccdbc40889a183'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:780fdd12db2abeeb89295e2a69623cb2c2389207a84ed7c02dccdbc40889a183'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:4904ce4423774e3e4076b99604d23be4af774d66d399c1d624a9ed86462ef5d1')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:780fdd12db2abeeb89295e2a69623cb2c2389207a84ed7c02dccdbc40889a183')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8957,6 +8957,7 @@ DECLARE
   maintenance_snapshot jsonb;
   maintenance_binding jsonb;
   maintenance_registration record;
+  retirement_in_flight boolean;
 BEGIN
   IF p_purpose<>'printing-printer-admin'
      OR p_operation NOT IN (
@@ -9291,10 +9292,30 @@ BEGIN
          WHERE p."printerRegistrationId"=maintenance_registration.id AND p."isActive")
     THEN RETURN jsonb_build_object('printerId',printer_row.id,'registrationId',maintenance_registration.id,
       'retired',true,'idempotent',true,'dispatchFenced',true); END IF;
-    IF maintenance_snapshot->>'state'<>'ACTIVE'
-    THEN RAISE EXCEPTION 'CONNECTOR_MAINTENANCE_FENCED' USING ERRCODE='55000'; END IF;
-    PERFORM app_rls.printing_maintenance_gate(maintenance_scope,'REQUEST',actor."userId",
-      jsonb_build_object('requestId',p_request_id,'printerId',printer_row.id));
+    IF maintenance_snapshot->>'state'<>'DISPATCH_FENCED'
+       OR maintenance_snapshot->>'requestedBy' IS DISTINCT FROM actor."userId"
+       OR maintenance_snapshot ? 'upgrade'
+    THEN RAISE EXCEPTION 'CONNECTOR_RETIREMENT_FENCE_REQUIRED' USING ERRCODE='55000'; END IF;
+    SELECT array_agg(p.id ORDER BY p.id) INTO maintenance_printers FROM public."Printer" p
+      WHERE p."printerRegistrationId"=maintenance_registration.id
+        AND p."assignedUserId"=actor."userId"
+        AND p."orgId" IS NOT DISTINCT FROM scope_org
+        AND p."licenseeId" IS NOT DISTINCT FROM scope_licensee;
+    IF maintenance_printers IS NULL OR NOT printer_row.id=ANY(maintenance_printers)
+    THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    PERFORM set_config('app.printing_maintenance_printers',to_json(maintenance_printers)::text,true),
+            set_config('app.printing_operation','printing-printer-admin-maintenance_inventory',true);
+    SELECT EXISTS (SELECT 1 FROM public."PrintItem" pi
+      JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+      WHERE ps."printerId"=ANY(maintenance_printers) AND pi.state IN ('ISSUED','AGENT_ACKED'))
+      INTO retirement_in_flight;
+    PERFORM set_config('app.printing_operation','printing-printer-admin-retire',true);
+    IF retirement_in_flight OR EXISTS (
+      SELECT 1 FROM jsonb_each(coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb)) lease
+      WHERE lease.value->>'state'='ACCEPTED') OR EXISTS (
+      SELECT 1 FROM public."Printer" p WHERE p.id=ANY(maintenance_printers)
+        AND p.metadata->'pendingLocalAgentTestLabel'->>'status' IN ('CLAIMED','ACKED'))
+    THEN RAISE EXCEPTION 'CONNECTOR_RETIREMENT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
     UPDATE public."PrinterRegistration" SET "trustStatus"='REVOKED',"revokedAt"=coalesce("revokedAt",now_at),
       "trustReason"='Manufacturer retired connector',"updatedAt"=now_at
       WHERE id=maintenance_registration.id;
