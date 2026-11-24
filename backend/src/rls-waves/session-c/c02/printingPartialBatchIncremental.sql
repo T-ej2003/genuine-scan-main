@@ -291,7 +291,7 @@ BEGIN
   VALUES(event_id,job_row."batchId",job_row.id,qr_row.id,'SAMPLE_SCAN_PASSED',actor."userId",
     coalesce(p_evidence,'{}'::jsonb)||jsonb_build_object('requestId',p_request_id),now_at);
   SELECT count(DISTINCT e."qrCodeId") INTO actual_count FROM public."PrintAuditEvent" e
-    WHERE e."printJobId"=job_row.id AND e."eventType"='SAMPLE_SCAN_PASSED';
+    WHERE e."printJobId"=job_row.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified');
   IF actual_count>=required_count AND NOT EXISTS (
     SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=job_row."batchId" AND j.status='CONFIRMED'
       AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
@@ -445,8 +445,8 @@ BEGIN
                ELSE 'mscqr_rls_cert_app' END)::regrole AND a.grantor=p.proowner
                AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
            FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a)
-      AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='4ab17111fd0d9234e2886380eecadf95a0f5832af62172bb3f5fec35313fb1b7'
-      AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='0d9b922f8d3dd417afcebf7c7deb87d46ac2422f0dc1cd8908d8571e9e27e26f'
+      AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='41a94c32bc9eda53bb975560b62cd7e98eb98cc3c8fb5593dd6dbda90ad96884'
+      AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='b8c528c3fa290d74e21417172668646e0b1f0e4e5d412ca312d54d6b89c31996'
   ) OR NOT EXISTS (
     SELECT 1 FROM pg_proc p
     WHERE p.oid=to_regprocedure('app_rls.printing_release_batch(text,text,text,text,text,text)')

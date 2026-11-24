@@ -1239,7 +1239,12 @@ async function main() {
   `);
   for (const entry of quorumCases) {
     let result;
-    for (const qr of entry.qrs) {
+    if (entry.key === "labels") {
+      psql(admin, `INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
+        VALUES('${randomUUID()}','${entry.batch}','${entry.job}','${entry.qrs[0].id}',
+          'sample_scan_verified','${ids.maker}','{}'::jsonb,now())`);
+    }
+    for (const qr of entry.qrs.slice(entry.key === "labels" ? 1 : 0)) {
       result = json(app, `SELECT app_rls.printing_record_sample(
         '${caps.maker}','printing-sample-scan','${requestId()}','${entry.job}','${qr.code}','{}'::jsonb
       )`);

@@ -3046,7 +3046,7 @@ BEGIN
   VALUES(event_id,job_row."batchId",job_row.id,qr_row.id,'SAMPLE_SCAN_PASSED',actor."userId",
     coalesce(p_evidence,'{}'::jsonb)||jsonb_build_object('requestId',p_request_id),now_at);
   SELECT count(DISTINCT e."qrCodeId") INTO actual_count FROM public."PrintAuditEvent" e
-    WHERE e."printJobId"=job_row.id AND e."eventType"='SAMPLE_SCAN_PASSED';
+    WHERE e."printJobId"=job_row.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified');
   IF actual_count>=required_count AND NOT EXISTS (
     SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=job_row."batchId" AND j.status='CONFIRMED'
       AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
