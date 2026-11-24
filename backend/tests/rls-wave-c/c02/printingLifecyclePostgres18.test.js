@@ -124,16 +124,24 @@ async function main() {
     COMMIT;`);
   const retirementArtifact = readFileSync(path.join(__dirname,
     "../../../src/rls-waves/session-c/c02/connectorRetirementIncremental.sql"), "utf8");
-  const retirementDefinition = readFileSync(path.join(__dirname,
-    "../../../src/rls-waves/session-c/c02/printingLifecycle.sql"), "utf8")
+  const retirementCanonical = readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/printingLifecycle.sql"), "utf8");
+  const retirementDefinition = retirementCanonical
     .match(/CREATE OR REPLACE FUNCTION app_rls\.printing_printer_administration\([\s\S]*?\n\$fn\$;/)?.[0];
   assert(retirementDefinition && retirementArtifact.includes(retirementDefinition),
     "the retirement deployment artifact must match the certified current printer function");
+  const retirementGateDefinition = retirementCanonical
+    .match(/CREATE OR REPLACE FUNCTION app_rls\.printing_maintenance_gate\([\s\S]*?\n\$fn\$;/)?.[0]
+    ?.replaceAll("{{APP_ROLE}}", "'mscqr_prd_rls_phase2_app'")
+    .replaceAll("{{WORKER_ROLE}}", "'mscqr_prd_rls_phase2_worker'");
+  assert(retirementGateDefinition && retirementArtifact.includes(retirementGateDefinition),
+    "the retirement deployment artifact must match the certified maintenance gate");
   const retirementBody = retirementArtifact.replace(/^\\set ON_ERROR_STOP on\s*/m, "")
     .replace(/^BEGIN;\s*/, "").replace(/\s*COMMIT;\s*$/, "")
     .replaceAll("mscqr_prd_rls_phase2_auth_owner", "mscqr_rls_cert_auth_owner")
     .replaceAll("mscqr_prd_rls_phase2_owner", "mscqr_rls_cert_owner")
-    .replaceAll("mscqr_prd_rls_phase2_app", "mscqr_rls_cert_app");
+    .replaceAll("mscqr_prd_rls_phase2_app", "mscqr_rls_cert_app")
+    .replaceAll("mscqr_prd_rls_phase2_worker", "mscqr_rls_cert_worker");
   psql(admin, `BEGIN;
     SET ROLE "mscqr_rls_cert_owner";
     GRANT CREATE ON SCHEMA app_rls TO "mscqr_rls_cert_auth_owner";
@@ -2532,6 +2540,21 @@ async function main() {
     '50000000-0000-4000-8000-000000009999','{}'::jsonb)`,/PRINTING_BOUNDARY_DENIED/);
   denied(app,retireSql(caps.maker),/CONNECTOR_RETIREMENT_FENCE_REQUIRED/);
   assert.equal(json(app,retirementFenceSql).state,'DISPATCH_FENCED');
+  const retirementCheckpoint=`connector-maintenance:${hash(JSON.stringify(['local',ids.retirementRegistration]))}`;
+  const retirementStatusSql=()=>`SELECT app_rls.printing_printer_administration(
+    '${caps.maker}','printing-printer-admin','${requestId()}','MAINTENANCE_STATUS','${ids.retirementPrinter}','{}'::jsonb)`;
+  for(const upgradeState of ['AUTHORIZED','CONSUMED']) {
+    psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,'{upgrade}',
+      '{"state":"${upgradeState}","tokenHash":"synthetic-private-token"}'::jsonb)
+      WHERE key='${retirementCheckpoint}'`);
+    const projected=json(app,retirementStatusSql());
+    assert.equal(projected.upgradeInProgress,true);
+    assert.equal(Object.hasOwn(projected,'upgrade'),false,'status must not reveal upgrade credentials');
+    denied(app,retireSql(caps.maker),/CONNECTOR_RETIREMENT_FENCE_REQUIRED/);
+  }
+  psql(admin,`UPDATE public."SystemCheckpoint" SET value=value-'upgrade'
+    WHERE key='${retirementCheckpoint}'`);
+  assert.equal(json(app,retirementStatusSql()).upgradeInProgress,false);
   const inFlightJobId=randomUUID(), inFlightSessionId=randomUUID();
   const inFlightQrId=randomUUID(), inFlightItemId=randomUUID();
   psql(admin, `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")

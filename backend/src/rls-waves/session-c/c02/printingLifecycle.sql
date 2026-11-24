@@ -150,7 +150,9 @@ BEGIN
     UPDATE public."SystemCheckpoint" SET value=current_value,"updatedAt"=clock_timestamp() WHERE key=checkpoint_key;
     RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',current_value->>'state'<>'ACTIVE');
   END IF;
-  RETURN (current_value-'upgrade')||jsonb_build_object('upgradeAllowed',false,'reconciliationRequired',current_value->>'state'<>'ACTIVE');
+  RETURN (current_value-'upgrade')||jsonb_build_object('upgradeAllowed',false,
+    'upgradeInProgress',coalesce(current_value->'upgrade'->>'state' IN ('AUTHORIZED','CONSUMED'),false),
+    'reconciliationRequired',current_value->>'state'<>'ACTIVE');
 END
 $fn$;
 REVOKE ALL ON FUNCTION app_rls.printing_maintenance_gate(text,text,text,jsonb) FROM PUBLIC;
@@ -1237,7 +1239,7 @@ BEGIN
       'retired',true,'idempotent',true,'dispatchFenced',true); END IF;
     IF maintenance_snapshot->>'state'<>'DISPATCH_FENCED'
        OR maintenance_snapshot->>'requestedBy' IS DISTINCT FROM actor."userId"
-       OR maintenance_snapshot ? 'upgrade'
+       OR coalesce((maintenance_snapshot->>'upgradeInProgress')::boolean,true)
     THEN RAISE EXCEPTION 'CONNECTOR_RETIREMENT_FENCE_REQUIRED' USING ERRCODE='55000'; END IF;
     SELECT array_agg(p.id ORDER BY p.id) INTO maintenance_printers FROM public."Printer" p
       WHERE p."printerRegistrationId"=maintenance_registration.id

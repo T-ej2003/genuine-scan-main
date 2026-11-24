@@ -104,8 +104,11 @@ test("every printing and public routine changed by this PR has a governed instal
       }
       assert.match(retirementIncremental, /\nCOMMIT;\n$/);
       assert.deepEqual([...definitions(retirementIncremental)],
-        [["printing_printer_administration", after.get("printing_printer_administration")]],
-        "retirement migration must install the exact canonical function and no other routine");
+        [["printing_maintenance_gate", after.get("printing_maintenance_gate")
+          .replaceAll("{{APP_ROLE}}", "'mscqr_prd_rls_phase2_app'")
+          .replaceAll("{{WORKER_ROLE}}", "'mscqr_prd_rls_phase2_worker'")],
+        ["printing_printer_administration", after.get("printing_printer_administration")]],
+        "retirement migration must install the exact canonical gate and printer function and no other routine");
     }
     assert.deepEqual(changed.filter(name => !allowed.includes(name) &&
       !(incremental && ["printing_maintenance_gate", "printing_create_job", "printing_record_sample", "printing_release_batch", "printing_readiness"].includes(name)) &&

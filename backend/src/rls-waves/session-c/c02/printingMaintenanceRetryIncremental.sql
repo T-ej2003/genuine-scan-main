@@ -158,7 +158,9 @@ BEGIN
     UPDATE public."SystemCheckpoint" SET value=current_value,"updatedAt"=clock_timestamp() WHERE key=checkpoint_key;
     RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',current_value->>'state'<>'ACTIVE');
   END IF;
-  RETURN (current_value-'upgrade')||jsonb_build_object('upgradeAllowed',false,'reconciliationRequired',current_value->>'state'<>'ACTIVE');
+  RETURN (current_value-'upgrade')||jsonb_build_object('upgradeAllowed',false,
+    'upgradeInProgress',coalesce(current_value->'upgrade'->>'state' IN ('AUTHORIZED','CONSUMED'),false),
+    'reconciliationRequired',current_value->>'state'<>'ACTIVE');
 END
 $fn$;
 
