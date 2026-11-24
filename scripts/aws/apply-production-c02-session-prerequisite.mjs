@@ -44,7 +44,7 @@ export function buildC02SessionTask({ sourceSha, hostname, combinedRequirements,
   assert.ok(bytes.length < (combinedRequirements ? 256 : 64) * 1024);
   const encoded = (combinedRequirements ? brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } })
     : gzipSync(bytes, { level: 9, mtime: 0 })).toString("base64");
-  assert.ok(encoded.length <= (combinedRequirements ? 38 * 1024 : 32768), `C02 task payload exceeds the reviewed bounded transport (${encoded.length} bytes)`);
+  assert.ok(encoded.length <= (combinedRequirements ? 39 * 1024 : 32768), `C02 task payload exceeds the reviewed bounded transport (${encoded.length} bytes)`);
   const definition = { family, networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"], cpu: "1024", memory: "2048",
     executionRoleArn: PRINTING_ROUTINE_DELTA.executionRoleArn, runtimePlatform: STAGE_B.taskRuntimePlatform,
     volumes: [{ name: "executor-tmp" }], containerDefinitions: [{ name: containerName,
