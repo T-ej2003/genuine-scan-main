@@ -3,6 +3,8 @@ setlocal EnableExtensions
 rem Let Windows PowerShell rebuild its native module path after Inno/cmd launches it.
 set "PSModulePath="
 if /I "%~1"=="/MSCQRSILENT" set "MSCQR_SETUP_SILENT=1"
+if /I "%~1"=="/MSCQRREINSTALL" set "MSCQR_RETAINED_REINSTALL=1"
+if /I "%~2"=="/MSCQRREINSTALL" set "MSCQR_RETAINED_REINSTALL=1"
 cd /d "%~dp0"
 
 set "INSTALL_SCRIPT=%~dp0install-startup-task.ps1"

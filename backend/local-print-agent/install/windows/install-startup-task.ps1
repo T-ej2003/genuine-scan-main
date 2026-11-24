@@ -7,6 +7,7 @@ $PackageRoot = $ScriptRoot
 $AgentHome = Join-Path $env:LOCALAPPDATA "MSCQR\local-print-agent"
 $BinDir = Join-Path $AgentHome "bin"
 $LogDir = Join-Path $AgentHome "logs"
+$LifecycleDir = Join-Path $env:LOCALAPPDATA "MSCQR\lifecycle"
 $EnvFile = Join-Path $AgentHome "agent.env"
 $Wrapper = Join-Path $BinDir "start-local-print-agent.cmd"
 $StartupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
@@ -15,7 +16,8 @@ $InstallResultPath = Join-Path $AgentHome "install-result.json"
 $TaskName = "MSCQR Local Print Agent"
 $StatusUrl = "http://127.0.0.1:17866/status"
 $DialogTitle = "MSCQR Connector Setup"
-$SetupLog = Join-Path $LogDir "setup.log"
+$SetupLog = Join-Path $LifecycleDir "setup.log"
+$script:InstallStage = 'preflight'
 $CanonicalAgentExe = Join-Path $BinDir "mscqr-local-print-agent.exe"
 $LegacyTaskNames = @($TaskName, "MSCQR Connector", "MSCQR Print Agent", "MSCQR Local Connector") | Select-Object -Unique
 $LegacyServiceNames = @("MSCQRLocalPrintAgent", "MSCQR Connector", "MSCQR Print Agent", "GenuineScan Connector", "Genuine Scan Connector") | Select-Object -Unique
@@ -43,6 +45,7 @@ $PackagedInstall = $false
 if ("1", "true", "yes", "on" -contains [string]$env:MSCQR_PACKAGED_INSTALL) {
   $PackagedInstall = $true
 }
+$RetainedReinstall = $env:MSCQR_RETAINED_REINSTALL -eq '1'
 
 $ResolvedVersion = [string]$env:MSCQR_CONNECTOR_VERSION
 if ([string]::IsNullOrWhiteSpace($ResolvedVersion)) {
@@ -92,7 +95,7 @@ function Write-UpgradeLog {
     [string]$Message
   )
 
-  New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+  New-Item -ItemType Directory -Force -Path $LifecycleDir | Out-Null
   $line = "$(Get-Date -Format o) $Message"
   Add-Content -Path $SetupLog -Value $line -Encoding ASCII
   Write-Host $Message
@@ -161,6 +164,9 @@ function Write-InstallResult {
   New-Item -ItemType Directory -Force -Path $AgentHome | Out-Null
 
   $payload = [ordered]@{
+    operation = $(if ($RetainedReinstall) { 'reinstall' } else { 'install' })
+    stage = $script:InstallStage
+    errorId = $(if ($Outcome -eq 'failure') { 'CONNECTOR_INSTALL_FAILED' } else { 'NONE' })
     outcome = $Outcome
     state = $State
     message = $Message
@@ -168,6 +174,9 @@ function Write-InstallResult {
     printerId = $PrinterId
     printerSetupUrl = $PrinterSetupUrl
     logPath = $LogPath
+    previousInstallationUsable = $false
+    manualInterventionRequired = ($Outcome -eq 'failure')
+    timestamp = [DateTime]::UtcNow.ToString('o')
     installedVersion = $ResolvedVersion
     previousVersion = $PreviousVersion
     processStopped = $ProcessStopped
@@ -179,6 +188,8 @@ function Write-InstallResult {
   }
 
   ($payload | ConvertTo-Json -Depth 4) | Set-Content -Path $InstallResultPath -Encoding ASCII
+  New-Item -ItemType Directory -Force -Path $LifecycleDir | Out-Null
+  ($payload | ConvertTo-Json -Depth 4) | Set-Content -Path (Join-Path $LifecycleDir 'install-result.json') -Encoding UTF8
 }
 
 function Read-PreviousVersion {
@@ -319,6 +330,7 @@ function Wait-ForVerifiedStatus {
     [int]$DelayMs = 500
   )
 
+  $lastPartial = $null
   for ($attempt = 0; $attempt -lt $MaxAttempts; $attempt++) {
     Start-Sleep -Milliseconds $DelayMs
     try {
@@ -358,16 +370,20 @@ function Wait-ForVerifiedStatus {
       }
 
       if ($setupVerification.state -in @("READY", "NO_PRINTERS", "PRINTER_UNAVAILABLE")) {
-        return [pscustomobject]@{
+        $verified = [pscustomobject]@{
           status = $statusPayload
           setupVerification = $setupVerification
         }
+        if ($setupVerification.state -eq "READY") { return $verified }
+        # The listener can become ready before Windows printer enumeration has
+        # settled. Keep using the existing bounded status retry window.
+        $lastPartial = $verified
       }
     } catch {
     }
   }
 
-  return $null
+  return $lastPartial
 }
 
 function Get-WrapperBody {
@@ -474,8 +490,18 @@ function Ensure-AgentEnvFile {
 }
 
 function Initialize-AgentIdentity {
+  $retainedDiscovery = $null
+  $previousStateOverride = $env:PRINT_AGENT_STATE_FILE
+  if ($RetainedReinstall) {
+    if (-not $PackagedInstall) { throw 'Retained-state reinstall requires the signed packaged connector.' }
+    . (Join-Path $ScriptRoot 'connector-upgrade-transaction.ps1')
+    $retainedDiscovery = Resolve-MscqrUpgradeState $env:USERPROFILE $AgentHome $CanonicalAgentExe
+    Get-MscqrDispatchJournalFiles (Join-Path $env:USERPROFILE '.mscqr\dispatch-journal') | Out-Null
+    $env:PRINT_AGENT_STATE_FILE = $retainedDiscovery.selectedPath
+  }
+  try {
   if ($PackagedInstall) {
-    $output = & $CanonicalAgentExe --initialize-state 2>&1
+    $output = & $CanonicalAgentExe $(if ($RetainedReinstall) { '--validate-state' } else { '--initialize-state' }) 2>&1
   } else {
     $backendDir = (Resolve-Path (Join-Path $ScriptRoot "..\..\..")).Path
     $nodeCommand = Get-Command node -ErrorAction Stop
@@ -483,14 +509,16 @@ function Initialize-AgentIdentity {
     try { $output = & $nodeCommand.Source (Join-Path $backendDir 'dist\local-print-agent\index.js') --initialize-state 2>&1 }
     finally { Pop-Location }
   }
-  if ($LASTEXITCODE -ne 0) { throw 'Connector first-install identity initialization failed; inspect the configured state path before retrying.' }
+  if ($LASTEXITCODE -ne 0) { throw 'Connector identity validation or initialization failed; preserve the configured state path before retrying.' }
   $evidence = ($output | Out-String) | ConvertFrom-Json -ErrorAction Stop
-  $expectedStateFile = Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json'
+  $expectedStateFile = if ($RetainedReinstall) { $retainedDiscovery.selectedPath } else { Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json' }
   if (-not $evidence.ok -or -not (Test-SamePath -Left ([string]$evidence.statePath) -Right $expectedStateFile) -or
       [string]$evidence.stateSha256 -notmatch '^[a-fA-F0-9]{64}$') {
-    throw 'Connector first-install identity evidence does not match the expected state location.'
+    throw 'Connector identity evidence does not match the expected state location.'
   }
-  Write-UpgradeLog 'Connector first-install identity initialized and validated at the canonical state location.'
+  if ($RetainedReinstall) { Write-UpgradeLog 'Retained connector identity validated and reused.' }
+  else { Write-UpgradeLog 'Connector first-install identity initialized and validated at the canonical state location.' }
+  } finally { $env:PRINT_AGENT_STATE_FILE = $previousStateOverride }
 }
 
 function Register-StartupLauncher {
@@ -602,7 +630,7 @@ function Complete-Install {
     -PrinterName $PrinterName `
     -PrinterId $PrinterId `
     -PrinterSetupUrl $PrinterSetupUrl `
-    -LogPath (Join-Path $LogDir "agent.log")
+    -LogPath $SetupLog
 
   Show-SetupDialog -Message $Message -Icon $Icon
   exit $ExitCode
@@ -610,12 +638,13 @@ function Complete-Install {
 
 # Refuse an uncoordinated legacy upgrade before writing installation state.
 # This is not an idle snapshot or a substitute for a server maintenance fence.
+try {
 if (-not [string]::IsNullOrWhiteSpace([string]$env:PRINT_AGENT_STATE_FILE)) {
   throw 'An ambient connector state override requires verified persistent startup configuration; fresh initialization is refused.'
 }
-if ((Test-Path -LiteralPath $EnvFile) -or
+if (-not $RetainedReinstall -and ((Test-Path -LiteralPath $EnvFile) -or
     (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')) -or
-    (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json'))) {
+    (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json')))) {
   throw 'Existing connector identity or configuration requires authenticated maintenance and reconciliation before initialization.'
 }
 Stop-RunningAgent
@@ -624,7 +653,7 @@ Cleanup-LegacyServices
 Remove-LegacyRunRegistryEntries
 Remove-LegacyStartupEntries
 
-try {
+  $script:InstallStage = 'files'
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
   New-Item -ItemType Directory -Force -Path $StartupDir | Out-Null
@@ -652,10 +681,13 @@ try {
     Install-StandaloneAgentFiles
   }
 
+  $script:InstallStage = 'identity'
   Initialize-AgentIdentity
+  $script:InstallStage = 'startup'
   Register-StartupLauncher
   Start-AgentProcess
 
+  $script:InstallStage = 'runtime-verification'
   $verificationResult = Wait-ForVerifiedStatus -TargetUrl $StatusUrl -ExpectedVersion $ResolvedVersion
   if ($null -eq $verificationResult) {
     throw "Connector installed, but the local status endpoint did not start at version $ResolvedVersion in time. Check $LogDir\agent.log and $SetupLog."
@@ -725,9 +757,8 @@ try {
 
   Complete-Install -ExitCode 10 -State $setupVerification.state -Message $message -Icon "Warning" -PrinterName $printerName -PrinterId $printerId -PrinterSetupUrl $printerSetupUrl
 } catch {
-  $logPath = Join-Path $LogDir "agent.log"
-  $message = "MSCQR Connector setup did not complete.`n`n$($_.Exception.Message)`n`nReview the local log at:`n$logPath"
-  Write-UpgradeLog "ERROR setup failed: $($_.Exception.Message)"
-  Write-Error $_
+  $message = "MSCQR Connector setup did not complete during $script:InstallStage. Preserve local identity and journal evidence.`n`nReview the local log at:`n$SetupLog"
+  Write-UpgradeLog "ERROR CONNECTOR_INSTALL_FAILED stage=$script:InstallStage; setup stopped. Preserve state for review."
+  Write-Error "CONNECTOR_INSTALL_FAILED stage=$script:InstallStage. Review $SetupLog"
   Complete-Install -ExitCode 1 -State "FAILED" -Message $message -Icon "Error" -PrinterName $null -PrinterId $null -PrinterSetupUrl (Get-PrinterSetupUrl)
 }

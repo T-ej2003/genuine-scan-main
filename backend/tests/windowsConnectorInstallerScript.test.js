@@ -228,7 +228,7 @@ const run = async () => {
     "Windows installer must expand the supported per-user profile environment constant before signing"
   );
   const supportedInnoConstants = new Set([
-    "app", "cmd", "tmp", "srcexe", "sys", "localappdata", "%USERPROFILE",
+    "app", "cmd", "tmp", "srcexe", "sys", "localappdata", "userstartup", "%USERPROFILE",
     "param:MSCQRRECOVER|",
   ]);
   assert(installerTemplate.includes("RunUpgrade('Acquire')") &&
@@ -240,17 +240,13 @@ const run = async () => {
       assert(supportedInnoConstants.has(constant), "Unsupported Inno runtime constant: " + constant);
     }
   }
-  const uninstallRunLine = installerTemplate
-    .split(/\r?\n/)
-    .find((line) => line.includes('"{app}\\Uninstall Connector.cmd"') && line.includes("Flags:"));
-  assert(uninstallRunLine, "Windows installer template should include an Inno [UninstallRun] entry");
   assert(
-    uninstallRunLine.includes("runhidden") && uninstallRunLine.includes("waituntilterminated"),
-    "Windows uninstaller should keep running the cleanup command hidden and wait for it to finish"
-  );
-  assert(
-    !/\b(skipifsilent|skipifnotsilent|postinstall|unchecked|runasoriginaluser)\b/.test(uninstallRunLine),
-    "Windows [UninstallRun] entry should not use flags that Inno Setup only supports in [Run]"
+    !installerTemplate.includes("[UninstallRun]") &&
+      installerTemplate.includes("InitializeUninstall") &&
+      installerTemplate.includes("CurUninstallStepChanged") &&
+      installerTemplate.includes("-Operation Preflight") &&
+      installerTemplate.includes("-Operation Complete"),
+    "Windows removal must finish safety preflight before Inno deletes owned files and verify preservation afterwards"
   );
   assert(installScript.includes("setupVerification"), "Canonical Windows installer should inspect setupVerification from the local agent status payload");
   assert(
@@ -362,7 +358,7 @@ const run = async () => {
       installerTemplate.includes('if InitializationFailed then Result := 20') &&
       (installerTemplate.match(/InitializationFailed := True;/g) || []).length >= 4 &&
       installerTemplate.includes('if InitializationFailed then exit;') &&
-      !installerTemplate.includes('RaiseException('),
+      installerTemplate.indexOf('RaiseException(') > installerTemplate.indexOf('procedure CurUninstallStepChanged'),
     "A failed initialization must produce a nonzero Inno exit even when message boxes are suppressed"
   );
   assert(
@@ -392,7 +388,7 @@ const run = async () => {
       installerTemplate.includes('connector-upgrade-backup.ps1') &&
       installerTemplate.includes('connector-upgrade-state.ps1') &&
       installerTemplate.includes('-ExecutionPolicy RemoteSigned -File') &&
-      !installerTemplate.includes('-ExecutionPolicy AllSigned -File'),
+      installerTemplate.indexOf('-ExecutionPolicy AllSigned -File') > installerTemplate.indexOf('function InitializeUninstall'),
     "Upgrade execution must verify the signed transaction and sourced helper scripts before noninteractive launch"
   );
   assert(upgradeTransaction.includes('Get-MscqrCertifiedSource $authority $Version $installerSha256 $runtime $Live') &&

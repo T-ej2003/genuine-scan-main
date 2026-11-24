@@ -70,6 +70,7 @@ mock('controllers/connectorUpgradeDeviceProofController.js', { trustedBinding: a
 let consumed = false;
 let released = false;
 let revoked = false;
+let retiredCount = 0;
 mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingUpgradeHandoff: async input => {
   if (input.operation === 'RELEASE_STATUS') {
     if (!released || input.tokenHash !== authorizedTokenHash || JSON.stringify(input.binding) !== JSON.stringify(binding))
@@ -92,6 +93,7 @@ mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { redeemPrintingU
     supersededUnsubmitted: 0, gatewayJournalEntries: 0,
     protectedItemIds: protectedEntries.map(entry => entry.printItemId) };
 }, administerPrintingPrinter: async input => {
+  if (input.operation === 'RETIRE') { retiredCount += 1; return { retired: true, idempotent: retiredCount > 1 }; }
   if (input.operation === 'MAINTENANCE_RELEASE') {
     released = true;
     return { authorized: true, dispatchFenced: false, binding: input.payload.evidence.binding };
@@ -331,6 +333,11 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const afterRevocation = response();
     await controller.redeemConnectorMaintenanceHandoff(request({ action: 'verify', token, binding }), afterRevocation);
     assert.equal(afterRevocation.code, 403);
+    const retirement = response();
+    await controller.requestConnectorMaintenance(request({ action: 'retire' }), retirement);
+    assert.equal(retirement.code, 200);
+    assert.equal(retirement.body.data.retired, true);
+    assert.equal(retiredCount, 1, 'manufacturer retirement reaches the existing printer administration boundary');
     console.log('connector maintenance authority tests passed');
   } finally {
     delete process.env.CONNECTOR_ISOLATION_AUTHORITY_PRIVATE_KEY_PEM;

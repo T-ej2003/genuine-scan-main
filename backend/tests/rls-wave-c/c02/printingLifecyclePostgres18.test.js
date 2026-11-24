@@ -26,6 +26,8 @@ const ids = {
   discoveredPrinter: "50000000-0000-4000-8000-000000000703",
   registration: "50000000-0000-4000-8000-000000000801",
   staleRegistration: "50000000-0000-4000-8000-000000000803",
+  retirementRegistration: "50000000-0000-4000-8000-000000000804",
+  retirementPrinter: "50000000-0000-4000-8000-000000000704",
 };
 const caps = { maker: "M".repeat(43), checker: "C".repeat(43), outsider: "O".repeat(43) };
 const quorumCases = [
@@ -116,6 +118,26 @@ async function main() {
     SET ROLE "mscqr_rls_cert_owner";
     REVOKE CREATE ON SCHEMA app_rls FROM "mscqr_rls_cert_auth_owner";
     COMMIT;`);
+  const retirementArtifact = readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/connectorRetirementIncremental.sql"), "utf8");
+  const retirementDefinition = readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/printingUpgradeNoReplayDefinitions.sql"), "utf8")
+    .match(/CREATE OR REPLACE FUNCTION app_rls\.printing_printer_administration\([\s\S]*?\n\$fn\$;/)?.[0];
+  assert(retirementDefinition && retirementArtifact.includes(retirementDefinition),
+    "the retirement deployment artifact must match the certified current printer function");
+  const retirementBody = retirementArtifact.replace(/^\\set ON_ERROR_STOP on\s*/m, "")
+    .replace(/^BEGIN;\s*/, "").replace(/\s*COMMIT;\s*$/, "")
+    .replaceAll("mscqr_prd_rls_phase2_auth_owner", "mscqr_rls_cert_auth_owner");
+  psql(admin, `BEGIN;
+    SET ROLE "mscqr_rls_cert_owner";
+    GRANT CREATE ON SCHEMA app_rls TO "mscqr_rls_cert_auth_owner";
+    RESET ROLE;
+    SET ROLE "mscqr_rls_cert_auth_owner";
+    ${retirementBody}
+    RESET ROLE;
+    SET ROLE "mscqr_rls_cert_owner";
+    REVOKE CREATE ON SCHEMA app_rls FROM "mscqr_rls_cert_auth_owner";
+    COMMIT;`);
   assert.equal(psql(admin, `SELECT has_function_privilege('mscqr_rls_cert_app',
     'app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb)', 'EXECUTE')`), 't');
   assert.equal(psql(admin, `SELECT has_column_privilege('mscqr_rls_cert_auth_owner',
@@ -131,6 +153,7 @@ async function main() {
   const abortedRequestHash = hash("printing-idempotency-aborted-request");
 
   psql(admin, `
+    DELETE FROM public."SystemCheckpoint" WHERE key='connector-maintenance:${hash(JSON.stringify(["local", ids.retirementRegistration]))}';
     DELETE FROM public."ActionIdempotencyKey" WHERE "keyHash" IN ('${idempotencyKeyHash}','${abortedKeyHash}');
     DELETE FROM public."PrintItemEvent" WHERE "actorUserId" IN ('${ids.maker}','${ids.checker}','${ids.outsider}');
     DELETE FROM public."PrintAuditEvent" WHERE "batchId" IN ('${ids.batch}','${ids.raceBatch}');
@@ -141,11 +164,11 @@ async function main() {
     DELETE FROM public."SensitiveActionApproval" WHERE "entityType"='Batch' AND "entityId" IN ('${ids.batch}','${ids.raceBatch}');
     DELETE FROM public."AuditLog" WHERE "entityId"='${ids.batch}' OR "licenseeId"='${ids.licenseeA}';
     DELETE FROM public."SecurityEventOutbox" WHERE "licenseeId"='${ids.licenseeA}';
-    DELETE FROM public."PrinterAttestation" WHERE "printerRegistrationId" IN ('${ids.registration}','${ids.staleRegistration}');
-    DELETE FROM public."PrinterAgentSession" WHERE "registrationId" IN ('${ids.registration}','${ids.staleRegistration}');
+    DELETE FROM public."PrinterAttestation" WHERE "printerRegistrationId" IN ('${ids.registration}','${ids.staleRegistration}','${ids.retirementRegistration}');
+    DELETE FROM public."PrinterAgentSession" WHERE "registrationId" IN ('${ids.registration}','${ids.staleRegistration}','${ids.retirementRegistration}');
     DELETE FROM public."RefreshToken" WHERE id IN ('${ids.makerRefresh}','${ids.checkerRefresh}','${ids.outsiderRefresh}');
-    DELETE FROM public."Printer" WHERE id IN ('${ids.printer}','${ids.foreignPrinter}','${ids.discoveredPrinter}');
-    DELETE FROM public."PrinterRegistration" WHERE id IN ('${ids.registration}','${ids.staleRegistration}');
+    DELETE FROM public."Printer" WHERE id IN ('${ids.printer}','${ids.foreignPrinter}','${ids.discoveredPrinter}','${ids.retirementPrinter}');
+    DELETE FROM public."PrinterRegistration" WHERE id IN ('${ids.registration}','${ids.staleRegistration}','${ids.retirementRegistration}');
     DELETE FROM public."QRCode" WHERE id IN ('${ids.qr}','${ids.raceQr}');
     DELETE FROM public."Batch" WHERE id IN ('${ids.batch}','${ids.raceBatch}');
     DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}';
@@ -2359,6 +2382,38 @@ async function main() {
     'fenced historical binding is version agnostic; certified digest policy is enforced before authorization');
   denied(app,deviceBinding(caps.outsider,ids.printer), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
   denied(app,'SELECT "agentId" FROM public."PrinterAgentSession" LIMIT 1', /permission denied/);
+
+  // Retirement uses a separate synthetic registration so prior maintenance
+  // and print evidence remain available for the rest of this fixture.
+  psql(admin, `INSERT INTO public."PrinterRegistration"(id,"userId","orgId","licenseeId",
+      "deviceFingerprint","agentId","publicKeyPem","trustStatus","approvedAt","updatedAt")
+    VALUES('${ids.retirementRegistration}','${ids.maker}','${ids.orgA}','${ids.licenseeA}',
+      'retirement-fixture-device','retirement-fixture-agent','-----BEGIN PUBLIC KEY----- fixture',
+      'TRUSTED',now(),now());
+    INSERT INTO public."Printer"(id,name,"connectionType","commandLanguage","nativePrinterId",
+      "agentId","deviceFingerprint","printerRegistrationId","orgId","licenseeId",
+      "assignedUserId","createdByUserId","isActive","updatedAt")
+    VALUES('${ids.retirementPrinter}','Retirement Fixture','LOCAL_AGENT','ZPL','retirement-native',
+      'retirement-fixture-agent','retirement-fixture-device','${ids.retirementRegistration}',
+      '${ids.orgA}','${ids.licenseeA}','${ids.maker}','${ids.maker}',true,now());`);
+  const retireSql=(capability)=>`SELECT app_rls.printing_printer_administration(
+    '${capability}','printing-printer-admin','${requestId()}','RETIRE','${ids.retirementPrinter}','{}'::jsonb)`;
+  denied(app,retireSql(caps.outsider),/PRINTING_BOUNDARY_DENIED/);
+  const historicalItems=psql(admin,`SELECT count(*) FROM public."PrintItem"`);
+  assert.deepEqual(json(app,retireSql(caps.maker)),{
+    printerId:ids.retirementPrinter,registrationId:ids.retirementRegistration,
+    retired:true,idempotent:false,dispatchFenced:true,
+  });
+  assert.equal(json(app,retireSql(caps.maker)).idempotent,true);
+  assert.equal(psql(admin,`SELECT "trustStatus"::text FROM public."PrinterRegistration"
+    WHERE id='${ids.retirementRegistration}'`),'REVOKED');
+  assert.equal(psql(admin,`SELECT "isActive"::text FROM public."Printer"
+    WHERE id='${ids.retirementPrinter}'`),'false');
+  assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem"`),historicalItems);
+  denied(app,`SELECT app_rls.printing_connector_event('${ids.retirementRegistration}',
+    'retirement-fixture-agent','retirement-fixture-device','retirement_claim_nonce',now()::timestamp,
+    '${requestId()}','CLAIM',NULL,NULL,'${ids.retirementPrinter}',NULL,NULL,'{}'::jsonb)`,
+    /CONNECTOR_BOUNDARY_DENIED|query returned no rows/);
 
   const rollback = readFileSync(
     path.resolve(__dirname, "../../../src/rls-waves/session-c/c02/printingLifecycleRollback.sql"),

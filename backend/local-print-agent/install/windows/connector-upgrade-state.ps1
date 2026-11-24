@@ -64,3 +64,53 @@ function Resolve-MscqrUpgradeState([string]$UserProfile,[string]$LiveDirectory,[
   $selected=if($configured){$configured}elseif(Test-Path -LiteralPath $modern -PathType Leaf){$modern}else{$legacy}
   return [pscustomobject]@{selectedPath=[IO.Path]::GetFullPath($selected);candidates=$snapshot;sha256=(Get-MscqrStateDiscoveryDigest $snapshot);policy='PRESERVE_SOURCE_MATCHING_DUPLICATES_PREFER_MODERN'}
 }
+
+# Classify only the installation owned by this AppId. A retained identity is
+# deliberately distinct from a complete installation and is never initialized
+# again by the reinstall path.
+function Get-MscqrInstallationClassification([string]$UserProfile,[string]$LiveDirectory,[string]$Candidate) {
+  $live=[IO.Path]::GetFullPath($LiveDirectory).TrimEnd('\')
+  $startup=Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
+  $registry='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1'
+  $required=@((Join-Path $live 'bin\mscqr-local-print-agent.exe'),
+    (Join-Path $live 'bin\start-local-print-agent.cmd'),
+    (Join-Path $live 'unins000.exe'),(Join-Path $live 'unins000.dat'),
+    (Join-Path $live 'Install Connector.cmd'),(Join-Path $live 'connector-upgrade-transaction.ps1'),$startup)
+  foreach($item in $required) {Assert-MscqrPlainPath $item}
+  $present=@($required | Where-Object {Test-Path -LiteralPath $_ -PathType Leaf})
+  $registered=Test-Path -LiteralPath $registry
+  $modern=Join-Path $UserProfile '.mscqr\local-print-agent-state.json'
+  $legacy=Join-Path $UserProfile '.authenticqr\local-print-agent-state.json'
+  $identityPresent=(Test-Path -LiteralPath $modern) -or (Test-Path -LiteralPath $legacy)
+  $environment=Join-Path $live 'agent.env'
+  $journal=Join-Path $UserProfile '.mscqr\dispatch-journal'
+  if($present.Count -eq $required.Count -and $registered) {
+    if(-not $identityPresent) {throw 'INCONSISTENT_INSTALLATION: installed connector identity is missing.'}
+    Get-MscqrUninstallSnapshot $live | Out-Null
+    $discovery=Resolve-MscqrUpgradeState $UserProfile $live $Candidate
+    Get-MscqrDispatchJournalFiles $journal | Out-Null
+    return 'EXISTING_INSTALL_UPGRADE'
+  }
+  if($present.Count -gt 0 -or $registered) {
+    throw 'INCONSISTENT_INSTALLATION: installed executable, startup or AppId registration is incomplete. Preserve all files for review.'
+  }
+  if(Test-Path -LiteralPath $live -PathType Container) {
+    foreach($entry in @(Get-ChildItem -LiteralPath $live -Force)) {
+      if($entry.Name -notin @('agent.env','install-result.json','logs') -or
+         ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'INCONSISTENT_INSTALLATION: unexpected files remain in the connector application directory.'
+      }
+    }
+  }
+  Assert-MscqrStoppedInstallation
+  if($identityPresent) {
+    $discovery=Resolve-MscqrUpgradeState $UserProfile $live $Candidate
+    if(Test-Path -LiteralPath $environment) {Assert-MscqrPlainPath $environment}
+    Get-MscqrDispatchJournalFiles $journal | Out-Null
+    return 'RETAINED_STATE_REINSTALL'
+  }
+  if((Test-Path -LiteralPath $environment) -or (Test-Path -LiteralPath $journal)) {
+    throw 'INCONSISTENT_INSTALLATION: retained configuration or journal exists without a valid identity.'
+  }
+  return 'CLEAN_INSTALL'
+}
