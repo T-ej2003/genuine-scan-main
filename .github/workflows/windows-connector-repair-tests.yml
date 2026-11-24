@@ -45,6 +45,10 @@ jobs:
           & ./backend/tests/windowsConnectorCertificationWait.test.ps1
           & ./backend/tests/windowsConnectorTransaction.test.ps1
           & ./backend/tests/windowsConnectorStateDiscovery.test.ps1
+          & ./backend/tests/windowsConnectorLifecycleClassification.test.ps1
+          & ./backend/tests/windowsConnectorUninstallPreservation.test.ps1
+          & ./backend/tests/windowsConnectorUninstallCycle.test.ps1
+          & ./backend/tests/windowsConnectorPrinterReadiness.test.ps1
           & ./backend/tests/windowsConnectorSigningHook.test.ps1
           & ./backend/tests/windowsConnectorComponentVerification.test.ps1
           & ./backend/tests/windowsConnectorCertifiedSource.test.ps1

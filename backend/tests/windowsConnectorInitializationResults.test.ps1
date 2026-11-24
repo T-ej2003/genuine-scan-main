@@ -9,8 +9,11 @@ if($ChildCase) {
     $fn=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true)|Where-Object Name -eq $name
     Invoke-Expression $fn.Extent.Text
   }
+  $env:USERPROFILE=$CaseDirectory;$env:PRINT_AGENT_STATE_FILE=$null
   $AgentHome=$CaseDirectory;$BinDir="$CaseDirectory\bin";$LogDir="$CaseDirectory\logs";$StartupDir="$CaseDirectory\startup"
-  $InstallResultPath="$CaseDirectory\install-result.json";$SetupLog="$LogDir\setup.log";$StatusUrl='http://127.0.0.1:1/status'
+  $EnvFile="$CaseDirectory\agent.env";$RetainedReinstall=$false
+  $LifecycleDir="$CaseDirectory\lifecycle";$script:InstallStage='preflight'
+  $InstallResultPath="$CaseDirectory\install-result.json";$SetupLog="$LifecycleDir\setup.log";$StatusUrl='http://127.0.0.1:1/status'
   $StartupLauncher="$StartupDir\fixture.vbs";$ResolvedVersion='2026.10.29.1';$PackagedInstall=$true
   $env:MSCQR_SETUP_SILENT=if($SilentFixture){'1'}else{'0'}
   function Write-UpgradeLog {param($Message)}
@@ -50,6 +53,9 @@ try {
     $expected=if($case -eq 'READY'){0}elseif($case -in @('NO_PRINTERS','PRINTER_UNAVAILABLE')){10}else{1}
     if($LASTEXITCODE -ne $expected){throw "$mode/$case expected $expected; see $dir"}
     $result=Get-Content "$dir\install-result.json" -Raw|ConvertFrom-Json
+    $durable=Get-Content "$dir\lifecycle\install-result.json" -Raw|ConvertFrom-Json
+    if($durable.outcome -ne $result.outcome -or -not $durable.timestamp -or
+      $durable.logPath -notlike '*\lifecycle\setup.log') {throw 'Durable lifecycle result differs from install contract'}
     if($expected -in @(0,10)) {
       if(-not (Test-Path "$dir\startup\fixture.vbs")){throw 'Startup registration missing'}
       if(-not (Test-Path "$dir\identity-initialized")){throw 'First-install identity initialization was skipped'}

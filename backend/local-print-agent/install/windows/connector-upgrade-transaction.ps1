@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Acquire','Prepare','Activate','Commit','Recover')][string]$Operation,
+  [ValidateSet('Acquire','Prepare','Activate','Commit','Recover','Classify')][string]$Operation,
   [string]$PayloadDirectory,
   [string]$InstallerFile,
   [string]$LiveDirectory,
@@ -50,6 +50,20 @@ function Protect-MscqrDirectory([string]$Path) {
     $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow')))
   }
   Set-Acl -LiteralPath $Path -AclObject $acl
+}
+function Write-MscqrUpgradeFailure([string]$Phase,[string]$Live) {
+  $root=Join-Path ([IO.Path]::GetDirectoryName($Live)) 'connector-upgrade'
+  if(Test-Path -LiteralPath $root) {Assert-MscqrPrivatePath $root}
+  else {Protect-MscqrDirectory $root}
+  $log=Join-Path $root 'lifecycle.log'
+  $errorId='CONNECTOR_UPGRADE_'+$Phase.ToUpperInvariant()+'_FAILED'
+  $record=[ordered]@{operation=if($Phase -eq 'Classify'){'install-classification'}else{'upgrade'};
+    stage=$Phase;errorId=$errorId;message='Connector lifecycle operation stopped. Preserve identity and journal evidence; review the local transaction journal before retrying.';
+    logPath=$log;previousInstallationUsable=($Phase -in @('Classify','Acquire','Prepare'));
+    manualInterventionRequired=($Phase -notin @('Classify','Acquire'));
+    timestamp=[DateTime]::UtcNow.ToString('o');outcome='failure'}
+  [IO.File]::WriteAllText((Join-Path $root 'lifecycle-result.json'),($record | ConvertTo-Json -Depth 4),[Text.Encoding]::UTF8)
+  [IO.File]::AppendAllText($log,"$($record.timestamp) $Phase $errorId failure`r`n",[Text.Encoding]::UTF8)
 }
 function Assert-MscqrSignedFile([string]$Path, [string]$Sha256) {
   Assert-MscqrPlainPath $Path
@@ -847,6 +861,15 @@ if ($MyInvocation.InvocationName -ne '.') {
     if ($live -ine [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'))) {
       throw 'Previous connector installation directory requires separate compatibility verification.'
     }
+    if($Operation -eq 'Classify') {
+      $classification=Get-MscqrInstallationClassification $env:USERPROFILE $live (Join-Path $PayloadDirectory 'bin\mscqr-local-print-agent.exe')
+      switch($classification) {
+        'CLEAN_INSTALL' {exit 30}
+        'RETAINED_STATE_REINSTALL' {exit 31}
+        'EXISTING_INSTALL_UPGRADE' {exit 32}
+        default {throw 'INCONSISTENT_INSTALLATION: unsupported installation classification.'}
+      }
+    }
     $discovery=$null
     $recoveringFencedCommit=$false
     if($Operation -eq 'Acquire') {
@@ -872,5 +895,9 @@ if ($MyInvocation.InvocationName -ne '.') {
     if($recoveringFencedCommit -and $resultPhase -eq 'COMMITTED') {exit 11}
     if($Operation -in @('Commit','Recover') -and $resultPhase -eq 'COMMITTED_FENCED') {exit 10}
     exit 0
-  } catch { Write-Error $_; exit 1 }
+  } catch {
+    try {Write-MscqrUpgradeFailure $Operation ([IO.Path]::GetFullPath($LiveDirectory))} catch {}
+    Write-Error "CONNECTOR_UPGRADE_$($Operation.ToUpperInvariant())_FAILED: review %LOCALAPPDATA%\MSCQR\connector-upgrade\lifecycle-result.json and transaction.json."
+    exit 1
+  }
 }

@@ -35,12 +35,39 @@ Source: "__WINDOWS_STAGE_DIR__\*"; DestDir: "{app}"; Flags: recursesubdirs ignor
 Name: "{group}\MSCQR Connector"; Filename: "{app}\Install Connector.cmd"
 Name: "{group}\Uninstall MSCQR Connector"; Filename: "{app}\Uninstall Connector.cmd"
 
-[UninstallRun]
-Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: runhidden waituntilterminated; RunOnceId: MSCQRConnectorUninstall
-
 [Code]
 var
-  UpgradeMode, UpgradePrepared, SetupCommitted, InitializationFailed, PrintingPaused, RecoveryCompleted: Boolean;
+  UpgradeMode, ReinstallMode, UpgradePrepared, SetupCommitted, InitializationFailed, PrintingPaused, RecoveryCompleted,
+    UninstallPrepared, UninstallCommitted: Boolean;
+  LastUpgradeCode: Integer;
+
+function JsonEscape(const Value: String): String;
+begin
+  Result := Value;
+  StringChangeEx(Result, '\', '\\', True);
+  StringChangeEx(Result, '"', '\"', True);
+end;
+
+procedure WriteLifecycleFailure(const Operation, Stage, ErrorId, Message: String;
+  PreviousUsable, Manual: Boolean);
+var Root, LogPath, Body, UsableText, ManualText, Stamp: String;
+begin
+  Root := ExpandConstant('{localappdata}\MSCQR\lifecycle');
+  CreateDir(ExpandConstant('{localappdata}\MSCQR'));
+  CreateDir(Root);
+  LogPath := Root + '\installer.log';
+  Stamp := GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':');
+  if PreviousUsable then UsableText := 'true' else UsableText := 'false';
+  if Manual then ManualText := 'true' else ManualText := 'false';
+  Body := '{"operation":"' + JsonEscape(Operation) + '","stage":"' + JsonEscape(Stage) +
+    '","errorId":"' + JsonEscape(ErrorId) + '","message":"' + JsonEscape(Message) +
+    '","logPath":"' + JsonEscape(LogPath) + '","previousInstallationUsable":' +
+    UsableText + ',"manualInterventionRequired":' + ManualText + ',"timestamp":"' +
+    Stamp + '","outcome":"failure"}';
+  if not SaveStringToFile(Root + '\installer-result.json', Body, False) or
+     not SaveStringToFile(LogPath, Stamp + ' ' + Operation + ' ' + Stage + ' ' + ErrorId + #13#10, True) then
+    Log('Lifecycle failure result could not be persisted at ' + Root);
+end;
 
 function GetCustomSetupExitCode: Integer;
 begin
@@ -50,11 +77,49 @@ end;
 
 function InitializeUninstall(): Boolean;
 begin
-  { UninstallRun exit codes cannot prevent Inno's later file removal. Refuse
-    before any uninstallation work until governed removal is implemented. }
-  Result := False;
-  if not UninstallSilent then
-    MsgBox('Automatic connector removal is blocked pending governed dispatch isolation and work reconciliation. The installation and identity are preserved. Contact MSCQR support.', mbError, MB_OK);
+  Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var Code: Integer; Params, ScriptPath, CompletionCopy: String;
+begin
+  if CurUninstallStep = usUninstall then begin
+    ScriptPath := ExpandConstant('{app}\uninstall-startup-task.ps1');
+    CompletionCopy := ExpandConstant('{tmp}\mscqr-uninstall-complete.ps1');
+    if not CopyFile(ScriptPath, CompletionCopy, False) then begin
+      WriteLifecycleFailure('uninstall', 'preflight-copy', 'UNINSTALL_CHECK_COPY_FAILED',
+        'Removal could not preserve the completion check. No application files were removed.', True, True);
+      RaiseException('Connector removal could not preserve its completion check. No application files were removed.');
+    end;
+    Params := '-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "' + ScriptPath + '" -Operation Preflight';
+    Code := -1;
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then begin
+      WriteLifecycleFailure('uninstall', 'preflight', 'UNINSTALL_PREFLIGHT_FAILED',
+        'Removal stopped before Inno deleted files. The connector may remain fenced; review the local uninstall result.', False, True);
+      RaiseException('Connector removal stopped before Inno deleted files. Review %LOCALAPPDATA%\MSCQR\lifecycle\uninstall-result.json and uninstall.log.');
+    end;
+    UninstallPrepared := True;
+    exit;
+  end;
+  if CurUninstallStep <> usPostUninstall then exit;
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "' +
+    ExpandConstant('{tmp}\mscqr-uninstall-complete.ps1') + '" -Operation Complete';
+  Code := -1;
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
+    ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then begin
+    WriteLifecycleFailure('uninstall', 'complete', 'UNINSTALL_COMPLETION_FAILED',
+      'Removal could not verify preserved identity, configuration and journal.', False, True);
+    RaiseException('Connector removal could not verify preserved identity, configuration and journal. Review %LOCALAPPDATA%\MSCQR\lifecycle\uninstall-result.json.');
+  end;
+  UninstallCommitted := True;
+end;
+
+procedure DeinitializeUninstall;
+begin
+  if UninstallPrepared and not UninstallCommitted then
+    WriteLifecycleFailure('uninstall', 'removal', 'UNINSTALL_INCOMPLETE',
+      'Removal stopped after preflight. Dispatch remains fenced; inspect the installation before retrying.', False, True);
 end;
 
 function IsFreshInstallation: Boolean;
@@ -95,7 +160,11 @@ function RunUpgrade(const Operation: String): Boolean;
 var Code: Integer; Params: String;
 begin
   Result := VerifyUpgradePayloadSignatures;
-  if not Result then exit;
+  if not Result then begin
+    WriteLifecycleFailure('upgrade', 'signature', 'CONNECTOR_PAYLOAD_SIGNATURE_INVALID',
+      'Signed connector payload verification failed. No files were replaced.', True, True);
+    exit;
+  end;
   Params := '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + ExpandConstant('{tmp}\mscqr-payload\connector-upgrade-transaction.ps1') +
     '" -Operation ' + Operation + ' -PayloadDirectory "' + ExpandConstant('{tmp}\mscqr-payload') +
     '" -InstallerFile "' + ExpandConstant('{srcexe}') + '" -LiveDirectory "' +
@@ -104,13 +173,16 @@ begin
   Code := -1;
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
     ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);
+  LastUpgradeCode := Code;
   if (Operation = 'Commit') and (Code = 10) then PrintingPaused := True;
   if (Operation = 'Recover') and (Code = 11) then RecoveryCompleted := True;
   Result := Result and ((Code = 0) or ((Operation = 'Commit') and (Code = 10)) or
-    ((Operation = 'Recover') and (Code = 11)));
+    ((Operation = 'Recover') and (Code = 11)) or
+    ((Operation = 'Classify') and (Code >= 30) and (Code <= 32)));
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var HasInstallEvidence, HasRetainedEvidence: Boolean;
 begin
   Result := '';
 #ifdef MSCQR_DEVELOPMENT_FIXTURE
@@ -119,23 +191,44 @@ begin
 #endif
   if ExpandConstant('{%USERPROFILE}') = '' then begin
     Result := 'Windows user profile could not be resolved. Installation was cancelled.';
+    WriteLifecycleFailure('install', 'profile', 'CONNECTOR_PROFILE_UNAVAILABLE', Result, False, True);
     exit;
   end;
-  UpgradeMode := DirExists(ExpandConstant('{app}')) or
-     FileExists(ExpandConstant('{%USERPROFILE}\.mscqr\local-print-agent-state.json')) or
-     FileExists(ExpandConstant('{%USERPROFILE}\.authenticqr\local-print-agent-state.json'));
-  if UpgradeMode then begin
+  HasInstallEvidence := DirExists(ExpandConstant('{app}')) or
+    FileExists(ExpandConstant('{app}\bin\mscqr-local-print-agent.exe')) or
+    FileExists(ExpandConstant('{app}\unins000.exe')) or
+    FileExists(ExpandConstant('{app}\unins000.dat')) or
+    FileExists(ExpandConstant('{userstartup}\MSCQR Connector.vbs')) or
+    RegKeyExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1');
+  HasRetainedEvidence := FileExists(ExpandConstant('{%USERPROFILE}\.mscqr\local-print-agent-state.json')) or
+    FileExists(ExpandConstant('{%USERPROFILE}\.authenticqr\local-print-agent-state.json')) or
+    FileExists(ExpandConstant('{app}\agent.env')) or
+    DirExists(ExpandConstant('{%USERPROFILE}\.mscqr\dispatch-journal'));
+  if HasInstallEvidence or HasRetainedEvidence then begin
     ExtractTemporaryFiles('mscqr-payload\*');
+    if not RunUpgrade('Classify') then begin
+      Result := 'Connector installation state is incomplete or invalid. No files were replaced. Review the local lifecycle log and preserve the identity and dispatch journal.';
+      WriteLifecycleFailure('install', 'classify', 'INCONSISTENT_INSTALLATION', Result, False, True);
+      exit;
+    end;
+    UpgradeMode := LastUpgradeCode = 32;
+    ReinstallMode := LastUpgradeCode = 31;
+  end;
+  if ReinstallMode then exit;
+  if UpgradeMode then begin
     if ExpandConstant('{param:MSCQRRECOVER|}') = '1' then begin
       if RunUpgrade('Recover') then
         Result := 'Previous installation restoration was verified. This upgrade remains cancelled and dispatch remains fenced. Review the journal before another attempt.'
-      else
+      else begin
         Result := 'Interrupted upgrade restoration could not be verified. Keep dispatch fenced and inspect the durable journal.';
+        WriteLifecycleFailure('upgrade', 'recover', 'CONNECTOR_UPGRADE_RECOVERY_FAILED', Result, False, True);
+      end;
       exit;
     end;
     if FileExists(ExpandConstant('{localappdata}\MSCQR\connector-upgrade\transaction.json')) then begin
       if not RunUpgrade('Recover') then begin
         Result := 'The previous connector upgrade remains safely paused. Retry when backend verification is available.';
+        WriteLifecycleFailure('upgrade', 'recover', 'CONNECTOR_UPGRADE_RECOVERY_PAUSED', Result, False, True);
         exit;
       end;
       if RecoveryCompleted then begin
@@ -148,6 +241,8 @@ begin
     else if not RunUpgrade('Prepare') then
       Result := 'Upgrade preflight, backend authorization, staging or backup failed. The existing runtime has not been replaced.'
     else UpgradePrepared := True;
+    if Result <> '' then
+      WriteLifecycleFailure('upgrade', 'prepare', 'CONNECTOR_UPGRADE_PREFLIGHT_FAILED', Result, True, True);
   end;
 end;
 
@@ -160,6 +255,8 @@ begin
     if UpgradeMode then begin
       if not RunUpgrade('Activate') then begin
         InitializationFailed := True;
+        WriteLifecycleFailure('upgrade', 'activate', 'CONNECTOR_UPGRADE_ACTIVATION_FAILED',
+          'Connector upgrade activation failed; dispatch remains fenced.', False, True);
         Log('Connector upgrade activation failed. Review the durable upgrade journal; dispatch remains fenced.');
         if not WizardSilent then
           MsgBox('Connector upgrade failed. Review the durable upgrade journal; dispatch remains fenced.', mbError, MB_OK);
@@ -168,10 +265,13 @@ begin
     end;
     Parameters := '/c ""' + ExpandConstant('{app}\Install Connector.cmd') + '"';
     if WizardSilent then Parameters := Parameters + ' /MSCQRSILENT';
+    if ReinstallMode then Parameters := Parameters + ' /MSCQRREINSTALL';
     Parameters := Parameters + '"';
     if not Exec(ExpandConstant('{cmd}'), Parameters, ExpandConstant('{app}'), SW_HIDE,
       ewWaitUntilTerminated, ResultCode) then begin
       InitializationFailed := True;
+      WriteLifecycleFailure('install', 'initialization', 'CONNECTOR_INITIALIZATION_START_FAILED',
+        'Connector initialization could not be started.', False, True);
       Log('Connector initialization could not be started.');
       if not WizardSilent then
         MsgBox('Connector initialization could not be started. Review the setup log.', mbError, MB_OK);
@@ -187,6 +287,8 @@ begin
         MsgBox('MSCQR Connector is installed and running. Printer setup needs attention: open MSCQR Printer Setup, select a printer and check that Windows reports it online. Printing readiness has not been verified. See the connector setup log and install-result.json.', mbInformation, MB_OK);
     end else if ResultCode <> 0 then begin
       InitializationFailed := True;
+      WriteLifecycleFailure('install', 'verification', 'CONNECTOR_INITIALIZATION_FAILED',
+        'Connector initialization or verification failed. Review the retained setup result.', False, True);
       Log('Connector initialization or verification failed (exit ' + IntToStr(ResultCode) + ').');
       if not WizardSilent then
         MsgBox('Connector initialization or verification failed. Review the connector setup log.', mbError, MB_OK);
@@ -198,6 +300,8 @@ begin
     if UpgradeMode then begin
       if not RunUpgrade('Commit') then begin
         InitializationFailed := True;
+        WriteLifecycleFailure('upgrade', 'commit', 'CONNECTOR_UPGRADE_COMMIT_FAILED',
+          'Connector upgrade commit verification failed; dispatch remains fenced.', False, True);
         Log('Connector upgrade commit verification failed; dispatch remains fenced.');
         if not WizardSilent then
           MsgBox('Connector upgrade commit verification failed; dispatch remains fenced.', mbError, MB_OK);
@@ -230,5 +334,9 @@ procedure DeinitializeSetup;
 begin
   if UpgradePrepared and not SetupCommitted then
     if not RunUpgrade('Recover') then
+    begin
+      WriteLifecycleFailure('upgrade', 'recover', 'CONNECTOR_UPGRADE_RECOVERY_FAILED',
+        'Upgrade recovery is not verified. Keep dispatch fenced and inspect the transaction journal.', False, True);
       Log('Upgrade recovery is NOT verified. Keep dispatch fenced and inspect the transaction journal.');
+    end;
 end;

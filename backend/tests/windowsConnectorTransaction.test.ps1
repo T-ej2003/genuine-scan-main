@@ -102,6 +102,7 @@ function Assert-MscqrExistingIdentity {param($Candidate,$StateFile,$Binding)}
 function Get-MscqrIdentityEvidence {param($Candidate,$StateFile) return [pscustomobject]@{stateSemanticSha256=(Get-FileHash $StateFile).Hash.ToLowerInvariant()}}
 function Get-ScheduledTask { return @() }
 function Get-CimInstance { param($ClassName) return @() }
+function Get-NetTCPConnection { param($LocalPort,$State) return @() }
 function Get-MscqrUninstallSnapshot {
   param($Live)
   $version=if([IO.File]::ReadAllText("$Live\bin\mscqr-local-print-agent.exe").StartsWith('replacement')) {$script:targetVersion} else {$script:sourceVersion}

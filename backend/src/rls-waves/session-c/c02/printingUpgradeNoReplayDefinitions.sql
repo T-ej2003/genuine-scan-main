@@ -24,10 +24,11 @@ DECLARE
   maintenance_snapshot jsonb;
   maintenance_binding jsonb;
   maintenance_registration record;
+  retirement_in_flight boolean;
 BEGIN
   IF p_purpose<>'printing-printer-admin'
      OR p_operation NOT IN (
-       'CREATE','UPDATE','DELETE','RELINK','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
+       'CREATE','UPDATE','DELETE','RELINK','RETIRE','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
        'AUDIT_TEST','AUDIT_TEST_LABEL_ATTENTION','AUDIT_TEST_LABEL_CONFIRMED',
        'AUDIT_TEST_LABEL_QUEUED','AUDIT_DISCOVERY'
      )
@@ -59,7 +60,8 @@ BEGIN
       p."printerRegistrationId",p."orgId",p."licenseeId",p."assignedUserId",p."createdByUserId",
       p."isActive",p."isDefault",p."lastSeenAt",p."lastValidatedAt",p."lastValidationStatus",
       p."lastValidationMessage",p."capabilitySummary",p."calibrationProfile",p.metadata,p."createdAt",p."updatedAt"
-      INTO STRICT printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
+      INTO printer_row FROM public."Printer" p WHERE p.id=p_printer_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     scope_licensee:=printer_row."licenseeId";
     scope_org:=printer_row."orgId";
     IF actor.role='LICENSEE_ADMIN' AND (
@@ -76,7 +78,7 @@ BEGIN
         ))
       )
       OR (
-        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
+        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('RETIRE','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
         AND EXISTS (
           SELECT 1 FROM public."ManufacturerLicenseeLink" ml
           WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=printer_row."licenseeId"
@@ -337,6 +339,62 @@ BEGIN
         "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
         "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
         "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
+  ELSIF p_operation='RETIRE' THEN
+    IF actor.role<>'MANUFACTURER_ADMIN' OR printer_row."connectionType"<>'LOCAL_AGENT'
+       OR printer_row."printerRegistrationId" IS NULL OR coalesce(p_payload,'{}'::jsonb)<>'{}'::jsonb
+    THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    PERFORM set_config('app.printing_registration_id',printer_row."printerRegistrationId",true);
+    SELECT pr.id,pr."trustStatus",pr."revokedAt" INTO maintenance_registration
+      FROM public."PrinterRegistration" pr
+      WHERE pr.id=printer_row."printerRegistrationId" AND pr."userId"=actor."userId"
+        AND pr."orgId" IS NOT DISTINCT FROM scope_org
+        AND pr."licenseeId" IS NOT DISTINCT FROM scope_licensee FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    maintenance_scope:=jsonb_build_array('local',maintenance_registration.id)::text;
+    maintenance_snapshot:=app_rls.printing_maintenance_gate(maintenance_scope,'STATUS',actor."userId",'{}'::jsonb);
+    IF maintenance_snapshot->>'state'='DISPATCH_FENCED'
+       AND maintenance_registration."trustStatus"='REVOKED'
+       AND maintenance_registration."revokedAt" IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM public."Printer" p
+         WHERE p."printerRegistrationId"=maintenance_registration.id AND p."isActive")
+    THEN RETURN jsonb_build_object('printerId',printer_row.id,'registrationId',maintenance_registration.id,
+      'retired',true,'idempotent',true,'dispatchFenced',true); END IF;
+    IF maintenance_snapshot->>'state'<>'DISPATCH_FENCED'
+       OR maintenance_snapshot->>'requestedBy' IS DISTINCT FROM actor."userId"
+       OR coalesce((maintenance_snapshot->>'upgradeInProgress')::boolean,true)
+    THEN RAISE EXCEPTION 'CONNECTOR_RETIREMENT_FENCE_REQUIRED' USING ERRCODE='55000'; END IF;
+    SELECT array_agg(p.id ORDER BY p.id) INTO maintenance_printers FROM public."Printer" p
+      WHERE p."printerRegistrationId"=maintenance_registration.id
+        AND p."assignedUserId"=actor."userId"
+        AND p."orgId" IS NOT DISTINCT FROM scope_org
+        AND p."licenseeId" IS NOT DISTINCT FROM scope_licensee;
+    IF maintenance_printers IS NULL OR NOT printer_row.id=ANY(maintenance_printers)
+    THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    PERFORM set_config('app.printing_maintenance_printers',to_json(maintenance_printers)::text,true),
+            set_config('app.printing_operation','printing-printer-admin-maintenance_inventory',true);
+    SELECT EXISTS (SELECT 1 FROM public."PrintItem" pi
+      JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+      WHERE ps."printerId"=ANY(maintenance_printers) AND pi.state IN ('ISSUED','AGENT_ACKED'))
+      INTO retirement_in_flight;
+    PERFORM set_config('app.printing_operation','printing-printer-admin-retire',true);
+    IF retirement_in_flight OR EXISTS (
+      SELECT 1 FROM jsonb_each(coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb)) lease
+      WHERE lease.value->>'state'='ACCEPTED') OR EXISTS (
+      SELECT 1 FROM public."Printer" p WHERE p.id=ANY(maintenance_printers)
+        AND p.metadata->'pendingLocalAgentTestLabel'->>'status' IN ('CLAIMED','ACKED'))
+    THEN RAISE EXCEPTION 'CONNECTOR_RETIREMENT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+    UPDATE public."PrinterRegistration" SET "trustStatus"='REVOKED',"revokedAt"=coalesce("revokedAt",now_at),
+      "trustReason"='Manufacturer retired connector',"updatedAt"=now_at
+      WHERE id=maintenance_registration.id;
+    UPDATE public."Printer" SET "isActive"=false,"isDefault"=false,
+      "lastValidationStatus"='RETIRED',"lastValidationMessage"='Connector registration retired',
+      "updatedAt"=now_at WHERE "printerRegistrationId"=maintenance_registration.id
+      AND "assignedUserId"=actor."userId" AND "orgId" IS NOT DISTINCT FROM scope_org
+      AND "licenseeId" IS NOT DISTINCT FROM scope_licensee;
+    PERFORM app_rls.printing_write_audit(actor."userId",actor.role,scope_org,scope_licensee,
+      'PRINTER_RETIRED','Printer',printer_row.id,jsonb_build_object('registrationId',maintenance_registration.id));
+    RETURN jsonb_build_object('printerId',printer_row.id,'registrationId',maintenance_registration.id,
+      'retired',true,'idempotent',false,'dispatchFenced',true);
   ELSIF p_operation='DELETE' THEN
     IF printer_row."connectionType"='LOCAL_AGENT'
        OR EXISTS (SELECT 1 FROM public."PrintJob" j

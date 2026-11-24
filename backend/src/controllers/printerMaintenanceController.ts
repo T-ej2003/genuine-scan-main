@@ -260,6 +260,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
   try {
     const input = z.discriminatedUnion("action", [
       z.object({ action: z.literal("request") }).strict(),
+      z.object({ action: z.literal("retire") }).strict(),
       z.object({ action: z.literal("inventory") }).strict(),
       z.object({ action: z.enum(["authorize","release"]), evidence: z.object({ statement: z.string().max(100000), signature: z.string().max(200) }).strict() }).strict(),
       z.object({ action: z.enum(["consume", "verify"]), token: z.string().regex(/^[a-f0-9]{64}$/), binding: maintenanceBinding }).strict(),
@@ -328,7 +329,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       payload = { binding: input.binding, tokenHash: createHash("sha256").update(input.token).digest("hex") };
     }
     const data = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
-      operation: ({ request: "MAINTENANCE_REQUEST", inventory: "MAINTENANCE_INVENTORY", authorize: "MAINTENANCE_AUTHORIZE",
+      operation: ({ request: "MAINTENANCE_REQUEST", retire: "RETIRE", inventory: "MAINTENANCE_INVENTORY", authorize: "MAINTENANCE_AUTHORIZE",
         consume: "MAINTENANCE_CONSUME", verify: "MAINTENANCE_VERIFY", release: "MAINTENANCE_RELEASE" } as const)[input.action], printerId: String(req.params.id), payload });
     if (input.action === "release") {
       const released = payload.evidence as { tokenHash?: string; binding?: Record<string, string> };

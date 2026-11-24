@@ -1,28 +1,9 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
-
-set "UNINSTALL_SCRIPT=%~dp0uninstall-startup-task.ps1"
-if not exist "%UNINSTALL_SCRIPT%" (
-  echo.
-  echo MSCQR Connector removal script was not found in this folder.
-  echo Extract the entire ZIP to a normal folder first, then run Uninstall Connector.cmd again.
-  pause
+set "UNINSTALLER=%~dp0unins000.exe"
+if not exist "%UNINSTALLER%" (
+  echo MSCQR Connector's Windows uninstaller is missing. No files were removed.
   exit /b 1
 )
-
-set "MSCQR_PACKAGED_INSTALL=1"
-powershell.exe -NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "%UNINSTALL_SCRIPT%"
-set "EXITCODE=%ERRORLEVEL%"
-
-if not "%EXITCODE%"=="0" (
-  echo.
-  echo MSCQR Connector removal did not complete.
-  pause
-  exit /b %EXITCODE%
-)
-
-echo.
-echo MSCQR Connector has been removed.
-pause
-exit /b 0
+"%UNINSTALLER%" %*
+exit /b %ERRORLEVEL%

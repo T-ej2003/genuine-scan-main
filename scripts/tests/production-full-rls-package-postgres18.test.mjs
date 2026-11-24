@@ -1594,7 +1594,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
         RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
         DROP FUNCTION app_rls.printing_connector_session(text,text,text,jsonb);
-        ${PRINTING_RELEASE_NAMES.filter(n => n !== "printing_connector_session").map(oldFunction).join("\n")}
+        DROP FUNCTION app_rls.printing_maintenance_gate(text,text,text,jsonb);
+        ${PRINTING_RELEASE_NAMES.filter(n => !["printing_connector_session", "printing_maintenance_gate"].includes(n)).map(oldFunction).join("\n")}
         ${["public_verify_execute", "verify_signed_qr", "claim_customer_ownership"].map(oldPublicFunction).join("\n")}
         RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
         REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
@@ -1629,7 +1630,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), beforeB03);
         assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "C02 rollback grant"), "f");
       }
-      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 55 });
+      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 57 });
       const afterC02 = hashProductionRlsCatalogue(await collectCatalogueRows(verifier));
       assert.deepEqual(Object.fromEntries(Object.entries(afterC02).map(([k,v]) => [k,canonicalSha256(v)])), combinedPackage.successorCatalogue);
       // Commit succeeded but migration-history recording was interrupted: retry

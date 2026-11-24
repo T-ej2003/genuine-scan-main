@@ -28,7 +28,7 @@ test("combined boundary advances only reviewed printing identities and preserves
   for (const key of Object.keys(rows)) for (const row of rows[key]) {
     assert.equal(row.sha256, (PRINTING_RELEASE_OBJECTS[key].includes(row.identity) ? "2" : "1").repeat(64));
   }
-  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 28);
+  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 30);
   assert.equal(predecessor.objects.routines[0].sha256, "1".repeat(64));
 });
 
@@ -40,13 +40,16 @@ test("every printing and public routine changed by this PR has a governed instal
   ]) {
     const old = spawnSync("git", ["show", `${base}:${file}`], { encoding: "utf8" });
     assert.equal(old.status, 0, old.stderr);
-    const definitions = source => new Map([...source.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${schema}\\.([a-z0-9_]+)\\(`, "g"))]
-      .map(match => [match[1], source.slice(match.index, source.indexOf(`\n${delimiter}`, match.index) + delimiter.length + 1)]));
+    const definitions = input => {
+      const source = input.replaceAll("\r\n", "\n");
+      return new Map([...source.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${schema}\\.([a-z0-9_]+)\\(`, "g"))]
+        .map(match => [match[1], source.slice(match.index, source.indexOf(`\n${delimiter}`, match.index) + delimiter.length + 1)]));
+    };
     const before = definitions(old.stdout), after = definitions(fs.readFileSync(file, "utf8"));
     const changed = [...after].filter(([name, sql]) => before.get(name) !== sql).map(([name]) => name);
     assert.ok(changed.length > 0);
     const incremental = file.endsWith("printingLifecycle.sql")
-      ? fs.readFileSync("backend/src/rls-waves/session-c/c02/printingMaintenanceRetryIncremental.sql", "utf8") : "";
+      ? fs.readFileSync("backend/src/rls-waves/session-c/c02/printingMaintenanceRetryIncremental.sql", "utf8").replaceAll("\r\n", "\n") : "";
     if (incremental) {
       assert.match(incremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
       assert.match(incremental, /MAINTENANCE_MIGRATION_IDENTITY_INVALID/);
@@ -79,8 +82,46 @@ test("every printing and public routine changed by this PR has a governed instal
       assert.deepEqual([...definitions(partialBatchIncremental)], partialBatchFunctions.map(name => [name, after.get(name)]),
         "partial-batch migration must install only the four exact canonical functions");
     }
+    const retirementIncremental = file.endsWith("printingLifecycle.sql")
+      ? fs.readFileSync("backend/src/rls-waves/session-c/c02/connectorRetirementIncremental.sql", "utf8").replaceAll("\r\n", "\n") : "";
+    if (retirementIncremental) {
+      assert.match(retirementIncremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
+      assert.match(retirementIncremental, /CONNECTOR_RETIREMENT_FUNCTION_OWNER_INVALID/);
+      assert.match(retirementIncremental, /ALTER POLICY "printing_lifecycle_printer_update" ON public\."Printer"/);
+      assert.match(retirementIncremental, /ALTER POLICY "printing_lifecycle_printerregistration_update" ON public\."PrinterRegistration"/);
+      const generatedPolicies = fs.readFileSync("scripts/rls/sql/generated/30-policies.sql", "utf8").replaceAll("\r\n", "\n");
+      for (const [policy, table] of [["printing_lifecycle_printer_update", "Printer"],
+        ["printing_lifecycle_printerregistration_update", "PrinterRegistration"]]) {
+        const create = generatedPolicies.split("\n").find(line =>
+          line.startsWith(`CREATE POLICY "${policy}" ON public."${table}" `));
+        assert.ok(create, `generated policy ${policy} must exist`);
+        const alter = create.replace(
+          `CREATE POLICY "${policy}" ON public."${table}" AS PERMISSIVE FOR UPDATE TO "mscqr_rls_cert_auth_owner"`,
+          `ALTER POLICY "${policy}" ON public."${table}" TO "mscqr_prd_rls_phase2_auth_owner"`
+        ).replaceAll("mscqr_rls_cert_auth_owner", "mscqr_prd_rls_phase2_auth_owner")
+          .replaceAll("mscqr_rls_cert_app", "mscqr_prd_rls_phase2_app");
+        assert.ok(retirementIncremental.includes(alter), `retirement migration must install exact policy ${policy}`);
+      }
+      assert.match(retirementIncremental, /\nCOMMIT;\n$/);
+      assert.deepEqual([...definitions(retirementIncremental)],
+        [["printing_maintenance_gate", after.get("printing_maintenance_gate")
+          .replaceAll("{{APP_ROLE}}", "'mscqr_prd_rls_phase2_app'")
+          .replaceAll("{{WORKER_ROLE}}", "'mscqr_prd_rls_phase2_worker'")],
+        ["printing_printer_administration", after.get("printing_printer_administration")]],
+        "retirement migration must install the exact canonical gate and printer function and no other routine");
+      const retireBranch = definition => definition.slice(definition.indexOf("  ELSIF p_operation='RETIRE' THEN"),
+        definition.indexOf("  ELSIF p_operation='DELETE' THEN"));
+      const canonicalRetirement = retireBranch(after.get("printing_printer_administration"));
+      assert.ok(canonicalRetirement.includes("CONNECTOR_RETIREMENT_RECONCILIATION_REQUIRED"));
+      for (const source of ["backend/src/rls-waves/session-c/c02/printingUpgradeNoReplayDefinitions.sql",
+        "scripts/rls/sql/generated/22-printing-upgrade.sql"]) {
+        const upgrade = definitions(fs.readFileSync(source, "utf8").replaceAll("\r\n", "\n"));
+        assert.equal(retireBranch(upgrade.get("printing_printer_administration")), canonicalRetirement,
+          `${source} must preserve the guarded canonical retirement branch`);
+      }
+    }
     assert.deepEqual(changed.filter(name => !allowed.includes(name) &&
-      !(incremental && ["printing_maintenance_gate", "printing_create_job", "printing_record_sample", "printing_release_batch", "printing_readiness"].includes(name))), [], `${file} changed functions missing from governed release`);
+      !(incremental && ["printing_create_job", "printing_record_sample", "printing_release_batch", "printing_readiness"].includes(name))), [], `${file} changed functions missing from governed release`);
   }
 });
 
@@ -116,10 +157,12 @@ test("B03 diagnostic requires all printing deltas at exact successor, never mere
 test("combined C02 task keeps root executor bindings and bounded source-authenticated transport", () => {
   const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
   assert.deepEqual(runtime.validatePackage(pkg), pkg);
-  assert.equal(pkg.definitions.length, 12); assert.equal(pkg.policySql.length, 19);
+  assert.equal(pkg.definitions.length, 14); assert.equal(pkg.policySql.length, 19);
   assert.ok(pkg.definitions.some(({ schema, name }) => schema === "app_rls" && name === "printing_gateway_job"));
+  assert.deepEqual(pkg.definitions.filter(({ name }) => ["printing_maintenance_gate", "printing_printer_administration"].includes(name)).map(({ name }) => name),
+    ["printing_maintenance_gate", "printing_printer_administration"], "retirement routines must be installed in the executed combined package");
   assert.deepEqual(pkg.definitions.slice(-4).map(({ schema, name }) => `${schema}.${name}`), [
-    "app_rls.printing_worker_network_job", "app_public.public_verify_execute", "app_public.verify_signed_qr", "app_public.claim_customer_ownership",
+    "app_rls.printing_printer_administration", "app_public.public_verify_execute", "app_public.verify_signed_qr", "app_public.claim_customer_ownership",
   ]);
   const publicExecutor = pkg.definitions.find(({ name }) => name === "public_verify_execute");
   assert.match(publicExecutor.sql, /activation\."eventType"='AUTOMATIC_ACTIVATION'/);
@@ -145,9 +188,9 @@ test("combined C02 task keeps root executor bindings and bounded source-authenti
   assert.equal(task.definition.containerDefinitions[0].secrets.length, 1);
   const resultBody = { schemaVersion: 2, kind: "PRODUCTION_C02_COMBINED_INSTALL_RESULT", sourceSha,
     packageSha256: pkg.packageSha256, database: "mscqr_production_rls_green_phase2", databaseRole: "mscqr_prod_admin",
-    status: "APPLIED", writeCount: 55 };
+    status: "APPLIED", writeCount: 57 };
   assert.equal(authenticateC02SessionResult(JSON.stringify({ ...resultBody, evidenceSha256: canonicalSha256(resultBody) }),
-    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 55);
+    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 57);
   const result = spawnSync(process.execPath, task.definition.containerDefinitions[0].command,
     { cwd: os.tmpdir(), encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(result.status, 1);
