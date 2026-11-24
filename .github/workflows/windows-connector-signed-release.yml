@@ -547,7 +547,15 @@ jobs:
             throw 'Signed candidate source version differs from certification source.'
           }
           if ('${{ inputs.execution_mode }}' -ceq 'publish_fresh_install' -and $source -cne $env:GITHUB_SHA) {
-            throw 'Fresh-install publication requires an exact-current-main signed candidate.'
+            $manifest = Get-Content backend/local-print-agent/releases/manifest.json -Raw | ConvertFrom-Json
+            $candidate = @($manifest.releases | Where-Object version -ceq $version)
+            if ($manifest.latestVersion -cne $version -or $candidate.Count -ne 1 -or
+                $null -ne $candidate[0].publishedAt -or $null -ne $candidate[0].platforms.windows -or
+                $candidate[0].certification.targetSourceSha -cne $source -or
+                $candidate[0].certification.installerSha256 -cne $expected -or
+                $candidate[0].certification.runtimeSha256 -cne $expectedRuntime) {
+              throw 'Historical signed candidate does not match the unpublished certified release record.'
+            }
           }
           $name = "mscqr-windows-candidate-$version-$source"
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
