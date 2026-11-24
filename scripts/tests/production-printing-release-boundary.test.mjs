@@ -39,13 +39,16 @@ test("every printing and public routine changed by this PR has a governed instal
   ]) {
     const old = spawnSync("git", ["show", `${base}:${file}`], { encoding: "utf8" });
     assert.equal(old.status, 0, old.stderr);
-    const definitions = source => new Map([...source.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${schema}\\.([a-z0-9_]+)\\(`, "g"))]
-      .map(match => [match[1], source.slice(match.index, source.indexOf(`\n${delimiter}`, match.index) + delimiter.length + 1)]));
+    const definitions = input => {
+      const source = input.replaceAll("\r\n", "\n");
+      return new Map([...source.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${schema}\\.([a-z0-9_]+)\\(`, "g"))]
+        .map(match => [match[1], source.slice(match.index, source.indexOf(`\n${delimiter}`, match.index) + delimiter.length + 1)]));
+    };
     const before = definitions(old.stdout), after = definitions(fs.readFileSync(file, "utf8"));
     const changed = [...after].filter(([name, sql]) => before.get(name) !== sql).map(([name]) => name);
     assert.ok(changed.length > 0);
     const incremental = file.endsWith("printingLifecycle.sql")
-      ? fs.readFileSync("backend/src/rls-waves/session-c/c02/printingMaintenanceRetryIncremental.sql", "utf8") : "";
+      ? fs.readFileSync("backend/src/rls-waves/session-c/c02/printingMaintenanceRetryIncremental.sql", "utf8").replaceAll("\r\n", "\n") : "";
     if (incremental) {
       assert.match(incremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
       assert.match(incremental, /MAINTENANCE_MIGRATION_IDENTITY_INVALID/);
@@ -56,8 +59,19 @@ test("every printing and public routine changed by this PR has a governed instal
       assert.deepEqual([...definitions(incremental)], [["printing_maintenance_gate", productionDefinition]],
         "incremental migration must install the exact canonical function and no other routine");
     }
+    const retirementIncremental = file.endsWith("printingLifecycle.sql")
+      ? fs.readFileSync("backend/src/rls-waves/session-c/c02/connectorRetirementIncremental.sql", "utf8").replaceAll("\r\n", "\n") : "";
+    if (retirementIncremental) {
+      assert.match(retirementIncremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
+      assert.match(retirementIncremental, /CONNECTOR_RETIREMENT_FUNCTION_OWNER_INVALID/);
+      assert.match(retirementIncremental, /\nCOMMIT;\n$/);
+      assert.deepEqual([...definitions(retirementIncremental)],
+        [["printing_printer_administration", after.get("printing_printer_administration")]],
+        "retirement migration must install the exact canonical function and no other routine");
+    }
     assert.deepEqual(changed.filter(name => !allowed.includes(name) &&
-      !(incremental && name === "printing_maintenance_gate")), [], `${file} changed functions missing from governed release`);
+      !(incremental && name === "printing_maintenance_gate") &&
+      !(retirementIncremental && name === "printing_printer_administration")), [], `${file} changed functions missing from governed release`);
   }
 });
 

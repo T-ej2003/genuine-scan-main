@@ -121,7 +121,7 @@ async function main() {
   const retirementArtifact = readFileSync(path.join(__dirname,
     "../../../src/rls-waves/session-c/c02/connectorRetirementIncremental.sql"), "utf8");
   const retirementDefinition = readFileSync(path.join(__dirname,
-    "../../../src/rls-waves/session-c/c02/printingUpgradeNoReplayDefinitions.sql"), "utf8")
+    "../../../src/rls-waves/session-c/c02/printingLifecycle.sql"), "utf8")
     .match(/CREATE OR REPLACE FUNCTION app_rls\.printing_printer_administration\([\s\S]*?\n\$fn\$;/)?.[0];
   assert(retirementDefinition && retirementArtifact.includes(retirementDefinition),
     "the retirement deployment artifact must match the certified current printer function");
