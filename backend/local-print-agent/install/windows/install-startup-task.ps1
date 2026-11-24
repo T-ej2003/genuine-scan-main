@@ -516,7 +516,10 @@ function Initialize-AgentIdentity {
       [string]$evidence.stateSha256 -notmatch '^[a-fA-F0-9]{64}$') {
     throw 'Connector identity evidence does not match the expected state location.'
   }
-  if ($RetainedReinstall) { Write-UpgradeLog 'Retained connector identity validated and reused.' }
+  if ($RetainedReinstall) {
+    $script:RetainedStateFile = $retainedDiscovery.selectedPath
+    Write-UpgradeLog 'Retained connector identity validated and reused.'
+  }
   else { Write-UpgradeLog 'Connector first-install identity initialized and validated at the canonical state location.' }
   } finally { $env:PRINT_AGENT_STATE_FILE = $previousStateOverride }
 }
@@ -612,6 +615,78 @@ function Assert-PostInstallProcessState {
   }
 }
 
+function Complete-RetainedReinstallFence {
+  param($VerifiedStatus)
+  if (-not $RetainedReinstall) { return $VerifiedStatus }
+  if ([string]::IsNullOrWhiteSpace([string]$script:RetainedStateFile)) { throw 'Retained connector state path was not verified.' }
+  $marker = Join-Path ([IO.Path]::GetDirectoryName($script:RetainedStateFile)) 'maintenance-fence.json'
+  $pending = "$marker.release-pending"
+  Assert-MscqrPlainPath $marker
+  Assert-MscqrPlainPath $pending
+  if (Test-Path -LiteralPath $pending) { throw 'Interrupted maintenance fence release requires reviewed recovery.' }
+  if (-not (Test-Path -LiteralPath $marker)) { return $VerifiedStatus }
+  Assert-MscqrPrivatePath $marker
+  $fence = Read-MscqrJson $marker
+  if ($fence.version -ne 1 -or $fence.state -cne 'FENCED') { throw 'Retained maintenance fence is invalid.' }
+
+  $snapshotPath = Join-Path $LifecycleDir 'uninstall-preservation.json'
+  $resultPath = Join-Path $LifecycleDir 'uninstall-result.json'
+  Assert-MscqrPlainPath $snapshotPath
+  Assert-MscqrPlainPath $resultPath
+  if (-not (Test-Path -LiteralPath $snapshotPath -PathType Leaf) -or
+      -not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+    throw 'Retained fence lacks a completed local uninstall record.'
+  }
+  $snapshot = Read-MscqrJson $snapshotPath
+  $uninstall = Read-MscqrJson $resultPath
+  if ($uninstall.operation -cne 'uninstall' -or $uninstall.stage -cne 'complete' -or
+      $uninstall.outcome -cne 'success' -or
+      -not (Test-SamePath -Left $snapshot.live -Right $AgentHome) -or
+      -not (Test-SamePath -Left $snapshot.wrapper -Right $Wrapper) -or
+      -not (Test-SamePath -Left $snapshot.startup -Right $StartupLauncher) -or
+      [string]$snapshot.fenceSha256 -notmatch '^[a-fA-F0-9]{64}$' -or
+      (Get-FileHash -LiteralPath $marker -Algorithm SHA256).Hash -ine $snapshot.fenceSha256) {
+    throw 'Retained fence is not bound to this completed uninstall.'
+  }
+  $stateRecorded = $false
+  foreach ($record in @($snapshot.files)) {
+    Assert-MscqrPlainPath ([string]$record.path)
+    if (Test-SamePath -Left ([string]$record.path) -Right $script:RetainedStateFile) { $stateRecorded = $true }
+    if (-not (Test-Path -LiteralPath $record.path -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $record.path -Algorithm SHA256).Hash -ine $record.sha256) {
+      throw 'Retained identity, configuration or journal changed since uninstall.'
+    }
+  }
+  if (-not $stateRecorded) { throw 'Retained identity is missing from the uninstall preservation record.' }
+
+  $runtimeHash = (Get-FileHash -LiteralPath $CanonicalAgentExe -Algorithm SHA256).Hash
+  Stop-MscqrVerifiedRuntime $CanonicalAgentExe $runtimeHash
+  [IO.File]::Move($marker, $pending)
+  try {
+    Start-AgentProcess
+    $restarted = Wait-ForVerifiedStatus -TargetUrl $StatusUrl -ExpectedVersion $ResolvedVersion
+    if ($null -eq $restarted) { throw 'Reinstalled connector did not restart after local fence release.' }
+    Assert-PostInstallProcessState
+    Remove-Item -LiteralPath $pending -Force -ErrorAction Stop
+    if ((Test-Path -LiteralPath $marker) -or (Test-Path -LiteralPath $pending)) {
+      throw 'Retained maintenance fence release did not complete.'
+    }
+    Write-UpgradeLog 'Completed verified local fence release after retained-state reinstall.'
+    return $restarted
+  } catch {
+    $failure = $_
+    if (Test-Path -LiteralPath $pending) {
+      if (Test-Path -LiteralPath $marker) {
+        if ((Read-MscqrJson $marker).state -cne 'FENCED') { throw 'Conflicting reinstall fences require reviewed recovery.' }
+        Remove-Item -LiteralPath $pending -Force -ErrorAction Stop
+      } else { [IO.File]::Move($pending, $marker) }
+    }
+    if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { throw 'Reinstall fence could not be restored safely.' }
+    if (@(Get-MscqrRuntimeProcesses).Count) { Stop-MscqrVerifiedRuntime $CanonicalAgentExe $runtimeHash }
+    throw $failure
+  }
+}
+
 function Complete-Install {
   param(
     [int]$ExitCode,
@@ -683,6 +758,11 @@ Remove-LegacyStartupEntries
 
   $script:InstallStage = 'identity'
   Initialize-AgentIdentity
+  if ($RetainedReinstall) {
+    $pendingFence = Join-Path ([IO.Path]::GetDirectoryName($script:RetainedStateFile)) 'maintenance-fence.json.release-pending'
+    Assert-MscqrPlainPath $pendingFence
+    if (Test-Path -LiteralPath $pendingFence) { throw 'Interrupted maintenance fence release requires reviewed recovery.' }
+  }
   $script:InstallStage = 'startup'
   Register-StartupLauncher
   Start-AgentProcess
@@ -693,6 +773,10 @@ Remove-LegacyStartupEntries
     throw "Connector installed, but the local status endpoint did not start at version $ResolvedVersion in time. Check $LogDir\agent.log and $SetupLog."
   }
   Assert-PostInstallProcessState
+  if ($RetainedReinstall) {
+    $script:InstallStage = 'fence-release'
+    $verificationResult = Complete-RetainedReinstallFence -VerifiedStatus $verificationResult
+  }
   Write-UpgradeLog "Post-install status verification passed for agentVersion/buildVersion $ResolvedVersion."
 
   $setupVerification = $verificationResult.setupVerification

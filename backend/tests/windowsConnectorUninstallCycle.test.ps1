@@ -54,7 +54,7 @@ try {
   [IO.File]::WriteAllText($fixtureScript,$source.Replace($sourceLine,'# fixture supplies isolated transaction functions'))
   . $fixtureScript -Operation Preflight
   function Enter-MscqrStoppedFence {param($StateFile)
-    [IO.File]::WriteAllText((Join-Path (Split-Path $StateFile) 'maintenance-fence.json'),'{"state":"FENCED"}')
+    [IO.File]::WriteAllText((Join-Path (Split-Path $StateFile) 'maintenance-fence.json'),'{"version":1,"state":"FENCED"}')
   }
   Invoke-MscqrUninstallPreflight
   foreach($path in @($wrapper,$startup)) {if(Test-Path -LiteralPath $path) {throw "Uninstall preflight retained $path"}}
@@ -71,6 +71,68 @@ try {
   if((Get-MscqrInstallationClassification $env:USERPROFILE $live $runtime) -cne 'RETAINED_STATE_REINSTALL') {
     throw 'Preserved installation was not classified as retained-state reinstall.'
   }
+  # Exercise the installer's fence release with this uninstall record. Only
+  # process and status boundaries are simulated in the isolated fixture.
+  New-Item -ItemType Directory -Path (Split-Path $runtime) -Force | Out-Null
+  [IO.File]::WriteAllText($runtime,'synthetic replacement runtime')
+  [IO.File]::WriteAllText($wrapper,'synthetic replacement wrapper')
+  [IO.File]::WriteAllText($startup,'synthetic replacement launcher')
+  $installSource=Join-Path $installer 'install-startup-task.ps1'
+  $parseErrors=$null
+  $ast=[Management.Automation.Language.Parser]::ParseFile($installSource,[ref]$null,[ref]$parseErrors)
+  if(@($parseErrors).Count) {throw 'Installer source has a PowerShell parse error.'}
+  $release=@($ast.FindAll({param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Complete-RetainedReinstallFence'},$true))
+  if($release.Count -ne 1) {throw 'Retained reinstall fence release function was not found.'}
+  Invoke-Expression $release[0].Extent.Text
+  $RetainedReinstall=$true;$script:RetainedStateFile=$state
+  $LifecycleDir=Join-Path $env:LOCALAPPDATA 'MSCQR\lifecycle'
+  $AgentHome=$live;$Wrapper=$wrapper;$StartupLauncher=$startup;$CanonicalAgentExe=$runtime
+  $StatusUrl='http://127.0.0.1:17866/status';$ResolvedVersion='synthetic'
+  $script:stopCount=0;$script:startCount=0;$script:failRestart=$false
+  function Test-SamePath {param($Left,$Right)
+    return [IO.Path]::GetFullPath([string]$Left) -ieq [IO.Path]::GetFullPath([string]$Right)
+  }
+  function Assert-MscqrPrivatePath {param($Path)}
+  function Stop-MscqrVerifiedRuntime {param($Runtime,$Hash) $script:stopCount++}
+  function Start-AgentProcess {$script:startCount++}
+  function Wait-ForVerifiedStatus {param($TargetUrl,$ExpectedVersion)
+    if($script:failRestart) {throw 'synthetic restart failure'}
+    return [pscustomobject]@{setupVerification=[pscustomobject]@{state='READY'}}
+  }
+  function Assert-PostInstallProcessState {}
+  function Write-UpgradeLog {param($Message)}
+  $verified=[pscustomobject]@{setupVerification=[pscustomobject]@{state='READY'}}
+  $result=Complete-RetainedReinstallFence -VerifiedStatus $verified
+  $marker=Join-Path (Split-Path $state) 'maintenance-fence.json'
+  if($result.setupVerification.state -ne 'READY' -or $script:stopCount -ne 1 -or $script:startCount -ne 1 -or
+     (Test-Path -LiteralPath $marker) -or (Test-Path -LiteralPath "$marker.release-pending")) {
+    throw 'Retained reinstall did not complete verified fence release.'
+  }
+  for($i=0;$i -lt $preserved.Count;$i++) {
+    if((Get-FileHash -LiteralPath $preserved[$i] -Algorithm SHA256).Hash -ne $hashes[$i]) {
+      throw "Reinstall changed preserved state: $($preserved[$i])"
+    }
+  }
+  [IO.File]::WriteAllText($marker,'{"version":1,"state":"FENCED"}')
+  [IO.File]::WriteAllText($script:journal,'tampered synthetic journal')
+  try {Complete-RetainedReinstallFence -VerifiedStatus $verified | Out-Null;throw 'Tampered journal was accepted.'}
+  catch {if($_.Exception.Message -ne 'Retained identity, configuration or journal changed since uninstall.'){throw}}
+  if($script:stopCount -ne 1 -or -not (Test-Path -LiteralPath $marker)) {throw 'Tampered journal changed the fence.'}
+  [IO.File]::WriteAllText($script:journal,'{"journalVersion":3,"state":"ATTEMPT_RESERVED"}')
+  [IO.File]::WriteAllText($marker,'{"version":1,"state":"FENCED","createdAt":"foreign"}')
+  try {Complete-RetainedReinstallFence -VerifiedStatus $verified | Out-Null;throw 'Foreign fence was accepted.'}
+  catch {if($_.Exception.Message -ne 'Retained fence is not bound to this completed uninstall.'){throw}}
+  if($script:stopCount -ne 1) {throw 'Foreign fence reached runtime shutdown.'}
+  [IO.File]::WriteAllText($marker,'{"version":1,"state":"FENCED"}')
+  $script:failRestart=$true
+  try {Complete-RetainedReinstallFence -VerifiedStatus $verified | Out-Null;throw 'Failed restart was accepted.'}
+  catch {if($_.Exception.Message -ne 'synthetic restart failure'){throw}}
+  if(-not (Test-Path -LiteralPath $marker) -or (Test-Path -LiteralPath "$marker.release-pending")) {
+    throw 'Failed restart did not restore the persistent fence.'
+  }
+  Write-Host 'PASS retained-state reinstall releases a verified uninstall fence and restores it on failure'
   Write-Host 'PASS existing installation -> standard uninstall -> retained-state reinstall classification (external boundaries simulated)'
 } finally {
   $env:LOCALAPPDATA=$originalLocal;$env:APPDATA=$originalApp;$env:USERPROFILE=$originalProfile

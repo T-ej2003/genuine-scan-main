@@ -82,7 +82,9 @@ function Invoke-MscqrUninstallPreflight {
     throw 'Persistent evidence changed during connector shutdown.'
   }
   [IO.Directory]::CreateDirectory($lifecycleRoot) | Out-Null
-  [IO.File]::WriteAllText($snapshotFile,(@{files=$before;live=$live;wrapper=$wrapper;startup=$startup} | ConvertTo-Json -Depth 8),[Text.Encoding]::UTF8)
+  $fencePath=Join-Path ([IO.Path]::GetDirectoryName($stateFile)) 'maintenance-fence.json'
+  [IO.File]::WriteAllText($snapshotFile,(@{files=$before;live=$live;wrapper=$wrapper;startup=$startup;
+    fenceSha256=(Get-FileHash -LiteralPath $fencePath -Algorithm SHA256).Hash.ToLowerInvariant()} | ConvertTo-Json -Depth 8),[Text.Encoding]::UTF8)
   Remove-Item -LiteralPath $startup -Force -ErrorAction Stop
   if(Test-Path -LiteralPath $wrapper -PathType Leaf) {Remove-Item -LiteralPath $wrapper -Force -ErrorAction Stop}
   if((Test-Path -LiteralPath $startup) -or (Test-Path -LiteralPath $wrapper)) {

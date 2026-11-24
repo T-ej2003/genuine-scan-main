@@ -28,6 +28,7 @@ const ids = {
   staleRegistration: "50000000-0000-4000-8000-000000000803",
   retirementRegistration: "50000000-0000-4000-8000-000000000804",
   retirementPrinter: "50000000-0000-4000-8000-000000000704",
+  retirementSiblingPrinter: "50000000-0000-4000-8000-000000000705",
 };
 const caps = { maker: "M".repeat(43), checker: "C".repeat(43), outsider: "O".repeat(43) };
 const quorumCases = [
@@ -172,7 +173,7 @@ async function main() {
     DELETE FROM public."PrinterAttestation" WHERE "printerRegistrationId" IN ('${ids.registration}','${ids.staleRegistration}','${ids.retirementRegistration}');
     DELETE FROM public."PrinterAgentSession" WHERE "registrationId" IN ('${ids.registration}','${ids.staleRegistration}','${ids.retirementRegistration}');
     DELETE FROM public."RefreshToken" WHERE id IN ('${ids.makerRefresh}','${ids.checkerRefresh}','${ids.outsiderRefresh}');
-    DELETE FROM public."Printer" WHERE id IN ('${ids.printer}','${ids.foreignPrinter}','${ids.discoveredPrinter}','${ids.retirementPrinter}');
+    DELETE FROM public."Printer" WHERE id IN ('${ids.printer}','${ids.foreignPrinter}','${ids.discoveredPrinter}','${ids.retirementPrinter}','${ids.retirementSiblingPrinter}');
     DELETE FROM public."PrinterRegistration" WHERE id IN ('${ids.registration}','${ids.staleRegistration}','${ids.retirementRegistration}');
     DELETE FROM public."QRCode" WHERE id IN ('${ids.qr}','${ids.raceQr}');
     DELETE FROM public."Batch" WHERE id IN ('${ids.batch}','${ids.raceBatch}');
@@ -2511,6 +2512,12 @@ async function main() {
       "assignedUserId","createdByUserId","isActive","updatedAt")
     VALUES('${ids.retirementPrinter}','Retirement Fixture','LOCAL_AGENT','ZPL','retirement-native',
       'retirement-fixture-agent','retirement-fixture-device','${ids.retirementRegistration}',
+      '${ids.orgA}','${ids.licenseeA}','${ids.maker}','${ids.maker}',true,now());
+    INSERT INTO public."Printer"(id,name,"connectionType","commandLanguage","nativePrinterId",
+      "agentId","deviceFingerprint","printerRegistrationId","orgId","licenseeId",
+      "assignedUserId","createdByUserId","isActive","updatedAt")
+    VALUES('${ids.retirementSiblingPrinter}','Retirement Sibling','LOCAL_AGENT','ZPL','retirement-native-sibling',
+      'retirement-fixture-agent','retirement-fixture-device','${ids.retirementRegistration}',
       '${ids.orgA}','${ids.licenseeA}','${ids.maker}','${ids.maker}',true,now());`);
   const retireSql=(capability)=>`SELECT app_rls.printing_printer_administration(
     '${capability}','printing-printer-admin','${requestId()}','RETIRE','${ids.retirementPrinter}','{}'::jsonb)`;
@@ -2531,6 +2538,8 @@ async function main() {
     WHERE id='${ids.retirementRegistration}'`),'REVOKED');
   assert.equal(psql(admin,`SELECT "isActive"::text FROM public."Printer"
     WHERE id='${ids.retirementPrinter}'`),'false');
+  assert.equal(psql(admin,`SELECT "isActive"::text FROM public."Printer"
+    WHERE id='${ids.retirementSiblingPrinter}'`),'false');
   assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem"`),historicalItems);
   denied(app,`SELECT app_rls.printing_connector_event('${ids.retirementRegistration}',
     'retirement-fixture-agent','retirement-fixture-device','retirement_claim_nonce',now()::timestamp,
