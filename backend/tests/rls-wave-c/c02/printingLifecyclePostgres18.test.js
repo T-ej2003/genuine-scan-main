@@ -167,7 +167,7 @@ async function main() {
   const abortedRequestHash = hash("printing-idempotency-aborted-request");
 
   psql(admin, `
-    DELETE FROM public."SystemCheckpoint" WHERE key='connector-maintenance:${hash(JSON.stringify(["local", ids.retirementRegistration]))}';
+    DELETE FROM public."SystemCheckpoint" WHERE value->>'scope'=jsonb_build_array('local','${ids.retirementRegistration}')::text;
     DELETE FROM public."ActionIdempotencyKey" WHERE "keyHash" IN ('${idempotencyKeyHash}','${abortedKeyHash}');
     DELETE FROM public."PrintItemEvent" WHERE "actorUserId" IN ('${ids.maker}','${ids.checker}','${ids.outsider}');
     DELETE FROM public."PrintAuditEvent" WHERE "batchId" IN ('${ids.batch}','${ids.raceBatch}');
@@ -2540,7 +2540,9 @@ async function main() {
     '50000000-0000-4000-8000-000000009999','{}'::jsonb)`,/PRINTING_BOUNDARY_DENIED/);
   denied(app,retireSql(caps.maker),/CONNECTOR_RETIREMENT_FENCE_REQUIRED/);
   assert.equal(json(app,retirementFenceSql).state,'DISPATCH_FENCED');
-  const retirementCheckpoint=`connector-maintenance:${hash(JSON.stringify(['local',ids.retirementRegistration]))}`;
+  const retirementCheckpoint=psql(admin,`SELECT key FROM public."SystemCheckpoint"
+    WHERE value->>'scope'=jsonb_build_array('local','${ids.retirementRegistration}')::text`);
+  assert.match(retirementCheckpoint,/^connector-maintenance:[a-f0-9]{64}$/);
   const retirementStatusSql=()=>`SELECT app_rls.printing_printer_administration(
     '${caps.maker}','printing-printer-admin','${requestId()}','MAINTENANCE_STATUS','${ids.retirementPrinter}','{}'::jsonb)`;
   for(const upgradeState of ['AUTHORIZED','CONSUMED']) {
