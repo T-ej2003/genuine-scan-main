@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { catalogueAfterPrinting, PRINTING_RELEASE_NAMES, PRINTING_RELEASE_OBJECTS, PUBLIC_VERIFICATION_RELEASE_NAMES, PUBLIC_VERIFICATION_RELEASE_POLICIES } from "../aws/production-printing-release-boundary.mjs";
@@ -58,6 +59,16 @@ test("every printing and public routine changed by this PR has a governed instal
       const partialBatchIncremental = fs.readFileSync("backend/src/rls-waves/session-c/c02/printingPartialBatchIncremental.sql", "utf8");
       assert.match(partialBatchIncremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
       assert.match(partialBatchIncremental, /PRINT_JOB_MIGRATION_IDENTITY_INVALID/);
+      const predecessorBody = before.get("printing_create_job").split("AS $fn$")[1].split("\n$fn$;")[0];
+      const successorBody = after.get("printing_create_job").split("AS $fn$")[1].split("\n$fn$;")[0];
+      for (const body of [predecessorBody, successorBody]) {
+        assert.ok(partialBatchIncremental.includes(createHash("sha256").update(`${body}\n`).digest("hex")),
+          "incremental migration must authenticate the exact predecessor and successor bodies");
+      }
+      assert.match(partialBatchIncremental, /p\.proconfig=ARRAY\['search_path=pg_catalog, public'\]/);
+      assert.equal((partialBatchIncremental.match(/pg_get_functiondef\(p\.oid\)/g) || []).length, 2,
+        "preflight and postflight must authenticate the full function definition");
+      assert.match(partialBatchIncremental, /PRINT_JOB_MIGRATION_SUCCESSOR_INVALID/);
       assert.match(partialBatchIncremental, /\nCOMMIT;\n$/);
       assert.deepEqual([...definitions(partialBatchIncremental)], [["printing_create_job", after.get("printing_create_job")]],
         "partial-batch migration must install the exact canonical function and no other routine");

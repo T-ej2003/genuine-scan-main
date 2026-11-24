@@ -7,6 +7,9 @@ BEGIN
     SELECT 1 FROM pg_proc p
     WHERE p.oid=to_regprocedure('app_rls.printing_create_job(text,text,text,text,text,integer,text,text,text,text,text,jsonb)')
       AND p.proowner=current_user::regrole AND p.prosecdef
+      AND p.provolatile='v' AND p.proconfig=ARRAY['search_path=pg_catalog, public']
+      AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='1bbabb75f6d8bed10140569fff834b1c8cee0872f84393dd98cc79bd59fac222'
+      AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='7cbe6b908ba9118f1cb2785b030be28cb708168be9db5ccfcfe7c4e6e6f4edcd'
   ) OR NOT has_schema_privilege(current_user,'app_rls','CREATE')
   THEN RAISE EXCEPTION 'PRINT_JOB_MIGRATION_IDENTITY_INVALID' USING ERRCODE='42501'; END IF;
 END
@@ -207,5 +210,18 @@ BEGIN
   );
 END
 $fn$;
+
+DO $postflight$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    WHERE p.oid=to_regprocedure('app_rls.printing_create_job(text,text,text,text,text,integer,text,text,text,text,text,jsonb)')
+      AND p.proowner=current_user::regrole AND p.prosecdef
+      AND p.provolatile='v' AND p.proconfig=ARRAY['search_path=pg_catalog, public']
+      AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='c67095e4bd432af37b51a1a544923d056a3f3b790daaa0ea1c43321059a5a03a'
+      AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='0f4d77a96f718d902a343ec991639ea05a04e5ce566beb80c5305616db3d9c60'
+  ) THEN RAISE EXCEPTION 'PRINT_JOB_MIGRATION_SUCCESSOR_INVALID' USING ERRCODE='42501'; END IF;
+END
+$postflight$;
 
 COMMIT;

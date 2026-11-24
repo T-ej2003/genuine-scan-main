@@ -2453,7 +2453,13 @@ async function main() {
   console.log("Release Fix 5 PostgreSQL 18 printing lifecycle proof passed");
 }
 
-main().then(() => process.exit(0)).catch((error) => {
+main().catch((error) => {
   console.error(error);
-  process.exit(1);
+  process.exitCode = 1;
+}).finally(async () => {
+  await require("../../../dist/services/redisService").closeRedisConnections();
+  await require("../../../dist/config/database").default.$disconnect();
+}).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
 });
