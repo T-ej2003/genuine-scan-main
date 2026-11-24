@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='69e55b3def1467c4795dc57450e59a3978917f82289639f2e540ac9f1eafeedc'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:69e55b3def1467c4795dc57450e59a3978917f82289639f2e540ac9f1eafeedc'
+    AND source_contract_sha256='e636a57a7b08a3db26cd3eac2ab0d2677b60dfda9588e2f529763974d8aba362'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:e636a57a7b08a3db26cd3eac2ab0d2677b60dfda9588e2f529763974d8aba362'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:69e55b3def1467c4795dc57450e59a3978917f82289639f2e540ac9f1eafeedc')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:e636a57a7b08a3db26cd3eac2ab0d2677b60dfda9588e2f529763974d8aba362')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8444,7 +8444,7 @@ BEGIN
         JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
         WHERE ps."batchId"=batch_row.id AND pi."printConfirmedAt" IS NOT NULL),
       'sampleCount',(SELECT count(DISTINCT pa."qrCodeId") FROM public."PrintAuditEvent" pa
-        WHERE pa."batchId"=batch_row.id AND pa."eventType"='SAMPLE_SCAN_PASSED'),
+        WHERE pa."batchId"=batch_row.id AND pa."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified')),
       'sampleRequired',CASE coalesce(batch_row."sampleScanPolicy"->>'type',batch_row."sampleScanPolicy"->>'mode','ONE_PER_PRINT_JOB')
         WHEN 'ONE_PER_PRINT_JOB' THEN 1
         WHEN 'ONE_PER_ROLL' THEN 1
@@ -11105,6 +11105,10 @@ BEGIN
   SELECT count(DISTINCT e."qrCodeId") INTO actual_count FROM public."PrintAuditEvent" e
     WHERE e."printJobId"=job_row.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified');
   IF actual_count>=required_count AND NOT EXISTS (
+    SELECT 1 FROM public."QRCode" q WHERE q."batchId"=job_row."batchId"
+      AND q.status='ALLOCATED' AND q."printJobId" IS NULL
+      AND NOT EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi."qrCodeId"=q.id)
+  ) AND NOT EXISTS (
     SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=job_row."batchId" AND j.status='CONFIRMED'
       AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
         WHERE e."printJobId"=j.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified'))
@@ -11194,6 +11198,9 @@ BEGIN
   ELSE
     IF batch_row."releasedAt" IS NOT NULL OR batch_row."lifecycleState"='RELEASED' THEN RAISE EXCEPTION 'BATCH_ALREADY_RELEASED'; END IF;
     IF batch_row."lifecycleState"<>'SAMPLE_VERIFIED' THEN RAISE EXCEPTION 'SAMPLE_SCAN_REQUIRED'; END IF;
+    IF EXISTS (SELECT 1 FROM public."PrintJob" j JOIN public."QRCode" q ON q."printJobId"=j.id
+      WHERE j."batchId"=p_batch_id AND j.status<>'CONFIRMED' AND q.status='PRINTED')
+    THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
     IF EXISTS (
       SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=p_batch_id AND j.status='CONFIRMED'
         AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e

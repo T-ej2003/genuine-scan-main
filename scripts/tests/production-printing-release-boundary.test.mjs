@@ -59,7 +59,7 @@ test("every printing and public routine changed by this PR has a governed instal
       const partialBatchIncremental = fs.readFileSync("backend/src/rls-waves/session-c/c02/printingPartialBatchIncremental.sql", "utf8");
       assert.match(partialBatchIncremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
       assert.match(partialBatchIncremental, /PRINT_JOB_MIGRATION_IDENTITY_INVALID/);
-      const partialBatchFunctions = ["printing_create_job", "printing_record_sample", "printing_release_batch"];
+      const partialBatchFunctions = ["printing_create_job", "printing_record_sample", "printing_release_batch", "printing_readiness"];
       for (const name of partialBatchFunctions) {
         for (const definition of [before.get(name), after.get(name)]) {
           const body = definition.split("AS $fn$")[1].split("\n$fn$;")[0];
@@ -68,19 +68,19 @@ test("every printing and public routine changed by this PR has a governed instal
         }
       }
       assert.match(partialBatchIncremental, /p\.proconfig=ARRAY\['search_path=pg_catalog, public'\]/);
-      assert.equal((partialBatchIncremental.match(/pg_get_functiondef\(p\.oid\)/g) || []).length, 6,
+      assert.equal((partialBatchIncremental.match(/pg_get_functiondef\(p\.oid\)/g) || []).length, 8,
         "preflight and postflight must authenticate the full function definition");
-      assert.equal((partialBatchIncremental.match(/pg_catalog\.aclexplode\(coalesce\(p\.proacl,pg_catalog\.acldefault\('f',p\.proowner\)\)\)/g) || []).length, 6,
+      assert.equal((partialBatchIncremental.match(/pg_catalog\.aclexplode\(coalesce\(p\.proacl,pg_catalog\.acldefault\('f',p\.proowner\)\)\)/g) || []).length, 8,
         "preflight and postflight must authenticate the exact function ACL");
-      assert.equal((partialBatchIncremental.match(/count\(\*\)=2/g) || []).length, 6,
+      assert.equal((partialBatchIncremental.match(/count\(\*\)=2/g) || []).length, 8,
         "only the function owner and approved app role may execute the routine");
       assert.match(partialBatchIncremental, /PRINT_JOB_MIGRATION_SUCCESSOR_INVALID/);
       assert.match(partialBatchIncremental, /\nCOMMIT;\n$/);
       assert.deepEqual([...definitions(partialBatchIncremental)], partialBatchFunctions.map(name => [name, after.get(name)]),
-        "partial-batch migration must install only the three exact canonical functions");
+        "partial-batch migration must install only the four exact canonical functions");
     }
     assert.deepEqual(changed.filter(name => !allowed.includes(name) &&
-      !(incremental && ["printing_maintenance_gate", "printing_create_job", "printing_record_sample", "printing_release_batch"].includes(name))), [], `${file} changed functions missing from governed release`);
+      !(incremental && ["printing_maintenance_gate", "printing_create_job", "printing_record_sample", "printing_release_batch", "printing_readiness"].includes(name))), [], `${file} changed functions missing from governed release`);
   }
 });
 

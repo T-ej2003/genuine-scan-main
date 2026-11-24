@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "69e55b3def1467c4795dc57450e59a3978917f82289639f2e540ac9f1eafeedc",
+  "sourceContractSha256": "e636a57a7b08a3db26cd3eac2ab0d2677b60dfda9588e2f529763974d8aba362",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -64,7 +64,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "a9836efff840aaa6cd623fd10a587c059142dc394c783e925fbe846569f77288"
+      "sha256": "fe72f382538529516f2f6a3e5e255e788be7e9bab34ec353d83de192bdddefe8"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -412,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:69e55b3def1467c4795dc57450e59a3978917f82289639f2e540ac9f1eafeedc",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:e636a57a7b08a3db26cd3eac2ab0d2677b60dfda9588e2f529763974d8aba362",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

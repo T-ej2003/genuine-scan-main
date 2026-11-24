@@ -387,7 +387,7 @@ BEGIN
         JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
         WHERE ps."batchId"=batch_row.id AND pi."printConfirmedAt" IS NOT NULL),
       'sampleCount',(SELECT count(DISTINCT pa."qrCodeId") FROM public."PrintAuditEvent" pa
-        WHERE pa."batchId"=batch_row.id AND pa."eventType"='SAMPLE_SCAN_PASSED'),
+        WHERE pa."batchId"=batch_row.id AND pa."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified')),
       'sampleRequired',CASE coalesce(batch_row."sampleScanPolicy"->>'type',batch_row."sampleScanPolicy"->>'mode','ONE_PER_PRINT_JOB')
         WHEN 'ONE_PER_PRINT_JOB' THEN 1
         WHEN 'ONE_PER_ROLL' THEN 1
@@ -3048,6 +3048,10 @@ BEGIN
   SELECT count(DISTINCT e."qrCodeId") INTO actual_count FROM public."PrintAuditEvent" e
     WHERE e."printJobId"=job_row.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified');
   IF actual_count>=required_count AND NOT EXISTS (
+    SELECT 1 FROM public."QRCode" q WHERE q."batchId"=job_row."batchId"
+      AND q.status='ALLOCATED' AND q."printJobId" IS NULL
+      AND NOT EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi."qrCodeId"=q.id)
+  ) AND NOT EXISTS (
     SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=job_row."batchId" AND j.status='CONFIRMED'
       AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
         WHERE e."printJobId"=j.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified'))
@@ -3137,6 +3141,9 @@ BEGIN
   ELSE
     IF batch_row."releasedAt" IS NOT NULL OR batch_row."lifecycleState"='RELEASED' THEN RAISE EXCEPTION 'BATCH_ALREADY_RELEASED'; END IF;
     IF batch_row."lifecycleState"<>'SAMPLE_VERIFIED' THEN RAISE EXCEPTION 'SAMPLE_SCAN_REQUIRED'; END IF;
+    IF EXISTS (SELECT 1 FROM public."PrintJob" j JOIN public."QRCode" q ON q."printJobId"=j.id
+      WHERE j."batchId"=p_batch_id AND j.status<>'CONFIRMED' AND q.status='PRINTED')
+    THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
     IF EXISTS (
       SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=p_batch_id AND j.status='CONFIRMED'
         AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e

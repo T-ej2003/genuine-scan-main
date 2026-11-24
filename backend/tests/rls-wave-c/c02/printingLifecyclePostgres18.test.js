@@ -1017,6 +1017,8 @@ async function main() {
   };
   const p0FirstPartial = json(app, p0PartialCreateSql(p0PartialQrs.slice(0, 1), "first-partial"));
   p0CompletePartialRun(p0FirstPartial.job, 1, "p0_first");
+  json(app, `SELECT app_rls.printing_record_sample('${caps.maker}','printing-sample-scan','${requestId()}',
+    '${p0FirstPartial.job.id}','${p0PartialQrs[0].code}','{}'::jsonb)`);
   assert.equal(psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${p0PartialBatch}'`), "PRINT_CONFIRMED");
   assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "batchId"='${p0PartialBatch}' AND status='ALLOCATED'`), "19");
   assert.equal(json(app, `SELECT app_rls.printing_readiness('${caps.maker}','printing-readiness','${requestId()}',
@@ -1043,9 +1045,6 @@ async function main() {
     'PRINTABLE_ITEMS','${p0PartialBatch}','{"limit":20}'::jsonb)`).printableItems.length, 0);
   denied(app, p0PartialCreateSql(p0PartialQrs.slice(0, 1), "duplicate-partial"), /BATCH_BUSY/);
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${p0PartialBatch}'`), "3");
-  const p0Sample = (job, qr) => json(app, `SELECT app_rls.printing_record_sample(
-    '${caps.maker}','printing-sample-scan','${requestId()}','${job.id}','${qr.code}','{}'::jsonb)`);
-  p0Sample(p0FirstPartial.job, p0PartialQrs[0]);
   assert.equal(psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${p0PartialBatch}'`), "PRINT_CONFIRMED",
     "one sampled job cannot verify an unsampled partial batch");
   denied(app, `SELECT app_rls.printing_release_batch('${caps.checker}','printing-release','${requestId()}',
@@ -1062,6 +1061,16 @@ async function main() {
   ]);
   assert(remainingSamples.every(({ status }) => status === 0), JSON.stringify(remainingSamples));
   assert.equal(psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${p0PartialBatch}'`), "SAMPLE_VERIFIED");
+  const failedPrintBatch = randomUUID(), failedPrintJob = randomUUID(), failedPrintQr = randomUUID();
+  psql(admin, `INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes","lifecycleState","updatedAt")
+    VALUES('${failedPrintBatch}','Partially failed print','${ids.licenseeA}','${ids.maker}',
+      'FAIL-0001','FAIL-0002',2,'SAMPLE_VERIFIED',now());
+    INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"pipelineState",quantity,"updatedAt")
+    VALUES('${failedPrintJob}','${failedPrintBatch}','${ids.maker}','${ids.printer}','FAILED','NEEDS_OPERATOR_ACTION',2,now());
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+    VALUES('${failedPrintQr}','failed-print-${failedPrintQr}','${ids.licenseeA}','${failedPrintBatch}','${failedPrintJob}','PRINTED',now());`);
+  denied(app, `SELECT app_rls.printing_release_batch('${caps.checker}','printing-release','${requestId()}',
+    '${failedPrintBatch}','APPROVE','unsafe partial failure')`, /PHYSICAL_CONFIRMATION_REQUIRED/);
 
   assert.equal(json(app, `SELECT app_rls.printing_connector_event(
     '${ids.registration}','printing-agent','printing-device','duplicate_confirm_1',now()::timestamp,
@@ -1253,6 +1262,10 @@ async function main() {
     assert.equal(result.actual, entry.required, `${entry.key} quorum evidence count`);
     assert.equal(result.satisfied, true, `${entry.key} quorum satisfaction`);
     assert.equal(psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${entry.batch}'`), "SAMPLE_VERIFIED");
+    if (entry.key === "labels") {
+      assert.equal(json(app, `SELECT app_rls.printing_readiness('${caps.maker}','printing-readiness','${requestId()}',
+        'RELEASE','${entry.batch}','{}'::jsonb)`).sampleCount, entry.required);
+    }
   }
   denied(app, `SELECT app_rls.printing_release_batch(
     '${caps.maker}','printing-release','${requestId()}','${ids.batch}','APPROVE',NULL
