@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='86123f390b71b2015e4f4969fb22375f8d61c88c288faf020aa3dca9dd36c82f'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:86123f390b71b2015e4f4969fb22375f8d61c88c288faf020aa3dca9dd36c82f'
+    AND source_contract_sha256='eabe03bcbf033cc56d2a2ca0b5485350be97f3c4505650fa1096fd7a8d4b0d14'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:eabe03bcbf033cc56d2a2ca0b5485350be97f3c4505650fa1096fd7a8d4b0d14'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:86123f390b71b2015e4f4969fb22375f8d61c88c288faf020aa3dca9dd36c82f')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:eabe03bcbf033cc56d2a2ca0b5485350be97f3c4505650fa1096fd7a8d4b0d14')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8971,7 +8971,8 @@ BEGIN
   SELECT * INTO STRICT actor
     FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
   PERFORM set_config('app.printing_operation','printing-printer-admin-'||lower(p_operation),true),
-          set_config('app.printing_printer_id',new_id,true);
+          set_config('app.printing_printer_id',new_id,true),
+          set_config('app.printing_user_id',actor."userId",true);
 
   IF p_operation='CREATE' THEN
     IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN')
@@ -9276,11 +9277,12 @@ BEGIN
        OR printer_row."printerRegistrationId" IS NULL OR coalesce(p_payload,'{}'::jsonb)<>'{}'::jsonb
     THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.printing_registration_id',printer_row."printerRegistrationId",true);
-    SELECT pr.id,pr."trustStatus",pr."revokedAt" INTO STRICT maintenance_registration
+    SELECT pr.id,pr."trustStatus",pr."revokedAt" INTO maintenance_registration
       FROM public."PrinterRegistration" pr
       WHERE pr.id=printer_row."printerRegistrationId" AND pr."userId"=actor."userId"
         AND pr."orgId" IS NOT DISTINCT FROM scope_org
         AND pr."licenseeId" IS NOT DISTINCT FROM scope_licensee FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     maintenance_scope:=jsonb_build_array('local',maintenance_registration.id)::text;
     maintenance_snapshot:=app_rls.printing_maintenance_gate(maintenance_scope,'STATUS',actor."userId",'{}'::jsonb);
     IF maintenance_snapshot->>'state'='DISPATCH_FENCED'

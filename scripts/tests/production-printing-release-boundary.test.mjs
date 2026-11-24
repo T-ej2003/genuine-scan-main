@@ -66,6 +66,19 @@ test("every printing and public routine changed by this PR has a governed instal
       assert.match(retirementIncremental, /CONNECTOR_RETIREMENT_FUNCTION_OWNER_INVALID/);
       assert.match(retirementIncremental, /ALTER POLICY "printing_lifecycle_printer_update" ON public\."Printer"/);
       assert.match(retirementIncremental, /ALTER POLICY "printing_lifecycle_printerregistration_update" ON public\."PrinterRegistration"/);
+      const generatedPolicies = fs.readFileSync("scripts/rls/sql/generated/30-policies.sql", "utf8").replaceAll("\r\n", "\n");
+      for (const [policy, table] of [["printing_lifecycle_printer_update", "Printer"],
+        ["printing_lifecycle_printerregistration_update", "PrinterRegistration"]]) {
+        const create = generatedPolicies.split("\n").find(line =>
+          line.startsWith(`CREATE POLICY "${policy}" ON public."${table}" `));
+        assert.ok(create, `generated policy ${policy} must exist`);
+        const alter = create.replace(
+          `CREATE POLICY "${policy}" ON public."${table}" AS PERMISSIVE FOR UPDATE TO "mscqr_rls_cert_auth_owner"`,
+          `ALTER POLICY "${policy}" ON public."${table}" TO "mscqr_prd_rls_phase2_auth_owner"`
+        ).replaceAll("mscqr_rls_cert_auth_owner", "mscqr_prd_rls_phase2_auth_owner")
+          .replaceAll("mscqr_rls_cert_app", "mscqr_prd_rls_phase2_app");
+        assert.ok(retirementIncremental.includes(alter), `retirement migration must install exact policy ${policy}`);
+      }
       assert.match(retirementIncremental, /\nCOMMIT;\n$/);
       assert.deepEqual([...definitions(retirementIncremental)],
         [["printing_printer_administration", after.get("printing_printer_administration")]],
