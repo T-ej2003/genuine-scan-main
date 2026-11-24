@@ -625,7 +625,6 @@ function Complete-RetainedReinstallFence {
   Assert-MscqrPlainPath $pending
   if (Test-Path -LiteralPath $pending) { throw 'Interrupted maintenance fence release requires reviewed recovery.' }
   if (-not (Test-Path -LiteralPath $marker)) { return $VerifiedStatus }
-  Assert-MscqrPrivatePath $marker
   $fence = Read-MscqrJson $marker
   if ($fence.version -ne 1 -or $fence.state -cne 'FENCED') { throw 'Retained maintenance fence is invalid.' }
 
