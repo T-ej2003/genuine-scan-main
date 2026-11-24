@@ -73,8 +73,7 @@ export function buildC02CombinedPackage({ sourceSha, predecessor, successor, rep
       const existed = predecessor.objects.policies.some(row => row.identity === identity);
       assert.equal(existed, ![...evidencePolicies, ...PUBLIC_VERIFICATION_RELEASE_POLICIES].includes(identity));
       return [...(existed ? [`DROP POLICY "${name}" ON public."${table}"`] : []), policies[index], policies[index + 1]]
-        .map(sql => sql.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_")
-          .replaceAll(") AND (", ")AND("));
+        .map(sql => sql.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
     });
   const migrationSql = read("backend/prisma/migrations/20261028210000_printer_agent_session_sequence/migration.sql").trim();
   assert.equal(migrationSql, 'ALTER TABLE "PrinterAgentSession"\n  ADD COLUMN "lastMessageSeq" INTEGER NOT NULL DEFAULT 0;');
