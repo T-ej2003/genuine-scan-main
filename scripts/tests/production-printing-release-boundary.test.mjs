@@ -109,6 +109,16 @@ test("every printing and public routine changed by this PR has a governed instal
           .replaceAll("{{WORKER_ROLE}}", "'mscqr_prd_rls_phase2_worker'")],
         ["printing_printer_administration", after.get("printing_printer_administration")]],
         "retirement migration must install the exact canonical gate and printer function and no other routine");
+      const retireBranch = definition => definition.slice(definition.indexOf("  ELSIF p_operation='RETIRE' THEN"),
+        definition.indexOf("  ELSIF p_operation='DELETE' THEN"));
+      const canonicalRetirement = retireBranch(after.get("printing_printer_administration"));
+      assert.ok(canonicalRetirement.includes("CONNECTOR_RETIREMENT_RECONCILIATION_REQUIRED"));
+      for (const source of ["backend/src/rls-waves/session-c/c02/printingUpgradeNoReplayDefinitions.sql",
+        "scripts/rls/sql/generated/22-printing-upgrade.sql"]) {
+        const upgrade = definitions(fs.readFileSync(source, "utf8").replaceAll("\r\n", "\n"));
+        assert.equal(retireBranch(upgrade.get("printing_printer_administration")), canonicalRetirement,
+          `${source} must preserve the guarded canonical retirement branch`);
+      }
     }
     assert.deepEqual(changed.filter(name => !allowed.includes(name) &&
       !(incremental && ["printing_create_job", "printing_record_sample", "printing_release_batch", "printing_readiness"].includes(name))), [], `${file} changed functions missing from governed release`);
