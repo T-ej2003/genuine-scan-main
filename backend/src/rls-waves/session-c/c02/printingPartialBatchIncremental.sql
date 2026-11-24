@@ -19,6 +19,38 @@ BEGIN
            FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a)
       AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='1bbabb75f6d8bed10140569fff834b1c8cee0872f84393dd98cc79bd59fac222'
       AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='7cbe6b908ba9118f1cb2785b030be28cb708168be9db5ccfcfe7c4e6e6f4edcd'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    WHERE p.oid=to_regprocedure('app_rls.printing_record_sample(text,text,text,text,text,jsonb)')
+      AND p.proowner=current_user::regrole AND p.prosecdef
+      AND p.provolatile='v' AND p.proconfig=ARRAY['search_path=pg_catalog, public']
+      AND current_user IN ('mscqr_prd_rls_phase2_auth_owner','mscqr_rls_cert_auth_owner')
+      AND (SELECT count(*)=2
+             AND count(*) FILTER (WHERE a.grantee=p.proowner AND a.grantor=p.proowner
+               AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
+             AND count(*) FILTER (WHERE a.grantee=(CASE current_user
+               WHEN 'mscqr_prd_rls_phase2_auth_owner' THEN 'mscqr_prd_rls_phase2_app'
+               ELSE 'mscqr_rls_cert_app' END)::regrole AND a.grantor=p.proowner
+               AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
+           FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a)
+      AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='c873ef11234a13cc1a61f6c08689c8bdd2fc255ca666a15fde727910d69efa00'
+      AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='ccc2e0db775df537bfa93eb0a358d322e8e8a041ec37022fc451863b6f81486e'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    WHERE p.oid=to_regprocedure('app_rls.printing_release_batch(text,text,text,text,text,text)')
+      AND p.proowner=current_user::regrole AND p.prosecdef
+      AND p.provolatile='v' AND p.proconfig=ARRAY['search_path=pg_catalog, public']
+      AND current_user IN ('mscqr_prd_rls_phase2_auth_owner','mscqr_rls_cert_auth_owner')
+      AND (SELECT count(*)=2
+             AND count(*) FILTER (WHERE a.grantee=p.proowner AND a.grantor=p.proowner
+               AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
+             AND count(*) FILTER (WHERE a.grantee=(CASE current_user
+               WHEN 'mscqr_prd_rls_phase2_auth_owner' THEN 'mscqr_prd_rls_phase2_app'
+               ELSE 'mscqr_rls_cert_app' END)::regrole AND a.grantor=p.proowner
+               AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
+           FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a)
+      AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='e508e171562a9f8431bb725b9d88d78d55cca670a4828bc49163eb0e271cd922'
+      AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='1244b25c4beedde1475fa83fd8ac9cc7daf4c0effa74a0434e0a42687c87c059'
   ) OR NOT has_schema_privilege(current_user,'app_rls','CREATE')
   THEN RAISE EXCEPTION 'PRINT_JOB_MIGRATION_IDENTITY_INVALID' USING ERRCODE='42501'; END IF;
 END
@@ -220,6 +252,167 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION app_rls.printing_record_sample(
+  p_capability text,p_purpose text,p_request_id text,p_job_id text,p_qr_code text,p_evidence jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; job_row record; qr_row record; policy jsonb; required_count integer; actual_count integer;
+  event_id text:=gen_random_uuid()::text; now_at timestamp without time zone:=transaction_timestamp();
+BEGIN
+  SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
+  PERFORM set_config('app.printing_job_id',p_job_id,true);
+  SELECT j.id,j."batchId",j.status,j.quantity
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+  SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,job_row."batchId");
+  PERFORM set_config('app.printing_job_id',p_job_id,true);
+  IF p_purpose<>'printing-sample-scan' OR job_row.status<>'CONFIRMED' THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
+  BEGIN
+    SELECT q.id INTO STRICT qr_row FROM public."QRCode" q
+     WHERE q.code=btrim(p_qr_code) AND q."batchId"=job_row."batchId" AND q."printJobId"=job_row.id
+       AND q.status='PRINTED';
+  EXCEPTION WHEN NO_DATA_FOUND THEN
+    RAISE EXCEPTION 'QR_NOT_IN_PRINT_JOB';
+  END;
+  IF EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=job_row.id
+    AND e."qrCodeId"=qr_row.id AND e."eventType"='SAMPLE_SCAN_PASSED')
+  THEN RETURN jsonb_build_object('idempotent',true,'qrCodeId',qr_row.id); END IF;
+  SELECT b."sampleScanPolicy" INTO policy FROM public."Batch" b WHERE b.id=job_row."batchId" FOR UPDATE;
+  required_count:=CASE coalesce(policy->>'type',policy->>'mode','ONE_PER_PRINT_JOB')
+    WHEN 'ONE_PER_PRINT_JOB' THEN 1
+    WHEN 'ONE_PER_ROLL' THEN 1
+    WHEN 'ONE_PER_N_LABELS' THEN GREATEST(1,ceil(job_row.quantity::numeric/GREATEST(coalesce((policy->>'n')::integer,job_row.quantity),1))::integer)
+    WHEN 'PERCENTAGE' THEN GREATEST(
+      GREATEST(coalesce((policy->>'min')::integer,1),1),
+      ceil(job_row.quantity*GREATEST(coalesce((policy->>'percentage')::numeric,1),0.01)/100)::integer
+    )
+    ELSE 1 END;
+  PERFORM set_config('app.printing_job_id',job_row.id,true),set_config('app.printing_item_id',qr_row.id,true);
+  INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
+  VALUES(event_id,job_row."batchId",job_row.id,qr_row.id,'SAMPLE_SCAN_PASSED',actor."userId",
+    coalesce(p_evidence,'{}'::jsonb)||jsonb_build_object('requestId',p_request_id),now_at);
+  SELECT count(DISTINCT e."qrCodeId") INTO actual_count FROM public."PrintAuditEvent" e
+    WHERE e."printJobId"=job_row.id AND e."eventType"='SAMPLE_SCAN_PASSED';
+  IF actual_count>=required_count AND NOT EXISTS (
+    SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=job_row."batchId" AND j.status='CONFIRMED'
+      AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
+        WHERE e."printJobId"=j.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified'))
+        < CASE coalesce(policy->>'type',policy->>'mode','ONE_PER_PRINT_JOB')
+            WHEN 'ONE_PER_N_LABELS' THEN GREATEST(1,ceil(j.quantity::numeric/GREATEST(coalesce((policy->>'n')::integer,j.quantity),1))::integer)
+            WHEN 'PERCENTAGE' THEN GREATEST(GREATEST(coalesce((policy->>'min')::integer,1),1),
+              ceil(j.quantity*GREATEST(coalesce((policy->>'percentage')::numeric,1),0.01)/100)::integer)
+            ELSE 1 END
+  ) THEN
+    UPDATE public."Batch" SET "lifecycleState"='SAMPLE_VERIFIED',"updatedAt"=now_at
+      WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_CONFIRMED';
+  END IF;
+  PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
+    'PRINT_SAMPLE_RECORDED','PrintJob',job_row.id,
+    jsonb_build_object('qrCodeId',qr_row.id,'required',required_count,'actual',actual_count));
+  RETURN jsonb_build_object('idempotent',false,'qrCodeId',qr_row.id,'required',required_count,
+    'actual',actual_count,'satisfied',actual_count>=required_count);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.printing_release_batch(
+  p_capability text,p_purpose text,p_request_id text,p_batch_id text,p_decision text,p_reason text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE actor record; batch_row record; maker_id text; now_at timestamp without time zone:=transaction_timestamp();
+  released_count integer; approval_id text; approval_requested_by text; approval_status text;
+  approval_expires_at timestamp without time zone;
+  effective_decision text:=p_decision;
+BEGIN
+  IF p_purpose<>'printing-release' OR p_decision NOT IN ('REQUEST','APPROVE','REJECT')
+     OR length(coalesce(p_reason,''))>500 THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
+  SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,p_batch_id);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
+    RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT b.id,b."lifecycleState",b."releasedAt",b."totalCodes",b."sampleScanPolicy"
+    INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
+  SELECT j."manufacturerId" INTO maker_id FROM public."PrintJob" j WHERE j."batchId"=p_batch_id
+    AND j.status='CONFIRMED' ORDER BY j."confirmedAt" DESC NULLS LAST,j."createdAt" DESC LIMIT 1;
+  IF maker_id IS NULL THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
+  IF p_decision='REQUEST' THEN
+    SELECT a.id,a."requestedByUserId",a.status,a."expiresAt"
+      INTO approval_id,approval_requested_by,approval_status,approval_expires_at
+      FROM public."SensitiveActionApproval" a
+     WHERE a."actionKey"='BATCH_RELEASE' AND a."entityType"='Batch' AND a."entityId"=p_batch_id
+       AND a.status='PENDING' AND a."expiresAt">now_at
+     ORDER BY a."createdAt" DESC,a.id DESC LIMIT 1 FOR UPDATE;
+    IF NOT FOUND THEN
+      IF actor.role<>'MANUFACTURER_ADMIN' OR maker_id<>actor."userId" THEN
+        RAISE EXCEPTION 'PRINTING_RELEASE_REQUEST_DENIED' USING ERRCODE='42501';
+      END IF;
+      INSERT INTO public."SensitiveActionApproval"(
+        id,"actionKey","requestedByUserId","licenseeId","entityType","entityId",payload,summary,status,
+        "expiresAt","createdAt","updatedAt"
+      ) VALUES (
+        gen_random_uuid()::text,'BATCH_RELEASE',actor."userId",actor."batchLicenseeId",'Batch',p_batch_id,
+        jsonb_build_object('batchId',p_batch_id,'printJobId',(
+          SELECT j.id FROM public."PrintJob" j WHERE j."batchId"=p_batch_id AND j.status='CONFIRMED'
+          ORDER BY j."confirmedAt" DESC NULLS LAST,j."createdAt" DESC LIMIT 1
+        ),'requestedByUserId',actor."userId",'releaseBoundary','supply_chain'),
+        jsonb_build_object('reason',nullif(btrim(p_reason),''),'totalCodes',batch_row."totalCodes"),
+        'PENDING',now_at+interval '30 minutes',now_at,now_at
+      ) RETURNING id,"requestedByUserId",status,"expiresAt"
+        INTO approval_id,approval_requested_by,approval_status,approval_expires_at;
+      PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
+        'BATCH_RELEASE_REQUESTED','Batch',p_batch_id,jsonb_build_object('approvalId',approval_id));
+      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_id,
+        'status',approval_status,'expiresAt',approval_expires_at,'idempotent',false);
+    END IF;
+    IF approval_requested_by=actor."userId" THEN
+      RETURN jsonb_build_object('batchId',p_batch_id,'approvalRequired',true,'approvalId',approval_id,
+        'status',approval_status,'expiresAt',approval_expires_at,'idempotent',true);
+    END IF;
+    IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN') THEN
+      RAISE EXCEPTION 'CHECKER_REQUIRED' USING ERRCODE='42501';
+    END IF;
+    UPDATE public."SensitiveActionApproval" SET status='EXECUTED',"reviewedByUserId"=actor."userId",
+      "reviewedAt"=now_at,"executedByUserId"=actor."userId","executedAt"=now_at,"updatedAt"=now_at
+      WHERE id=approval_id;
+    effective_decision:='APPROVE';
+  END IF;
+  IF maker_id=actor."userId" THEN RAISE EXCEPTION 'MAKER_CANNOT_APPROVE' USING ERRCODE='42501'; END IF;
+  IF effective_decision='REJECT' THEN
+    UPDATE public."Batch" SET "lifecycleState"='FAILED',"updatedAt"=now_at WHERE id=p_batch_id
+      AND "lifecycleState" IN ('PRINT_CONFIRMED','SAMPLE_VERIFIED');
+    IF NOT FOUND THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+  ELSE
+    IF batch_row."releasedAt" IS NOT NULL OR batch_row."lifecycleState"='RELEASED' THEN RAISE EXCEPTION 'BATCH_ALREADY_RELEASED'; END IF;
+    IF batch_row."lifecycleState"<>'SAMPLE_VERIFIED' THEN RAISE EXCEPTION 'SAMPLE_SCAN_REQUIRED'; END IF;
+    IF EXISTS (
+      SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=p_batch_id AND j.status='CONFIRMED'
+        AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
+          WHERE e."printJobId"=j.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified'))
+          < CASE coalesce(batch_row."sampleScanPolicy"->>'type',batch_row."sampleScanPolicy"->>'mode','ONE_PER_PRINT_JOB')
+              WHEN 'ONE_PER_N_LABELS' THEN GREATEST(1,ceil(j.quantity::numeric/GREATEST(coalesce((batch_row."sampleScanPolicy"->>'n')::integer,j.quantity),1))::integer)
+              WHEN 'PERCENTAGE' THEN GREATEST(GREATEST(coalesce((batch_row."sampleScanPolicy"->>'min')::integer,1),1),
+                ceil(j.quantity*GREATEST(coalesce((batch_row."sampleScanPolicy"->>'percentage')::numeric,1),0.01)/100)::integer)
+              ELSE 1 END
+    ) THEN RAISE EXCEPTION 'SAMPLE_SCAN_REQUIRED'; END IF;
+    IF EXISTS (SELECT 1 FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+      WHERE ps."batchId"=p_batch_id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED','CANCELLED','FAILED'))
+    THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
+    UPDATE public."QRCode" SET "customerVerifiableAt"=now_at,"updatedAt"=now_at
+      WHERE "batchId"=p_batch_id AND status='PRINTED';
+    GET DIAGNOSTICS released_count=ROW_COUNT;
+    IF released_count=0 THEN RAISE EXCEPTION 'QR_CODES_REQUIRED'; END IF;
+    UPDATE public."Batch" SET "lifecycleState"='RELEASED',"releasedAt"=now_at,
+      "releasedByUserId"=actor."userId","updatedAt"=now_at WHERE id=p_batch_id;
+  END IF;
+  PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
+    'BATCH_RELEASE_'||effective_decision,'Batch',p_batch_id,
+    jsonb_build_object('makerId',maker_id,'approvalId',approval_id,
+      'reason',nullif(btrim(p_reason),''),'releasedCodes',coalesce(released_count,0)));
+  RETURN jsonb_build_object('batchId',p_batch_id,'decision',effective_decision,'lifecycleState',
+    CASE WHEN effective_decision='APPROVE' THEN 'RELEASED' ELSE 'FAILED' END,
+    'releasedCodes',coalesce(released_count,0),'approvalRequired',approval_id IS NOT NULL,
+    'approvalId',approval_id);
+END
+$fn$;
+
 DO $postflight$
 BEGIN
   IF NOT EXISTS (
@@ -238,6 +431,38 @@ BEGIN
            FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a)
       AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='c67095e4bd432af37b51a1a544923d056a3f3b790daaa0ea1c43321059a5a03a'
       AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='0f4d77a96f718d902a343ec991639ea05a04e5ce566beb80c5305616db3d9c60'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    WHERE p.oid=to_regprocedure('app_rls.printing_record_sample(text,text,text,text,text,jsonb)')
+      AND p.proowner=current_user::regrole AND p.prosecdef
+      AND p.provolatile='v' AND p.proconfig=ARRAY['search_path=pg_catalog, public']
+      AND current_user IN ('mscqr_prd_rls_phase2_auth_owner','mscqr_rls_cert_auth_owner')
+      AND (SELECT count(*)=2
+             AND count(*) FILTER (WHERE a.grantee=p.proowner AND a.grantor=p.proowner
+               AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
+             AND count(*) FILTER (WHERE a.grantee=(CASE current_user
+               WHEN 'mscqr_prd_rls_phase2_auth_owner' THEN 'mscqr_prd_rls_phase2_app'
+               ELSE 'mscqr_rls_cert_app' END)::regrole AND a.grantor=p.proowner
+               AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
+           FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a)
+      AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='4ab17111fd0d9234e2886380eecadf95a0f5832af62172bb3f5fec35313fb1b7'
+      AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='0d9b922f8d3dd417afcebf7c7deb87d46ac2422f0dc1cd8908d8571e9e27e26f'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    WHERE p.oid=to_regprocedure('app_rls.printing_release_batch(text,text,text,text,text,text)')
+      AND p.proowner=current_user::regrole AND p.prosecdef
+      AND p.provolatile='v' AND p.proconfig=ARRAY['search_path=pg_catalog, public']
+      AND current_user IN ('mscqr_prd_rls_phase2_auth_owner','mscqr_rls_cert_auth_owner')
+      AND (SELECT count(*)=2
+             AND count(*) FILTER (WHERE a.grantee=p.proowner AND a.grantor=p.proowner
+               AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
+             AND count(*) FILTER (WHERE a.grantee=(CASE current_user
+               WHEN 'mscqr_prd_rls_phase2_auth_owner' THEN 'mscqr_prd_rls_phase2_app'
+               ELSE 'mscqr_rls_cert_app' END)::regrole AND a.grantor=p.proowner
+               AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)=1
+           FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) a)
+      AND encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')='e004b27f2771512fcbb32eef3e2df65f624088c7b010669c4b63dfd0ab794a53'
+      AND encode(sha256(convert_to(pg_get_functiondef(p.oid),'UTF8')),'hex')='63d3d14a35547cad3bb37baa8830a5c56122e557d5a06a70926a26ea5fe0d576'
   ) THEN RAISE EXCEPTION 'PRINT_JOB_MIGRATION_SUCCESSOR_INVALID' USING ERRCODE='42501'; END IF;
 END
 $postflight$;

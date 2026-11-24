@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='8362b9716b7d9719b2a124e5c36ad2d4d67957b2e830a49d0cbab450901e0230'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:8362b9716b7d9719b2a124e5c36ad2d4d67957b2e830a49d0cbab450901e0230'
+    AND source_contract_sha256='2e3ab1ff25e564ee8e1655ecddb57f8b9a290277f9fff98330615720d39b5925'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:2e3ab1ff25e564ee8e1655ecddb57f8b9a290277f9fff98330615720d39b5925'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:8362b9716b7d9719b2a124e5c36ad2d4d67957b2e830a49d0cbab450901e0230')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:2e3ab1ff25e564ee8e1655ecddb57f8b9a290277f9fff98330615720d39b5925')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11088,7 +11088,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=job_row.id
     AND e."qrCodeId"=qr_row.id AND e."eventType"='SAMPLE_SCAN_PASSED')
   THEN RETURN jsonb_build_object('idempotent',true,'qrCodeId',qr_row.id); END IF;
-  SELECT b."sampleScanPolicy" INTO policy FROM public."Batch" b WHERE b.id=job_row."batchId";
+  SELECT b."sampleScanPolicy" INTO policy FROM public."Batch" b WHERE b.id=job_row."batchId" FOR UPDATE;
   required_count:=CASE coalesce(policy->>'type',policy->>'mode','ONE_PER_PRINT_JOB')
     WHEN 'ONE_PER_PRINT_JOB' THEN 1
     WHEN 'ONE_PER_ROLL' THEN 1
@@ -11104,7 +11104,16 @@ BEGIN
     coalesce(p_evidence,'{}'::jsonb)||jsonb_build_object('requestId',p_request_id),now_at);
   SELECT count(DISTINCT e."qrCodeId") INTO actual_count FROM public."PrintAuditEvent" e
     WHERE e."printJobId"=job_row.id AND e."eventType"='SAMPLE_SCAN_PASSED';
-  IF actual_count>=required_count THEN
+  IF actual_count>=required_count AND NOT EXISTS (
+    SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=job_row."batchId" AND j.status='CONFIRMED'
+      AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
+        WHERE e."printJobId"=j.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified'))
+        < CASE coalesce(policy->>'type',policy->>'mode','ONE_PER_PRINT_JOB')
+            WHEN 'ONE_PER_N_LABELS' THEN GREATEST(1,ceil(j.quantity::numeric/GREATEST(coalesce((policy->>'n')::integer,j.quantity),1))::integer)
+            WHEN 'PERCENTAGE' THEN GREATEST(GREATEST(coalesce((policy->>'min')::integer,1),1),
+              ceil(j.quantity*GREATEST(coalesce((policy->>'percentage')::numeric,1),0.01)/100)::integer)
+            ELSE 1 END
+  ) THEN
     UPDATE public."Batch" SET "lifecycleState"='SAMPLE_VERIFIED',"updatedAt"=now_at
       WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_CONFIRMED';
   END IF;
@@ -11131,7 +11140,7 @@ BEGIN
   IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  SELECT b.id,b."lifecycleState",b."releasedAt",b."totalCodes"
+  SELECT b.id,b."lifecycleState",b."releasedAt",b."totalCodes",b."sampleScanPolicy"
     INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
   SELECT j."manufacturerId" INTO maker_id FROM public."PrintJob" j WHERE j."batchId"=p_batch_id
     AND j.status='CONFIRMED' ORDER BY j."confirmedAt" DESC NULLS LAST,j."createdAt" DESC LIMIT 1;
@@ -11185,6 +11194,16 @@ BEGIN
   ELSE
     IF batch_row."releasedAt" IS NOT NULL OR batch_row."lifecycleState"='RELEASED' THEN RAISE EXCEPTION 'BATCH_ALREADY_RELEASED'; END IF;
     IF batch_row."lifecycleState"<>'SAMPLE_VERIFIED' THEN RAISE EXCEPTION 'SAMPLE_SCAN_REQUIRED'; END IF;
+    IF EXISTS (
+      SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=p_batch_id AND j.status='CONFIRMED'
+        AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
+          WHERE e."printJobId"=j.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified'))
+          < CASE coalesce(batch_row."sampleScanPolicy"->>'type',batch_row."sampleScanPolicy"->>'mode','ONE_PER_PRINT_JOB')
+              WHEN 'ONE_PER_N_LABELS' THEN GREATEST(1,ceil(j.quantity::numeric/GREATEST(coalesce((batch_row."sampleScanPolicy"->>'n')::integer,j.quantity),1))::integer)
+              WHEN 'PERCENTAGE' THEN GREATEST(GREATEST(coalesce((batch_row."sampleScanPolicy"->>'min')::integer,1),1),
+                ceil(j.quantity*GREATEST(coalesce((batch_row."sampleScanPolicy"->>'percentage')::numeric,1),0.01)/100)::integer)
+              ELSE 1 END
+    ) THEN RAISE EXCEPTION 'SAMPLE_SCAN_REQUIRED'; END IF;
     IF EXISTS (SELECT 1 FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
       WHERE ps."batchId"=p_batch_id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED','CANCELLED','FAILED'))
     THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
