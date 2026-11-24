@@ -221,6 +221,16 @@ async function main() {
   for (const table of ["Batch", "QRCode", "PrintJob", "PrintSession", "PrintItem", "PrintItemEvent", "PrintJobChunk", "Printer", "PrinterRegistration", "PrinterAgentSession", "ActionIdempotencyKey"]) {
     denied(app, `SELECT * FROM public."${table}" LIMIT 1`);
   }
+  const retainedLookup = () => `SELECT app_rls.printing_connector_registration(
+    '${caps.maker}','printing-connector-registration','${requestId()}','LOOKUP',
+    '{"deviceFingerprint":"printing-device"}'::jsonb)`;
+  assert.equal(json(app, retainedLookup()).id, ids.registration);
+  assert.equal(json(app, retainedLookup()).id, ids.registration);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrinterRegistration"
+    WHERE "userId"='${ids.maker}' AND "deviceFingerprint"='printing-device'`), '1');
+  denied(app, `SELECT app_rls.printing_connector_registration(
+    '${caps.outsider}','printing-connector-registration','${requestId()}','LOOKUP',
+    '{"deviceFingerprint":"printing-device"}'::jsonb)`, /PRINTING_BOUNDARY_DENIED/);
   assert.equal(psql(admin, `SELECT bool_and(c.relrowsecurity AND c.relforcerowsecurity) FROM pg_class c
     JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
       AND c.relname IN ('PrintItemEvent','PrintJobChunk')`), "t");
