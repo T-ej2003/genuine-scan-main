@@ -180,6 +180,19 @@ const run = async () => {
       signedReleaseWorkflow.includes("npm --prefix backend run connector:smoke"),
     "Signed Windows workflow should publish, smoke-check, and commit the manifest/artifact that production downloads use"
   );
+  const freshInstallJob = signedReleaseWorkflow.split("\n  fresh-install:")[1]?.split("\n  upgrade-qualification:")[0] || "";
+  assert(
+    freshInstallJob.includes("git merge-base --is-ancestor $source $env:GITHUB_SHA") &&
+      freshInstallJob.includes("$run.head_sha -cne $source") &&
+      freshInstallJob.includes("--signer-workflow 'T-ej2003/genuine-scan-main/.github/workflows/windows-connector-signed-release.yml'") &&
+      freshInstallJob.includes("--source-digest $source") &&
+      freshInstallJob.includes("--predicate-type 'https://slsa.dev/provenance/v1'") &&
+      freshInstallJob.includes("'publish_fresh_install' -and $source -cne $env:GITHUB_SHA") &&
+      freshInstallJob.includes("$runtimeHash -cne $env:MSCQR_EXPECTED_RUNTIME_SHA256") &&
+      freshInstallJob.includes("--validate-state") &&
+      freshInstallJob.includes("fresh-install-certification.json"),
+    "Historical signed-source certification must verify provenance and runtime identity without relaxing exact-main publication"
+  );
   assert(
     sourceVersionHelper.includes("LOCAL_PRINT_AGENT_SOURCE_VERSION") &&
       sourceVersionHelper.includes("assertConnectorVersionMatchesSource"),
