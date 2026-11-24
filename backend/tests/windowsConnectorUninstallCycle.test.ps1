@@ -60,11 +60,20 @@ try {
     [IO.File]::WriteAllText((Join-Path (Split-Path $StateFile) 'maintenance-fence.json'),'{"version":1,"state":"FENCED"}')
   }
   Invoke-MscqrUninstallPreflight
-  foreach($path in @($wrapper,$startup)) {if(Test-Path -LiteralPath $path) {throw "Uninstall preflight retained $path"}}
+  foreach($path in @($wrapper,$startup)) {if(-not(Test-Path -LiteralPath $path -PathType Leaf)) {throw "Uninstall preflight removed $path before Inno committed"}}
+  Write-MscqrUninstallResult 'removal' 'UNINSTALL_INCOMPLETE' 'Synthetic interrupted Inno removal.' $false $true 'failure'
+  if((Get-MscqrInstallationClassification $env:USERPROFILE $live $runtime) -cne 'EXISTING_INSTALL_UPGRADE') {
+    throw 'Interrupted uninstall lost the complete installation classification.'
+  }
+  Invoke-MscqrUninstallPreflight
+  foreach($path in @($wrapper,$startup)) {if(-not(Test-Path -LiteralPath $path -PathType Leaf)) {throw "Retry preflight removed $path before Inno committed"}}
+  try {Invoke-MscqrUninstallComplete;throw 'Uninstall completion accepted an installation Inno had not removed.'}
+  catch {if($_.Exception.Message -ne 'Inno did not remove the owned executable and installation registration.'){throw}}
+  foreach($path in @($wrapper,$startup)) {if(-not(Test-Path -LiteralPath $path -PathType Leaf)) {throw "Failed completion removed $path"}}
   foreach($path in $tracked) {Microsoft.PowerShell.Management\Remove-Item -LiteralPath $path -Force}
-  Microsoft.PowerShell.Management\Remove-Item -LiteralPath (Join-Path $live 'bin')
   $script:registryPresent=$false
   Invoke-MscqrUninstallComplete
+  Microsoft.PowerShell.Management\Remove-Item -LiteralPath (Join-Path $live 'bin')
   foreach($path in @($runtime,$wrapper,$startup,$registry)) {if(Test-Path -LiteralPath $path) {throw "Uninstall retained $path"}}
   for($i=0;$i -lt $preserved.Count;$i++) {
     if((Get-FileHash -LiteralPath $preserved[$i] -Algorithm SHA256).Hash -ne $hashes[$i]) {
@@ -185,9 +194,9 @@ try {
   foreach($path in @($runtime,$uninstaller,$uninstallData,$uninstallScript)) {
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $path -Force
   }
-  Microsoft.PowerShell.Management\Remove-Item -LiteralPath (Join-Path $live 'bin') -Force
   $script:registryPresent=$false
   Invoke-MscqrUninstallComplete
+  Microsoft.PowerShell.Management\Remove-Item -LiteralPath (Join-Path $live 'bin') -Force
   if((Get-MscqrInstallationClassification $env:USERPROFILE $live $runtime) -cne 'CLEAN_INSTALL') {
     throw 'Failed first install did not return to clean classification after standard uninstall.'
   }
@@ -213,9 +222,9 @@ try {
   foreach($path in @($runtime,$uninstaller,$uninstallData,$uninstallScript)) {
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $path -Force
   }
-  Microsoft.PowerShell.Management\Remove-Item -LiteralPath (Join-Path $live 'bin') -Force
   $script:registryPresent=$false
   Invoke-MscqrUninstallComplete
+  Microsoft.PowerShell.Management\Remove-Item -LiteralPath (Join-Path $live 'bin') -Force
   for($i=0;$i -lt 3;$i++) {
     if((Get-FileHash -LiteralPath @($state,$script:journal,$config)[$i] -Algorithm SHA256).Hash -ne $retainedHashes[$i]) {
       throw 'Failed retained install removal changed persistent evidence.'

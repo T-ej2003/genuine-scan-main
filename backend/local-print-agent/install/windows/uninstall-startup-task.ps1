@@ -159,13 +159,10 @@ function Invoke-MscqrUninstallPreflight {
   [IO.Directory]::CreateDirectory($lifecycleRoot) | Out-Null
   [IO.File]::WriteAllText($snapshotFile,(@{files=$before;live=$live;wrapper=$wrapper;startup=$startup;
     removedEmptyEnv=$removeEmptyGeneratedEnv;
+    wrapperSha256=$(if(Test-Path -LiteralPath $wrapper -PathType Leaf){(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash.ToLowerInvariant()}else{''});
+    startupSha256=$(if(Test-Path -LiteralPath $startup -PathType Leaf){(Get-FileHash -LiteralPath $startup -Algorithm SHA256).Hash.ToLowerInvariant()}else{''});
     fenceSha256=$(if($stateFile){(Get-FileHash -LiteralPath $fencePath -Algorithm SHA256).Hash.ToLowerInvariant()}else{''})} | ConvertTo-Json -Depth 8),[Text.Encoding]::UTF8)
   if($removeEmptyGeneratedEnv) {Remove-Item -LiteralPath $environmentFile -Force -ErrorAction Stop}
-  if(Test-Path -LiteralPath $startup -PathType Leaf) {Remove-Item -LiteralPath $startup -Force -ErrorAction Stop}
-  if(Test-Path -LiteralPath $wrapper -PathType Leaf) {Remove-Item -LiteralPath $wrapper -Force -ErrorAction Stop}
-  if((Test-Path -LiteralPath $startup) -or (Test-Path -LiteralPath $wrapper)) {
-    throw 'Owned startup files could not be removed.'
-  }
   Write-MscqrUninstallResult 'preflight' 'NONE' 'Connector stopped; Inno can remove owned application files. Persistent state is retained.' $false $false 'ready'
 }
 
@@ -176,9 +173,8 @@ function Invoke-MscqrUninstallComplete {
      [IO.Path]::GetFullPath([string]$snapshot.startup) -ine [IO.Path]::GetFullPath($startup) -or
      [IO.Path]::GetFullPath([string]$snapshot.wrapper) -ine [IO.Path]::GetFullPath($wrapper)) {throw 'Uninstall preservation record does not match this installation.'}
   $registry='HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}_is1'
-  if((Test-Path -LiteralPath $runtime) -or (Test-Path -LiteralPath $wrapper) -or
-     (Test-Path -LiteralPath $startup) -or (Test-Path -LiteralPath $registry)) {
-    throw 'Inno did not remove every owned executable, startup file and registration.'
+  if((Test-Path -LiteralPath $runtime) -or (Test-Path -LiteralPath $registry)) {
+    throw 'Inno did not remove the owned executable and installation registration.'
   }
   if($snapshot.removedEmptyEnv -eq $true -and (Test-Path -LiteralPath (Join-Path $live 'agent.env'))) {
     throw 'Empty installer-generated configuration was not removed.'
@@ -188,6 +184,21 @@ function Invoke-MscqrUninstallComplete {
        (Get-FileHash -LiteralPath $record.path -Algorithm SHA256).Hash -ine $record.sha256) {
       throw 'Retained connector identity, configuration or journal differs from its pre-removal hash.'
     }
+  }
+  foreach($owned in @(@{path=$startup;hash=$snapshot.startupSha256;target=$wrapper},
+      @{path=$wrapper;hash=$snapshot.wrapperSha256;target=$runtime})) {
+    if(-not(Test-Path -LiteralPath $owned.path)) {continue}
+    if(-not(Test-Path -LiteralPath $owned.path -PathType Leaf) -or
+       ((Get-Item -LiteralPath $owned.path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+       [string]::IsNullOrWhiteSpace([string]$owned.hash) -or
+       (Get-FileHash -LiteralPath $owned.path -Algorithm SHA256).Hash -ine $owned.hash -or
+       -not (Get-Content -LiteralPath $owned.path -Raw).Contains($owned.target)) {
+      throw 'Owned startup file changed after uninstall preflight.'
+    }
+    Remove-Item -LiteralPath $owned.path -Force -ErrorAction Stop
+  }
+  if((Test-Path -LiteralPath $startup) -or (Test-Path -LiteralPath $wrapper)) {
+    throw 'Owned startup files could not be removed.'
   }
   Write-MscqrUninstallResult 'complete' 'NONE' 'Connector application removed; persistent identity, configuration and journal retained.' $false $false 'success'
 }
