@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2'
+    AND source_contract_sha256='7236623a1571e7faefd8f726deb46b91fba9ff92b16834ab54513890e2fd1d46'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:7236623a1571e7faefd8f726deb46b91fba9ff92b16834ab54513890e2fd1d46'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:984ed17d1c4f5b7b98d2a8aa7aab33aba3b66e9a918660ad5c1f857d324c14a2')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:7236623a1571e7faefd8f726deb46b91fba9ff92b16834ab54513890e2fd1d46')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8960,7 +8960,7 @@ DECLARE
 BEGIN
   IF p_purpose<>'printing-printer-admin'
      OR p_operation NOT IN (
-       'CREATE','UPDATE','DELETE','RELINK','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
+       'CREATE','UPDATE','DELETE','RELINK','RETIRE','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
        'AUDIT_TEST','AUDIT_TEST_LABEL_ATTENTION','AUDIT_TEST_LABEL_CONFIRMED',
        'AUDIT_TEST_LABEL_QUEUED','AUDIT_DISCOVERY'
      )
@@ -9009,7 +9009,7 @@ BEGIN
         ))
       )
       OR (
-        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
+        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('RETIRE','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
         AND EXISTS (
           SELECT 1 FROM public."ManufacturerLicenseeLink" ml
           WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=printer_row."licenseeId"
@@ -9263,6 +9263,41 @@ BEGIN
         "printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive",
         "isDefault","lastSeenAt","lastValidatedAt","lastValidationStatus","lastValidationMessage",
         "capabilitySummary","calibrationProfile",metadata,"createdAt","updatedAt" INTO printer_row;
+  ELSIF p_operation='RETIRE' THEN
+    IF actor.role<>'MANUFACTURER_ADMIN' OR printer_row."connectionType"<>'LOCAL_AGENT'
+       OR printer_row."printerRegistrationId" IS NULL OR coalesce(p_payload,'{}'::jsonb)<>'{}'::jsonb
+    THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    PERFORM set_config('app.printing_registration_id',printer_row."printerRegistrationId",true);
+    SELECT pr.id,pr."trustStatus",pr."revokedAt" INTO STRICT maintenance_registration
+      FROM public."PrinterRegistration" pr
+      WHERE pr.id=printer_row."printerRegistrationId" AND pr."userId"=actor."userId"
+        AND pr."orgId" IS NOT DISTINCT FROM scope_org
+        AND pr."licenseeId" IS NOT DISTINCT FROM scope_licensee FOR UPDATE;
+    maintenance_scope:=jsonb_build_array('local',maintenance_registration.id)::text;
+    maintenance_snapshot:=app_rls.printing_maintenance_gate(maintenance_scope,'STATUS',actor."userId",'{}'::jsonb);
+    IF maintenance_snapshot->>'state'='DISPATCH_FENCED'
+       AND maintenance_registration."trustStatus"='REVOKED'
+       AND maintenance_registration."revokedAt" IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM public."Printer" p
+         WHERE p."printerRegistrationId"=maintenance_registration.id AND p."isActive")
+    THEN RETURN jsonb_build_object('printerId',printer_row.id,'registrationId',maintenance_registration.id,
+      'retired',true,'idempotent',true,'dispatchFenced',true); END IF;
+    IF maintenance_snapshot->>'state'<>'ACTIVE'
+    THEN RAISE EXCEPTION 'CONNECTOR_MAINTENANCE_FENCED' USING ERRCODE='55000'; END IF;
+    PERFORM app_rls.printing_maintenance_gate(maintenance_scope,'REQUEST',actor."userId",
+      jsonb_build_object('requestId',p_request_id,'printerId',printer_row.id));
+    UPDATE public."PrinterRegistration" SET "trustStatus"='REVOKED',"revokedAt"=coalesce("revokedAt",now_at),
+      "trustReason"='Manufacturer retired connector',"updatedAt"=now_at
+      WHERE id=maintenance_registration.id;
+    UPDATE public."Printer" SET "isActive"=false,"isDefault"=false,
+      "lastValidationStatus"='RETIRED',"lastValidationMessage"='Connector registration retired',
+      "updatedAt"=now_at WHERE "printerRegistrationId"=maintenance_registration.id
+      AND "assignedUserId"=actor."userId" AND "orgId" IS NOT DISTINCT FROM scope_org
+      AND "licenseeId" IS NOT DISTINCT FROM scope_licensee;
+    PERFORM app_rls.printing_write_audit(actor."userId",actor.role,scope_org,scope_licensee,
+      'PRINTER_RETIRED','Printer',printer_row.id,jsonb_build_object('registrationId',maintenance_registration.id));
+    RETURN jsonb_build_object('printerId',printer_row.id,'registrationId',maintenance_registration.id,
+      'retired',true,'idempotent',false,'dispatchFenced',true);
   ELSIF p_operation='DELETE' THEN
     IF printer_row."connectionType"='LOCAL_AGENT'
        OR EXISTS (SELECT 1 FROM public."PrintJob" j
@@ -16132,7 +16167,8 @@ BEGIN
   ELSIF identity_class = 'breakglass' AND login_role !~ '^mscqr_prod_breakglass_[a-z0-9_]+$'
      AND login_role <> 'mscqr_rls_wave_c_breakglass' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
-  ELSIF identity_class = 'migration' AND login_role <> 'mscqr_rls_cert_migration' THEN
+  ELSIF identity_class = 'migration' AND login_role !~ '^mscqr_(dev|staging|prod)_migration$'
+     AND login_role <> 'mscqr_rls_wave_c_migration' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
   END IF;
   IF (login_role ~ '^mscqr_dev_(operator|migration)$' AND environment <> 'development')
