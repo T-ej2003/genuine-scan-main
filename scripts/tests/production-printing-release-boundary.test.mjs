@@ -55,9 +55,15 @@ test("every printing and public routine changed by this PR has a governed instal
         .replaceAll("{{WORKER_ROLE}}", "'mscqr_prd_rls_phase2_worker'");
       assert.deepEqual([...definitions(incremental)], [["printing_maintenance_gate", productionDefinition]],
         "incremental migration must install the exact canonical function and no other routine");
+      const partialBatchIncremental = fs.readFileSync("backend/src/rls-waves/session-c/c02/printingPartialBatchIncremental.sql", "utf8");
+      assert.match(partialBatchIncremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
+      assert.match(partialBatchIncremental, /PRINT_JOB_MIGRATION_IDENTITY_INVALID/);
+      assert.match(partialBatchIncremental, /\nCOMMIT;\n$/);
+      assert.deepEqual([...definitions(partialBatchIncremental)], [["printing_create_job", after.get("printing_create_job")]],
+        "partial-batch migration must install the exact canonical function and no other routine");
     }
     assert.deepEqual(changed.filter(name => !allowed.includes(name) &&
-      !(incremental && name === "printing_maintenance_gate")), [], `${file} changed functions missing from governed release`);
+      !(incremental && ["printing_maintenance_gate", "printing_create_job"].includes(name))), [], `${file} changed functions missing from governed release`);
   }
 });
 

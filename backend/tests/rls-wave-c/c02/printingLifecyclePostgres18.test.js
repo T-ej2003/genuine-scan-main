@@ -980,6 +980,69 @@ async function main() {
     "automatic activation is distinct from a human approval");
   assert.equal(psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${ids.batch}'`), "PRINT_CONFIRMED",
     "confirmation must not manufacture a whole-batch release");
+
+  // A confirmed run advances the batch milestone, even when other allocated QR codes remain.
+  const p0PartialBatch = randomUUID();
+  const p0PartialQrs = Array.from({ length: 20 }, (_, index) => ({
+    id: randomUUID(), code: `p0-partial-${index + 1}`, displayCode: `P0-${String(index + 1).padStart(4, "0")}`,
+  }));
+  psql(admin, `INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes","lifecycleState","sampleScanPolicy","updatedAt")
+    VALUES('${p0PartialBatch}','P0 partial batch','${ids.licenseeA}','${ids.maker}','P0-0001','P0-0020',20,'CODES_GENERATED','{"mode":"ONE_PER_PRINT_JOB"}',now());
+    ${p0PartialQrs.map((qr) => `INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId",status,"updatedAt")
+      VALUES('${qr.id}','${qr.code}','${qr.displayCode}','${ids.licenseeA}','${p0PartialBatch}','ALLOCATED',now());`).join("\n")}`);
+  const p0PartialCreateSql = (selected, label, capability = caps.maker) => `SELECT app_rls.printing_create_job(
+    '${capability}','printing-create-job','${requestId()}','${p0PartialBatch}','${ids.printer}',${selected.length},
+    NULL,NULL,'LOCAL_AGENT','ZPL',NULL,
+    '${JSON.stringify(selected.map((qr, index) => ({
+      qrCodeId: qr.id, tokenNonce: hash(`${label}-nonce-${index}`), tokenHash: hash(`${label}-${index}`),
+      tokenIssuedAt: signedAt, tokenExpiresAt: expires,
+    })))}'::jsonb)`;
+  const p0CompletePartialRun = (job, count, label) => {
+    for (let index = 0; index < count; index += 1) {
+      const claim = json(app, `SELECT app_rls.printing_connector_event(
+        '${ids.registration}','printing-agent','printing-device','${label}_claim_${index}_nonce',now()::timestamp,
+        '${requestId()}','CLAIM','${job.id}',NULL,'${ids.printer}','${hash(`${label}-claim-${index}`)}',NULL,'{}'::jsonb)`);
+      assert.equal(claim.available, true);
+      assert.equal(claim.printJobId, job.id);
+      json(app, `SELECT app_rls.printing_connector_event(
+        '${ids.registration}','printing-agent','printing-device','${label}_ack_${index}_nonce',now()::timestamp,
+        '${requestId()}','ACK','${job.id}','${claim.printItemId}','${ids.printer}','${hash(`${label}-ack-${index}`)}',
+        'spool-${label}-${index}','{}'::jsonb)`);
+      json(app, `SELECT app_rls.printing_connector_event(
+        '${ids.registration}','printing-agent','printing-device','${label}_confirm_${index}_nonce',now()::timestamp,
+        '${requestId()}','CONFIRM','${job.id}','${claim.printItemId}','${ids.printer}','${hash(`${label}-confirm-${index}`)}',
+        'spool-${label}-${index}','{"physical":true}'::jsonb)`);
+    }
+    assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${job.id}'`), "CONFIRMED");
+  };
+  const p0FirstPartial = json(app, p0PartialCreateSql(p0PartialQrs.slice(0, 1), "first-partial"));
+  p0CompletePartialRun(p0FirstPartial.job, 1, "p0_first");
+  assert.equal(psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${p0PartialBatch}'`), "PRINT_CONFIRMED");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "batchId"='${p0PartialBatch}' AND status='ALLOCATED'`), "19");
+  assert.equal(json(app, `SELECT app_rls.printing_readiness('${caps.maker}','printing-readiness','${requestId()}',
+    'PRINTABLE_ITEMS','${p0PartialBatch}','{"limit":20}'::jsonb)`).printableItems.length, 19);
+  denied(app, p0PartialCreateSql(p0PartialQrs.slice(1, 2), "foreign-partial", caps.outsider), /PRINTING_BOUNDARY_DENIED/);
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=now() WHERE id='${p0PartialBatch}'`);
+  denied(app, p0PartialCreateSql(p0PartialQrs.slice(1, 2), "suspended-partial"), /INVALID_STATE_TRANSITION/);
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=NULL WHERE id='${p0PartialBatch}'`);
+  const p0CompetingPartials = await Promise.all([
+    psqlAsync(app, p0PartialCreateSql(p0PartialQrs.slice(1, 2), "competing-a")),
+    psqlAsync(app, p0PartialCreateSql(p0PartialQrs.slice(1, 2), "competing-b")),
+  ]);
+  assert.equal(p0CompetingPartials.filter((result) => result.status === 0).length, 1);
+  assert.match(p0CompetingPartials.find((result) => result.status !== 0).output, /ACTIVE_PRINT_JOB_EXISTS|BATCH_BUSY/);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${p0PartialBatch}'`), "2",
+    "the losing transaction must leave no print job or reservation");
+  p0CompletePartialRun(JSON.parse(p0CompetingPartials.find((result) => result.status === 0).output).job, 1, "p0_second");
+  const p0LastPartial = json(app, p0PartialCreateSql(p0PartialQrs.slice(2), "last-partial"));
+  p0CompletePartialRun(p0LastPartial.job, 18, "p0_last");
+  assert.equal(psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${p0PartialBatch}'`), "PRINT_CONFIRMED");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "batchId"='${p0PartialBatch}' AND status='PRINTED'`), "20");
+  assert.equal(json(app, `SELECT app_rls.printing_readiness('${caps.maker}','printing-readiness','${requestId()}',
+    'PRINTABLE_ITEMS','${p0PartialBatch}','{"limit":20}'::jsonb)`).printableItems.length, 0);
+  denied(app, p0PartialCreateSql(p0PartialQrs.slice(0, 1), "duplicate-partial"), /BATCH_BUSY/);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${p0PartialBatch}'`), "3");
+
   assert.equal(json(app, `SELECT app_rls.printing_connector_event(
     '${ids.registration}','printing-agent','printing-device','duplicate_confirm_1',now()::timestamp,
     '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}',
@@ -2390,7 +2453,7 @@ async function main() {
   console.log("Release Fix 5 PostgreSQL 18 printing lifecycle proof passed");
 }
 
-main().catch((error) => {
+main().then(() => process.exit(0)).catch((error) => {
   console.error(error);
-  process.exitCode = 1;
+  process.exit(1);
 });

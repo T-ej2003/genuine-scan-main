@@ -1802,7 +1802,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('printing_batch_'||p_batch_id,0));
   SELECT b.id,b."licenseeId",b."lifecycleState",b."releasedAt",b."suspendedAt"
     INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
-  IF batch_row."lifecycleState" NOT IN ('CODES_GENERATED'::public."BatchLifecycleState",'PRINT_ACKNOWLEDGED'::public."BatchLifecycleState")
+  IF batch_row."lifecycleState" NOT IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED','PRINT_CONFIRMED')
      OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
   THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
   IF EXISTS (

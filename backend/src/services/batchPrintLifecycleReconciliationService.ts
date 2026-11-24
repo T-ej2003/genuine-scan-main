@@ -44,7 +44,6 @@ const PRINTABLE_STATES = new Set<BatchLifecycleState>([
   BatchLifecycleState.CODES_GENERATED,
   BatchLifecycleState.PRINT_ACKNOWLEDGED,
   BatchLifecycleState.PRINT_CONFIRMED,
-  BatchLifecycleState.SAMPLE_VERIFIED,
 ]);
 
 const PRINT_EVIDENCE_QR_STATUSES: QRStatus[] = [QRStatus.PRINTED, QRStatus.REDEEMED, QRStatus.SCANNED];
@@ -58,6 +57,7 @@ export const buildBatchPrintReadiness = (params: {
   batchId: string;
   lifecycleState?: BatchLifecycleState | null;
   releasedAt?: Date | string | null;
+  suspendedAt?: Date | string | null;
   availableToPrint?: number | null;
   canRepairAutomatically?: boolean;
   repairTargetState?: BatchLifecycleState | null;
@@ -77,6 +77,21 @@ export const buildBatchPrintReadiness = (params: {
       canRetry: false,
       canRepairAutomatically: false,
       reasonCode: "batch_released",
+      availableToPrint,
+    };
+  }
+
+  if (params.suspendedAt) {
+    return {
+      printable: false,
+      batchId: params.batchId,
+      currentLifecycleState,
+      requiredPreviousStep: "Resolve the batch suspension before printing.",
+      userMessage: "This batch is suspended and cannot be printed.",
+      recoveryAction: "contact_support",
+      canRetry: false,
+      canRepairAutomatically: false,
+      reasonCode: "batch_suspended",
       availableToPrint,
     };
   }
@@ -147,6 +162,7 @@ export const buildBatchPrintReadinessFromSummary = (params: {
   batchId: string;
   lifecycleState?: BatchLifecycleState | null;
   releasedAt?: Date | string | null;
+  suspendedAt?: Date | string | null;
   availableToPrint?: number | null;
   printedAt?: Date | string | null;
   printedCodes?: number | null;
@@ -171,6 +187,7 @@ export const buildBatchPrintReadinessFromSummary = (params: {
     batchId: params.batchId,
     lifecycleState,
     releasedAt: params.releasedAt || null,
+    suspendedAt: params.suspendedAt || null,
     availableToPrint: params.availableToPrint || 0,
     canRepairAutomatically: lifecycleState === BatchLifecycleState.DRAFT && Boolean(repairTargetState),
     repairTargetState,
@@ -271,6 +288,7 @@ export const reconcileBatchPrintLifecycle = async (params: {
       rootBatchId: true,
       lifecycleState: true,
       releasedAt: true,
+      suspendedAt: true,
     },
   });
   if (!batch) {
@@ -337,6 +355,7 @@ export const reconcileBatchPrintLifecycle = async (params: {
     batchId: batch.id,
     lifecycleState: afterState,
     releasedAt: batch.releasedAt,
+    suspendedAt: batch.suspendedAt,
     availableToPrint,
     canRepairAutomatically: !params.apply && canRepairAutomatically,
     repairTargetState: targetState,
