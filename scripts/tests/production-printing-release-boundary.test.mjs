@@ -68,6 +68,10 @@ test("every printing and public routine changed by this PR has a governed instal
       assert.match(partialBatchIncremental, /p\.proconfig=ARRAY\['search_path=pg_catalog, public'\]/);
       assert.equal((partialBatchIncremental.match(/pg_get_functiondef\(p\.oid\)/g) || []).length, 2,
         "preflight and postflight must authenticate the full function definition");
+      assert.equal((partialBatchIncremental.match(/pg_catalog\.aclexplode\(coalesce\(p\.proacl,pg_catalog\.acldefault\('f',p\.proowner\)\)\)/g) || []).length, 2,
+        "preflight and postflight must authenticate the exact function ACL");
+      assert.equal((partialBatchIncremental.match(/count\(\*\)=2/g) || []).length, 2,
+        "only the function owner and approved app role may execute the routine");
       assert.match(partialBatchIncremental, /PRINT_JOB_MIGRATION_SUCCESSOR_INVALID/);
       assert.match(partialBatchIncremental, /\nCOMMIT;\n$/);
       assert.deepEqual([...definitions(partialBatchIncremental)], [["printing_create_job", after.get("printing_create_job")]],
