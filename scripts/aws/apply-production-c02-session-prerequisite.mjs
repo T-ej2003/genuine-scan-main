@@ -33,7 +33,21 @@ export function buildC02SessionTask({ sourceSha, hostname, combinedRequirements,
   let executor = fs.readFileSync(path.join(repositoryRoot, "scripts/aws/production-c02-session-executor.cjs"), "utf8");
   let runtimeArgument;
   if (combinedRequirements) {
-    const sources=Object.fromEntries(["production-c02-session-executor.cjs","production-printing-routine-delta-executor.cjs","production-c02-combined-executor.cjs"].map(name=>["./"+name,fs.readFileSync(path.join(repositoryRoot,"scripts/aws",name),"utf8")]));
+    const catalogueSource=fs.readFileSync(path.join(repositoryRoot,"scripts/aws/production-printing-routine-delta-executor.cjs"),"utf8");
+    const catalogueEnd="async function executePrintingRoutineDeltaTransaction(";
+    const unusedStart="const expectedPredecessors = Object.freeze(";
+    const sharedStart="const canonicalJson = (value) => {";
+    assert.equal(catalogueSource.split(catalogueEnd).length,2,"C02 catalogue collector source changed");
+    assert.equal(catalogueSource.split(unusedStart).length,2,"C02 catalogue collector source changed");
+    assert.equal(catalogueSource.split(sharedStart).length,2,"C02 catalogue collector source changed");
+    assert.ok(catalogueSource.indexOf(unusedStart)<catalogueSource.indexOf(sharedStart)
+      && catalogueSource.indexOf(sharedStart)<catalogueSource.indexOf(catalogueEnd));
+    // Keep the existing catalogue collector and its dependencies; omit the unrelated delta executor.
+    const catalogueRuntime=catalogueSource.slice(0,catalogueSource.indexOf(unusedStart))
+      +catalogueSource.slice(catalogueSource.indexOf(sharedStart),catalogueSource.indexOf(catalogueEnd))
+      +"module.exports={canonicalJson,collectAppOnlyDatabaseCatalogueRows,hashProductionRlsCatalogue};";
+    const sources=Object.fromEntries(["production-c02-session-executor.cjs","production-c02-combined-executor.cjs"].map(name=>["./"+name,fs.readFileSync(path.join(repositoryRoot,"scripts/aws",name),"utf8")]));
+    sources["./production-printing-routine-delta-executor.cjs"]=catalogueRuntime;
     const runtime=`const sources=${JSON.stringify(sources)};const cache=Object.create(null);function load(n){if(cache[n])return cache[n].exports;if(!Object.hasOwn(sources,n))return require(n);const module={exports:{}};cache[n]=module;new Function('module','require',sources[n])(module,load);return module.exports;}load('./production-c02-combined-executor.cjs').main();`;
     assert.ok(Buffer.byteLength(runtime)<96*1024);
     runtimeArgument=brotliCompressSync(Buffer.from(runtime),{params:{[constants.BROTLI_PARAM_QUALITY]:11}}).toString("base64");
@@ -41,10 +55,10 @@ export function buildC02SessionTask({ sourceSha, hostname, combinedRequirements,
   }
   assert.ok(Buffer.byteLength(executor) < 64 * 1024);
   const bytes = Buffer.from(canonicalJson(pkg));
-  assert.ok(bytes.length < (combinedRequirements ? 256 : 64) * 1024);
+  assert.ok(bytes.length < (combinedRequirements ? 320 : 64) * 1024);
   const encoded = (combinedRequirements ? brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } })
     : gzipSync(bytes, { level: 9, mtime: 0 })).toString("base64");
-  assert.ok(encoded.length <= (combinedRequirements ? 39 * 1024 : 32768), `C02 task payload exceeds the reviewed bounded transport (${encoded.length} bytes)`);
+  assert.ok(encoded.length <= (combinedRequirements ? 48 * 1024 : 32768), `C02 task payload exceeds the reviewed bounded transport (${encoded.length} bytes)`);
   const definition = { family, networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"], cpu: "1024", memory: "2048",
     executionRoleArn: PRINTING_ROUTINE_DELTA.executionRoleArn, runtimePlatform: STAGE_B.taskRuntimePlatform,
     volumes: [{ name: "executor-tmp" }], containerDefinitions: [{ name: containerName,
@@ -74,7 +88,7 @@ export function authenticateC02SessionResult(message, { sourceSha, packageSha256
   assert.equal(result.sourceSha, sourceSha); assert.equal(result.packageSha256, packageSha256);
   assert.equal(result.database, "mscqr_production_rls_green_phase2");
   assert.equal(result.databaseRole, PRINTING_ROUTINE_DELTA.administrator);
-  assert.ok(result.status === "APPLIED" && result.writeCount === (combined ? 55 : 15) ||
+  assert.ok(result.status === "APPLIED" && result.writeCount === (combined ? 57 : 15) ||
     result.status === "ALREADY_CONVERGED" && result.writeCount === 0);
   return result;
 }

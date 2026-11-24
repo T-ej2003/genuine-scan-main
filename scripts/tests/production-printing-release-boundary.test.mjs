@@ -28,7 +28,7 @@ test("combined boundary advances only reviewed printing identities and preserves
   for (const key of Object.keys(rows)) for (const row of rows[key]) {
     assert.equal(row.sha256, (PRINTING_RELEASE_OBJECTS[key].includes(row.identity) ? "2" : "1").repeat(64));
   }
-  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 28);
+  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 30);
   assert.equal(predecessor.objects.routines[0].sha256, "1".repeat(64));
 });
 
@@ -111,8 +111,7 @@ test("every printing and public routine changed by this PR has a governed instal
         "retirement migration must install the exact canonical gate and printer function and no other routine");
     }
     assert.deepEqual(changed.filter(name => !allowed.includes(name) &&
-      !(incremental && ["printing_maintenance_gate", "printing_create_job", "printing_record_sample", "printing_release_batch", "printing_readiness"].includes(name)) &&
-      !(retirementIncremental && name === "printing_printer_administration")), [], `${file} changed functions missing from governed release`);
+      !(incremental && ["printing_create_job", "printing_record_sample", "printing_release_batch", "printing_readiness"].includes(name))), [], `${file} changed functions missing from governed release`);
   }
 });
 
@@ -148,10 +147,12 @@ test("B03 diagnostic requires all printing deltas at exact successor, never mere
 test("combined C02 task keeps root executor bindings and bounded source-authenticated transport", () => {
   const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
   assert.deepEqual(runtime.validatePackage(pkg), pkg);
-  assert.equal(pkg.definitions.length, 12); assert.equal(pkg.policySql.length, 19);
+  assert.equal(pkg.definitions.length, 14); assert.equal(pkg.policySql.length, 19);
   assert.ok(pkg.definitions.some(({ schema, name }) => schema === "app_rls" && name === "printing_gateway_job"));
+  assert.deepEqual(pkg.definitions.filter(({ name }) => ["printing_maintenance_gate", "printing_printer_administration"].includes(name)).map(({ name }) => name),
+    ["printing_maintenance_gate", "printing_printer_administration"], "retirement routines must be installed in the executed combined package");
   assert.deepEqual(pkg.definitions.slice(-4).map(({ schema, name }) => `${schema}.${name}`), [
-    "app_rls.printing_worker_network_job", "app_public.public_verify_execute", "app_public.verify_signed_qr", "app_public.claim_customer_ownership",
+    "app_rls.printing_printer_administration", "app_public.public_verify_execute", "app_public.verify_signed_qr", "app_public.claim_customer_ownership",
   ]);
   const publicExecutor = pkg.definitions.find(({ name }) => name === "public_verify_execute");
   assert.match(publicExecutor.sql, /activation\."eventType"='AUTOMATIC_ACTIVATION'/);
@@ -177,9 +178,9 @@ test("combined C02 task keeps root executor bindings and bounded source-authenti
   assert.equal(task.definition.containerDefinitions[0].secrets.length, 1);
   const resultBody = { schemaVersion: 2, kind: "PRODUCTION_C02_COMBINED_INSTALL_RESULT", sourceSha,
     packageSha256: pkg.packageSha256, database: "mscqr_production_rls_green_phase2", databaseRole: "mscqr_prod_admin",
-    status: "APPLIED", writeCount: 55 };
+    status: "APPLIED", writeCount: 57 };
   assert.equal(authenticateC02SessionResult(JSON.stringify({ ...resultBody, evidenceSha256: canonicalSha256(resultBody) }),
-    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 55);
+    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 57);
   const result = spawnSync(process.execPath, task.definition.containerDefinitions[0].command,
     { cwd: os.tmpdir(), encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(result.status, 1);
