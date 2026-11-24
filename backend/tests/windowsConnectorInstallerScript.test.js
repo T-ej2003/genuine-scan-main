@@ -188,6 +188,10 @@ const run = async () => {
       freshInstallJob.includes("--source-digest $source") &&
       freshInstallJob.includes("--predicate-type 'https://slsa.dev/provenance/v1'") &&
       freshInstallJob.includes("'publish_fresh_install' -and $source -cne $env:GITHUB_SHA") &&
+      freshInstallJob.includes("$candidate[0].certification.targetSourceSha -cne $source") &&
+      freshInstallJob.includes("$candidate[0].certification.installerSha256 -cne $expected") &&
+      freshInstallJob.includes("$candidate[0].certification.runtimeSha256 -cne $expectedRuntime") &&
+      freshInstallJob.includes("$null -ne $candidate[0].publishedAt") &&
       freshInstallJob.includes("$runtimeHash -cne $env:MSCQR_EXPECTED_RUNTIME_SHA256") &&
       freshInstallJob.includes("--validate-state") &&
       freshInstallJob.includes("fresh-install-certification.json"),
