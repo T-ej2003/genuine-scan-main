@@ -196,7 +196,14 @@ BEGIN
       -- a claim that the legacy binary supports native drain acknowledgement.
       IF EXISTS(SELECT 1 FROM jsonb_array_elements(maintenance_inventory->'items') item
         WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
-          WHERE r->>'itemId'=item->>'id' AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
+          WHERE r->>'itemId'=item->>'id' AND (r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY')
+            OR (r->>'outcome'='PROTECTED_UNKNOWN' AND item->>'state'='FROZEN'
+              AND item->>'pipelineState'='NEEDS_OPERATOR_ACTION'
+              AND item->'dispatchMetadata'->'upgradeNoReplay'->>'entrySha256'=r->>'reference'
+              AND EXISTS (SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'isolationEvidence') proof
+                WHERE proof->>'kind'='connector-work-inventory' AND proof->>'sha256'=
+                  item->'dispatchMetadata'->'upgradeNoReplay'->>'journalSha256')))
+            AND length(coalesce(r->>'reference',''))>0))
         OR EXISTS(SELECT 1 FROM jsonb_each(maintenance_inventory->'diagnostics') lease
           WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
             WHERE r->>'diagnosticId'=lease.key AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
