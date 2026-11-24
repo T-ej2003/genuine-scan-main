@@ -387,7 +387,7 @@ BEGIN
         JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
         WHERE ps."batchId"=batch_row.id AND pi."printConfirmedAt" IS NOT NULL),
       'sampleCount',(SELECT count(DISTINCT pa."qrCodeId") FROM public."PrintAuditEvent" pa
-        WHERE pa."batchId"=batch_row.id AND pa."eventType"='SAMPLE_SCAN_PASSED'),
+        WHERE pa."batchId"=batch_row.id AND pa."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified')),
       'sampleRequired',CASE coalesce(batch_row."sampleScanPolicy"->>'type',batch_row."sampleScanPolicy"->>'mode','ONE_PER_PRINT_JOB')
         WHEN 'ONE_PER_PRINT_JOB' THEN 1
         WHEN 'ONE_PER_ROLL' THEN 1
@@ -1802,7 +1802,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('printing_batch_'||p_batch_id,0));
   SELECT b.id,b."licenseeId",b."lifecycleState",b."releasedAt",b."suspendedAt"
     INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
-  IF batch_row."lifecycleState" NOT IN ('CODES_GENERATED'::public."BatchLifecycleState",'PRINT_ACKNOWLEDGED'::public."BatchLifecycleState")
+  IF batch_row."lifecycleState" NOT IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED','PRINT_CONFIRMED')
      OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
   THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
   IF EXISTS (
@@ -3031,7 +3031,7 @@ BEGIN
   IF EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=job_row.id
     AND e."qrCodeId"=qr_row.id AND e."eventType"='SAMPLE_SCAN_PASSED')
   THEN RETURN jsonb_build_object('idempotent',true,'qrCodeId',qr_row.id); END IF;
-  SELECT b."sampleScanPolicy" INTO policy FROM public."Batch" b WHERE b.id=job_row."batchId";
+  SELECT b."sampleScanPolicy" INTO policy FROM public."Batch" b WHERE b.id=job_row."batchId" FOR UPDATE;
   required_count:=CASE coalesce(policy->>'type',policy->>'mode','ONE_PER_PRINT_JOB')
     WHEN 'ONE_PER_PRINT_JOB' THEN 1
     WHEN 'ONE_PER_ROLL' THEN 1
@@ -3046,8 +3046,21 @@ BEGIN
   VALUES(event_id,job_row."batchId",job_row.id,qr_row.id,'SAMPLE_SCAN_PASSED',actor."userId",
     coalesce(p_evidence,'{}'::jsonb)||jsonb_build_object('requestId',p_request_id),now_at);
   SELECT count(DISTINCT e."qrCodeId") INTO actual_count FROM public."PrintAuditEvent" e
-    WHERE e."printJobId"=job_row.id AND e."eventType"='SAMPLE_SCAN_PASSED';
-  IF actual_count>=required_count THEN
+    WHERE e."printJobId"=job_row.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified');
+  IF actual_count>=required_count AND NOT EXISTS (
+    SELECT 1 FROM public."QRCode" q WHERE q."batchId"=job_row."batchId"
+      AND q.status='ALLOCATED' AND q."printJobId" IS NULL
+      AND NOT EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi."qrCodeId"=q.id)
+  ) AND NOT EXISTS (
+    SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=job_row."batchId" AND j.status='CONFIRMED'
+      AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
+        WHERE e."printJobId"=j.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified'))
+        < CASE coalesce(policy->>'type',policy->>'mode','ONE_PER_PRINT_JOB')
+            WHEN 'ONE_PER_N_LABELS' THEN GREATEST(1,ceil(j.quantity::numeric/GREATEST(coalesce((policy->>'n')::integer,j.quantity),1))::integer)
+            WHEN 'PERCENTAGE' THEN GREATEST(GREATEST(coalesce((policy->>'min')::integer,1),1),
+              ceil(j.quantity*GREATEST(coalesce((policy->>'percentage')::numeric,1),0.01)/100)::integer)
+            ELSE 1 END
+  ) THEN
     UPDATE public."Batch" SET "lifecycleState"='SAMPLE_VERIFIED',"updatedAt"=now_at
       WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_CONFIRMED';
   END IF;
@@ -3074,7 +3087,7 @@ BEGIN
   IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  SELECT b.id,b."lifecycleState",b."releasedAt",b."totalCodes"
+  SELECT b.id,b."lifecycleState",b."releasedAt",b."totalCodes",b."sampleScanPolicy"
     INTO STRICT batch_row FROM public."Batch" b WHERE b.id=p_batch_id FOR UPDATE;
   SELECT j."manufacturerId" INTO maker_id FROM public."PrintJob" j WHERE j."batchId"=p_batch_id
     AND j.status='CONFIRMED' ORDER BY j."confirmedAt" DESC NULLS LAST,j."createdAt" DESC LIMIT 1;
@@ -3128,6 +3141,19 @@ BEGIN
   ELSE
     IF batch_row."releasedAt" IS NOT NULL OR batch_row."lifecycleState"='RELEASED' THEN RAISE EXCEPTION 'BATCH_ALREADY_RELEASED'; END IF;
     IF batch_row."lifecycleState"<>'SAMPLE_VERIFIED' THEN RAISE EXCEPTION 'SAMPLE_SCAN_REQUIRED'; END IF;
+    IF EXISTS (SELECT 1 FROM public."PrintJob" j JOIN public."QRCode" q ON q."printJobId"=j.id
+      WHERE j."batchId"=p_batch_id AND j.status<>'CONFIRMED' AND q.status='PRINTED')
+    THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;
+    IF EXISTS (
+      SELECT 1 FROM public."PrintJob" j WHERE j."batchId"=p_batch_id AND j.status='CONFIRMED'
+        AND (SELECT count(DISTINCT e."qrCodeId") FROM public."PrintAuditEvent" e
+          WHERE e."printJobId"=j.id AND e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified'))
+          < CASE coalesce(batch_row."sampleScanPolicy"->>'type',batch_row."sampleScanPolicy"->>'mode','ONE_PER_PRINT_JOB')
+              WHEN 'ONE_PER_N_LABELS' THEN GREATEST(1,ceil(j.quantity::numeric/GREATEST(coalesce((batch_row."sampleScanPolicy"->>'n')::integer,j.quantity),1))::integer)
+              WHEN 'PERCENTAGE' THEN GREATEST(GREATEST(coalesce((batch_row."sampleScanPolicy"->>'min')::integer,1),1),
+                ceil(j.quantity*GREATEST(coalesce((batch_row."sampleScanPolicy"->>'percentage')::numeric,1),0.01)/100)::integer)
+              ELSE 1 END
+    ) THEN RAISE EXCEPTION 'SAMPLE_SCAN_REQUIRED'; END IF;
     IF EXISTS (SELECT 1 FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
       WHERE ps."batchId"=p_batch_id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED','CANCELLED','FAILED'))
     THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_REQUIRED'; END IF;

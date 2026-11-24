@@ -454,6 +454,7 @@ export const enrichBatchSummaries = async (
       batchId: batch.id,
       lifecycleState: batch.lifecycleState || BatchLifecycleState.DRAFT,
       releasedAt: batch.releasedAt || null,
+      suspendedAt: batch.suspendedAt || null,
       availableToPrint: batchKind === "MANUFACTURER_CHILD" ? printableCodes : 0,
       printedAt: batch.printedAt,
       printedCodes: counts.printed + counts.redeemed + counts.scanned,
