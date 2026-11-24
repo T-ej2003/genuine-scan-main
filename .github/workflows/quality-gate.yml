@@ -200,6 +200,8 @@ jobs:
             test "$(psql "$MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL" -X -qAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_stat_activity WHERE datname LIKE 'mscqr_full_rls_cert_%'")" = "0"
           done
           node --test backend/tests/qrAllocationAuditProjection.test.js
+          node backend/tests/batchPrintLifecycleReconciliation.test.js
+          node backend/tests/printJobCreateDiagnostics.test.js
       - name: Verify restored generated contracts and permission source
         run: |
           npm run rls:full-verify

@@ -131,10 +131,33 @@ const runTrueDraftReadinessTest = () => {
   assert(readiness.requiredPreviousStep, "blocked readiness should include next step");
 };
 
+const runPartialBatchReadinessTest = () => {
+  const partial = buildBatchPrintReadinessFromSummary({
+    batchId: "partial-batch",
+    lifecycleState: BatchLifecycleState.PRINT_CONFIRMED,
+    printedAt: "2026-11-18T20:09:30.390Z",
+    availableToPrint: 19,
+    printedCodes: 1,
+    allocatedCodes: 19,
+    manufacturerId: "manufacturer-1",
+  });
+  assert(partial.printable === true, "a confirmed print run must not block 19 untouched QR codes");
+  assert(partial.availableToPrint === 19, "readiness must retain the available count");
+  assert(buildBatchPrintReadinessFromSummary({
+    batchId: "sampled-batch", lifecycleState: BatchLifecycleState.SAMPLE_VERIFIED,
+    availableToPrint: 19,
+  }).printable === false, "a prior sample cannot authorize another print run without resetting sample evidence");
+  assert(buildBatchPrintReadinessFromSummary({
+    batchId: "suspended-batch", lifecycleState: BatchLifecycleState.PRINT_CONFIRMED,
+    suspendedAt: "2026-11-24T16:00:00Z", availableToPrint: 19,
+  }).printable === false, "suspended batches must match the database create guard");
+};
+
 Promise.resolve()
   .then(runDryRunTest)
   .then(runApplyTest)
   .then(runTrueDraftReadinessTest)
+  .then(runPartialBatchReadinessTest)
   .then(() => {
     console.log("batch print lifecycle reconciliation tests passed");
   })

@@ -24,13 +24,14 @@ export const buildPrintJobCreateDiagnostics = async (
     capability: String(req.databaseSessionCapability || ""),
     requestId: String(requestId || ""),
   };
+  const printableCountLimit = Math.max(1, Math.min(Number(params.quantity || 1), 200000));
   const [batchProjection, printer, printerStatus] = await Promise.all([
     params.batchId && userId
       ? readPrintingProjection({
           ...boundary,
           operation: "PRINTABLE_ITEMS",
           subjectId: params.batchId,
-          options: { limit: Math.max(1, Math.min(Number(params.quantity || 1), 200000)) },
+          options: { limit: printableCountLimit },
         })
       : Promise.resolve(null),
     params.printerId
@@ -74,10 +75,11 @@ export const buildPrintJobCreateDiagnostics = async (
       licenseeId: batch?.licenseeId || null,
       manufacturerMatches: batch?.manufacturerId ? batch.manufacturerId === userId : null,
       totalCodes: batch?.totalCodes ?? null,
-      printedAt: batch?.printedAt?.toISOString?.() || null,
-      suspendedAt: batch?.suspendedAt?.toISOString?.() || null,
+      printedAt: batch?.printedAt ? new Date(batch.printedAt).toISOString() : null,
+      suspendedAt: batch?.suspendedAt ? new Date(batch.suspendedAt).toISOString() : null,
       printableCount: printableCount ?? null,
-      remainingCodes: printableCount ?? null,
+      printableCountLimit,
+      remainingCodes: null,
       blockedByPrintItemEvidenceCount: null,
     },
     printerProfile: {
