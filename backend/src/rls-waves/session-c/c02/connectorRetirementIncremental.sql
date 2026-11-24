@@ -48,7 +48,8 @@ BEGIN
   SELECT * INTO STRICT actor
     FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
   PERFORM set_config('app.printing_operation','printing-printer-admin-'||lower(p_operation),true),
-          set_config('app.printing_printer_id',new_id,true);
+          set_config('app.printing_printer_id',new_id,true),
+          set_config('app.printing_user_id',actor."userId",true);
 
   IF p_operation='CREATE' THEN
     IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN')
@@ -353,11 +354,12 @@ BEGIN
        OR printer_row."printerRegistrationId" IS NULL OR coalesce(p_payload,'{}'::jsonb)<>'{}'::jsonb
     THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.printing_registration_id',printer_row."printerRegistrationId",true);
-    SELECT pr.id,pr."trustStatus",pr."revokedAt" INTO STRICT maintenance_registration
+    SELECT pr.id,pr."trustStatus",pr."revokedAt" INTO maintenance_registration
       FROM public."PrinterRegistration" pr
       WHERE pr.id=printer_row."printerRegistrationId" AND pr."userId"=actor."userId"
         AND pr."orgId" IS NOT DISTINCT FROM scope_org
         AND pr."licenseeId" IS NOT DISTINCT FROM scope_licensee FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     maintenance_scope:=jsonb_build_array('local',maintenance_registration.id)::text;
     maintenance_snapshot:=app_rls.printing_maintenance_gate(maintenance_scope,'STATUS',actor."userId",'{}'::jsonb);
     IF maintenance_snapshot->>'state'='DISPATCH_FENCED'

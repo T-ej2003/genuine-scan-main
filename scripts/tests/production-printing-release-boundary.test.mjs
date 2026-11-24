@@ -64,6 +64,8 @@ test("every printing and public routine changed by this PR has a governed instal
     if (retirementIncremental) {
       assert.match(retirementIncremental, /^\\set ON_ERROR_STOP on\nBEGIN;\n/);
       assert.match(retirementIncremental, /CONNECTOR_RETIREMENT_FUNCTION_OWNER_INVALID/);
+      assert.match(retirementIncremental, /ALTER POLICY "printing_lifecycle_printer_update" ON public\."Printer"/);
+      assert.match(retirementIncremental, /ALTER POLICY "printing_lifecycle_printerregistration_update" ON public\."PrinterRegistration"/);
       assert.match(retirementIncremental, /\nCOMMIT;\n$/);
       assert.deepEqual([...definitions(retirementIncremental)],
         [["printing_printer_administration", after.get("printing_printer_administration")]],

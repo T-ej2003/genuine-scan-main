@@ -127,7 +127,9 @@ async function main() {
     "the retirement deployment artifact must match the certified current printer function");
   const retirementBody = retirementArtifact.replace(/^\\set ON_ERROR_STOP on\s*/m, "")
     .replace(/^BEGIN;\s*/, "").replace(/\s*COMMIT;\s*$/, "")
-    .replaceAll("mscqr_prd_rls_phase2_auth_owner", "mscqr_rls_cert_auth_owner");
+    .replaceAll("mscqr_prd_rls_phase2_auth_owner", "mscqr_rls_cert_auth_owner")
+    .replaceAll("mscqr_prd_rls_phase2_owner", "mscqr_rls_cert_owner")
+    .replaceAll("mscqr_prd_rls_phase2_app", "mscqr_rls_cert_app");
   psql(admin, `BEGIN;
     SET ROLE "mscqr_rls_cert_owner";
     GRANT CREATE ON SCHEMA app_rls TO "mscqr_rls_cert_auth_owner";
