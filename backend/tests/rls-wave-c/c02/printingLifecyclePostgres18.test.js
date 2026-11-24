@@ -60,10 +60,11 @@ const connection = (raw) => {
   parsed.password = "";
   return { url: parsed.toString(), password };
 };
-const psql = (raw, sql, expectFailure = false) => {
+const psql = (raw, sql, expectFailure = false, verbose = false) => {
   const target = connection(raw);
   const large = Buffer.byteLength(sql) > 100_000;
-  const result = spawnSync("psql", [target.url, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", ...(large ? [] : ["-c", sql])], {
+  const result = spawnSync("psql", [target.url, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1",
+    ...(verbose ? ["-v", "VERBOSITY=verbose"] : []), ...(large ? [] : ["-c", sql])], {
     encoding: "utf8",
     ...(large ? { input: sql } : {}),
     env: { ...process.env, PGPASSWORD: target.password },
@@ -78,6 +79,8 @@ const psql = (raw, sql, expectFailure = false) => {
 };
 const denied = (url, sql, pattern = /permission denied|PRINTING_BOUNDARY_DENIED|CONNECTOR_SESSION_DENIED|CONNECTOR_SESSION_NOT_ACTIVE|CONNECTOR_SESSION_REPLAY|AUTH_SESSION_CAPABILITY_DENIED|INVALID_STATE_TRANSITION|PRINT_ACK_REQUIRED|SAMPLE_SCAN_REQUIRED/i) =>
   assert.match(psql(url, sql, true), pattern);
+const boundaryDenied = (url, sql) =>
+  assert.match(psql(url, sql, true, true), /ERROR:\s+42501:\s+PRINTING_BOUNDARY_DENIED/);
 const json = (url, sql) => JSON.parse(psql(url, sql));
 const psqlAsync = (raw, sql) => new Promise((resolve) => {
   const target = connection(raw);
@@ -2410,11 +2413,11 @@ async function main() {
       '${ids.orgA}','${ids.licenseeA}','${ids.maker}','${ids.maker}',true,now());`);
   const retireSql=(capability)=>`SELECT app_rls.printing_printer_administration(
     '${capability}','printing-printer-admin','${requestId()}','RETIRE','${ids.retirementPrinter}','{}'::jsonb)`;
-  denied(app,retireSql(caps.outsider),/PRINTING_BOUNDARY_DENIED/);
+  boundaryDenied(app,retireSql(caps.outsider));
   psql(admin, `UPDATE public."User" SET role='MANUFACTURER_ADMIN' WHERE id='${ids.outsider}'`);
-  denied(app,retireSql(caps.outsider),/PRINTING_BOUNDARY_DENIED/);
+  boundaryDenied(app,retireSql(caps.outsider));
   psql(admin, `UPDATE public."User" SET role='LICENSEE_ADMIN' WHERE id='${ids.outsider}'`);
-  denied(app, `SELECT app_rls.printing_printer_administration(
+  boundaryDenied(app, `SELECT app_rls.printing_printer_administration(
     '${caps.maker}','printing-printer-admin','${requestId()}','RETIRE',
     '50000000-0000-4000-8000-000000009999','{}'::jsonb)`,/PRINTING_BOUNDARY_DENIED/);
   const historicalItems=psql(admin,`SELECT count(*) FROM public."PrintItem"`);
