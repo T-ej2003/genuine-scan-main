@@ -1594,7 +1594,8 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
         RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
         DROP FUNCTION app_rls.printing_connector_session(text,text,text,jsonb);
-        ${PRINTING_RELEASE_NAMES.filter(n => n !== "printing_connector_session").map(oldFunction).join("\n")}
+        DROP FUNCTION app_rls.printing_maintenance_gate(text,text,text,jsonb);
+        ${PRINTING_RELEASE_NAMES.filter(n => !["printing_connector_session", "printing_maintenance_gate"].includes(n)).map(oldFunction).join("\n")}
         ${["public_verify_execute", "verify_signed_qr", "claim_customer_ownership"].map(oldPublicFunction).join("\n")}
         RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
         REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
