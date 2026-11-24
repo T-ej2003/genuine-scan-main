@@ -18,7 +18,10 @@ function Get-MscqrUninstallSnapshot {param($Live) return @([pscustomobject]@{nam
 function Resolve-MscqrUpgradeState {param($UserProfile,$LiveDirectory,$Candidate)
   return [pscustomobject]@{selectedPath=(Join-Path $UserProfile '.mscqr\local-print-agent-state.json')}
 }
-function Get-MscqrDispatchJournalFiles {param($Directory) return @($script:journal)}
+function Get-MscqrDispatchJournalFiles {param($Directory)
+  if(Test-Path -LiteralPath $script:journal -PathType Leaf) {return @($script:journal)}
+  return @()
+}
 function Assert-MscqrStoppedInstallation {}
 function Assert-MscqrSignedFile {param($Path,$Hash)}
 function Get-MscqrRuntimeProcesses {return @()}
@@ -148,6 +151,80 @@ try {
   }
   Write-Host 'PASS retained-state reinstall releases a verified uninstall fence and restores it on failure'
   Write-Host 'PASS existing installation -> standard uninstall -> retained-state reinstall classification (external boundaries simulated)'
+
+  # A failed first initialization may leave Inno's owned payload and uninstall
+  # registration, but no identity or startup launcher. The standard uninstaller
+  # must remove it without treating the empty generated env as user config.
+  foreach($path in @($state,$script:journal,$config,$wrapper,$startup,$marker)) {
+    if(Test-Path -LiteralPath $path) {Microsoft.PowerShell.Management\Remove-Item -LiteralPath $path -Force}
+  }
+  $journalFolder=Split-Path $script:journal
+  if(Test-Path -LiteralPath $journalFolder) {Microsoft.PowerShell.Management\Remove-Item -LiteralPath $journalFolder -Force}
+  $uninstaller=Join-Path $live 'unins000.exe'
+  $uninstallData=Join-Path $live 'unins000.dat'
+  $uninstallScript=Join-Path $live 'uninstall-startup-task.ps1'
+  foreach($path in @($uninstaller,$uninstallData,$uninstallScript)) {[IO.File]::WriteAllText($path,'synthetic owned payload')}
+  $emptyEnv=@'
+# Optional MSCQR connector overrides.
+# Example:
+# PRINT_GATEWAY_BACKEND_URL=https://mscqr.example.com/api
+# PRINT_GATEWAY_ID=gw_1234567890
+# PRINT_GATEWAY_SECRET=replace-with-bootstrap-secret
+'@
+  [IO.File]::WriteAllText($config,$emptyEnv)
+  if(-not(Test-MscqrEmptyGeneratedEnv $config)) {throw 'Empty generated config fixture was not recognized.'}
+  $installerResult=Join-Path $LifecycleDir 'installer-result.json'
+  [IO.File]::WriteAllText($installerResult,'{"operation":"install","outcome":"failure","errorId":"CONNECTOR_INITIALIZATION_FAILED"}')
+  $script:registryPresent=$true
+  try {Get-MscqrInstallationClassification $env:USERPROFILE $live $runtime | Out-Null;throw 'Partial install was classified as complete.'}
+  catch {if($_.Exception.Message -cnotlike 'INCONSISTENT_INSTALLATION:*'){throw}}
+  Invoke-MscqrUninstallPreflight
+  $partialSnapshot=Get-Content -LiteralPath $snapshotFile -Raw | ConvertFrom-Json
+  if($partialSnapshot.removedEmptyEnv -ne $true -or @($partialSnapshot.files).Count -ne 0 -or
+     (Test-Path -LiteralPath $config)) {throw 'Failed-install uninstall did not distinguish the empty generated configuration.'}
+  foreach($path in @($runtime,$uninstaller,$uninstallData,$uninstallScript)) {
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $path -Force
+  }
+  Microsoft.PowerShell.Management\Remove-Item -LiteralPath (Join-Path $live 'bin') -Force
+  $script:registryPresent=$false
+  Invoke-MscqrUninstallComplete
+  if((Get-MscqrInstallationClassification $env:USERPROFILE $live $runtime) -cne 'CLEAN_INSTALL') {
+    throw 'Failed first install did not return to clean classification after standard uninstall.'
+  }
+  Write-Host 'PASS failed first installation -> owned standard uninstall -> clean install classification (external boundaries simulated)'
+
+  # A retained identity and uncertain journal survive the same partial failure.
+  foreach($path in @($runtime,$uninstaller,$uninstallData,$uninstallScript,$wrapper,$state,$script:journal,$config)) {
+    New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+    [IO.File]::WriteAllText($path,'synthetic owned payload')
+  }
+  [IO.File]::WriteAllText($wrapper,'@echo off' + "`r`n" + '"' + $runtime + '"')
+  [IO.File]::WriteAllText($state,'{"agentId":"retained-fixture"}')
+  [IO.File]::WriteAllText($script:journal,'{"journalVersion":3,"state":"ATTEMPT_RESERVED"}')
+  [IO.File]::WriteAllText($config,'PRINT_GATEWAY_BACKEND_URL=https://isolated.example.invalid')
+  $retainedHashes=@(@($state,$script:journal,$config) | ForEach-Object {(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash})
+  $script:registryPresent=$true
+  Invoke-MscqrUninstallPreflight
+  $partialSnapshot=Get-Content -LiteralPath $snapshotFile -Raw | ConvertFrom-Json
+  if($partialSnapshot.removedEmptyEnv -ne $false -or @($partialSnapshot.files).Count -ne 3 -or
+     [string]$partialSnapshot.fenceSha256 -notmatch '^[a-fA-F0-9]{64}$') {
+    throw 'Failed retained installation did not preserve state and its local fence.'
+  }
+  foreach($path in @($runtime,$uninstaller,$uninstallData,$uninstallScript)) {
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $path -Force
+  }
+  Microsoft.PowerShell.Management\Remove-Item -LiteralPath (Join-Path $live 'bin') -Force
+  $script:registryPresent=$false
+  Invoke-MscqrUninstallComplete
+  for($i=0;$i -lt 3;$i++) {
+    if((Get-FileHash -LiteralPath @($state,$script:journal,$config)[$i] -Algorithm SHA256).Hash -ne $retainedHashes[$i]) {
+      throw 'Failed retained install removal changed persistent evidence.'
+    }
+  }
+  if((Get-MscqrInstallationClassification $env:USERPROFILE $live $runtime) -cne 'RETAINED_STATE_REINSTALL') {
+    throw 'Failed retained install did not return to retained-state reinstall classification.'
+  }
+  Write-Host 'PASS failed retained installation -> owned standard uninstall -> retained-state reinstall classification (external boundaries simulated)'
 } finally {
   $env:LOCALAPPDATA=$originalLocal;$env:APPDATA=$originalApp;$env:USERPROFILE=$originalProfile
   $safe=[IO.Path]::GetFullPath($root)
