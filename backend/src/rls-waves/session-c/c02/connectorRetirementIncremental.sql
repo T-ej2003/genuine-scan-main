@@ -54,8 +54,7 @@ BEGIN
   SELECT * INTO STRICT actor
     FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
   PERFORM set_config('app.printing_operation','printing-printer-admin-'||lower(p_operation),true),
-          set_config('app.printing_printer_id',new_id,true),
-          set_config('app.printing_user_id',actor."userId",true);
+          set_config('app.printing_printer_id',new_id,true);
 
   IF p_operation='CREATE' THEN
     IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN')
