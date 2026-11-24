@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='26087c4b7c94ee2f852e580f8c477fc1039f18460187a418e5a27ebdaedcdba3'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:26087c4b7c94ee2f852e580f8c477fc1039f18460187a418e5a27ebdaedcdba3'
+    AND source_contract_sha256='4eaa9652cba0492f611d289fe5318a3a176535a67c1412f2cf8ac7bcad348adf'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:4eaa9652cba0492f611d289fe5318a3a176535a67c1412f2cf8ac7bcad348adf'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:26087c4b7c94ee2f852e580f8c477fc1039f18460187a418e5a27ebdaedcdba3')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:4eaa9652cba0492f611d289fe5318a3a176535a67c1412f2cf8ac7bcad348adf')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -9119,7 +9119,14 @@ BEGIN
       -- a claim that the legacy binary supports native drain acknowledgement.
       IF EXISTS(SELECT 1 FROM jsonb_array_elements(maintenance_inventory->'items') item
         WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
-          WHERE r->>'itemId'=item->>'id' AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
+          WHERE r->>'itemId'=item->>'id' AND (r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY')
+            OR (r->>'outcome'='PROTECTED_UNKNOWN' AND item->>'state'='FROZEN'
+              AND item->>'pipelineState'='NEEDS_OPERATOR_ACTION'
+              AND item->'dispatchMetadata'->'upgradeNoReplay'->>'entrySha256'=r->>'reference'
+              AND EXISTS (SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'isolationEvidence') proof
+                WHERE proof->>'kind'='connector-work-inventory' AND proof->>'sha256'=
+                  item->'dispatchMetadata'->'upgradeNoReplay'->>'journalSha256')))
+            AND length(coalesce(r->>'reference',''))>0))
         OR EXISTS(SELECT 1 FROM jsonb_each(maintenance_inventory->'diagnostics') lease
           WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
             WHERE r->>'diagnosticId'=lease.key AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
