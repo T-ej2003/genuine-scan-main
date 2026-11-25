@@ -9,9 +9,10 @@ const privateKeyPem = keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).t
 const publicKeyPem = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
 const printerId = 'd5e8d13e-4d73-411b-9b3f-6d1800e73609';
 const registrationId = '839e55cd-86ea-4523-8544-ff4a62a15158';
+const { LOCAL_PRINT_AGENT_SOURCE_VERSION } = require(path.join(dist, 'local-print-agent/version'));
 const binding = { attemptId: randomUUID(), agentId: 'agent-test', deviceFingerprint: 'device-test', manufacturerId: 'manufacturer-1',
   tenantId: 'tenant-1', printerId, registrationId, sourceVersion: '2026.11.19.1',
-  currentVersion: '2026.11.19.1', targetVersion: '2026.11.22.1' };
+  currentVersion: '2026.11.19.1', targetVersion: LOCAL_PRINT_AGENT_SOURCE_VERSION };
 const proof = require(path.join(dist, 'services/connectorUpgradeDeviceProof'));
 
 const challenge = proof.createUpgradeDeviceChallenge(binding, 1000);

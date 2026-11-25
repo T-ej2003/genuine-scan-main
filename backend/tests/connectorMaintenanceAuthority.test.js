@@ -3,6 +3,7 @@ const { createHash, generateKeyPairSync, sign } = require('node:crypto');
 const path = require('node:path');
 
 const dist = path.resolve(__dirname, '../dist');
+const { LOCAL_PRINT_AGENT_SOURCE_VERSION } = require(path.join(dist, 'local-print-agent/version'));
 const mock = (name, exports) => {
   const filename = require.resolve(path.join(dist, name));
   require.cache[filename] = { id: filename, filename, loaded: true, exports };
@@ -16,7 +17,7 @@ process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM = authority.publicKey.e
 const proofService = require(path.join(dist, 'services/connectorUpgradeDeviceProof'));
 const attempt = { agentId: 'agent-test', deviceFingerprint: 'device-test', manufacturerId: 'maker-1', tenantId: null,
   printerId: 'd5e8d13e-4d73-411b-9b3f-6d1800e73609', registrationId: '839e55cd-86ea-4523-8544-ff4a62a15158',
-  sourceVersion: '2026.11.19.1', targetVersion: '2026.11.22.1' };
+  sourceVersion: '2026.11.19.1', targetVersion: LOCAL_PRINT_AGENT_SOURCE_VERSION };
 const challenge = proofService.createUpgradeDeviceChallenge({ ...attempt, currentVersion: attempt.sourceVersion,
   attemptId: '33045895-4cb7-49ad-81da-0d412d73fa93' });
 const controlledCertification = process.env.MSCQR_TEST_CERTIFICATION === 'true';
