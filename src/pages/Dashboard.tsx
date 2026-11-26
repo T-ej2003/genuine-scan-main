@@ -154,7 +154,7 @@ export default function Dashboard() {
       pendingStatsRefresh ||= affectsStats;
       pendingBatchRefresh ||= reason === "print_job" || ["QRCode", "QRRange", "Batch", "QrAllocationRequest"].includes(entityType || "");
       pendingPrintRefresh ||= reason === "print_job" || ["PrintJob", "PrintItem"].includes(entityType || "");
-      pendingAuditRefresh ||= affectsActivity || reason === "initial_race" && canReadAuditFeed;
+      pendingAuditRefresh ||= affectsActivity || (canReadAuditFeed && (reason === "initial_race" || reason === "print_job"));
       if (affectsStats) lastAuthoritativeRefreshRef.current = Date.now();
       if (refreshTimerRef.current) return;
       refreshTimerRef.current = window.setTimeout(() => {

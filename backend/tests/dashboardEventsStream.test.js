@@ -16,7 +16,7 @@ let snapshot = initial;
 mockModule("services/auditService.js", { onAuditLog: (callback) => { auditListener = callback; return () => { auditListener = null; }; } });
 mockModule("services/printJobRealtimeService.js", {
   onPrintJobRealtimeEvent: (callback) => { printListener = callback; return () => { printListener = null; }; },
-  canUserReceivePrintJobEvent: (req, event) => req.user.licenseeId === event.licenseeId,
+  canUserReceivePrintJobEvent: require("../dist/services/printJobRealtimeService").canUserReceivePrintJobEvent,
 });
 mockModule("services/dashboardSnapshotService.js", {
   getDashboardSnapshot: () => snapshot,
@@ -25,7 +25,7 @@ mockModule("services/dashboardSnapshotService.js", {
 const { dashboardEvents } = require("../dist/controllers/eventsController");
 
 (async () => {
-  const req = { user: { userId: "manufacturer-a", licenseeId: "tenant-a" } };
+  const req = { user: { userId: "manufacturer-a", licenseeId: "tenant-a", role: "LICENSEE_ADMIN" } };
   const res = new EventEmitter();
   const writes = [];
   res.setHeader = () => undefined;
@@ -47,6 +47,8 @@ const { dashboardEvents } = require("../dist/controllers/eventsController");
   printListener({ licenseeId: "tenant-a", batchId: "batch-a", type: "print_job.created" });
   assert.equal(count(), before + 1);
   req.user.role = "MANUFACTURER";
+  printListener({ manufacturerId: "manufacturer-b", licenseeId: "tenant-a", type: "print_job.created" });
+  assert.equal(count(), before + 1, "a linked brand alone must not deliver another manufacturer's print signal");
   await auditListener({ id: "audit-a", licenseeId: "tenant-a", entityType: "Batch", action: "ALLOCATED", details: { private: "audit-detail" } });
   assert.equal(count(), before + 2);
   assert(!writes.join("").includes('"reason":"personal_activity"'), "activity with no actor is never personal");

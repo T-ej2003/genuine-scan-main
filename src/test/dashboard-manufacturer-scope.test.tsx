@@ -1,6 +1,7 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 
 import Dashboard from "@/pages/Dashboard";
@@ -9,6 +10,7 @@ import { renderWithQueryClient } from "@/test/render-with-query-client";
 import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 const mockNavigate = vi.fn();
+let selectedLicenseeId: string | undefined;
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -24,7 +26,7 @@ vi.mock("@/contexts/AuthContext", () => ({
       id: "manufacturer-1",
       role: "manufacturer",
       rawRole: "MANUFACTURER_ADMIN",
-      licenseeId: "lic-1",
+      licenseeId: selectedLicenseeId,
       name: "Factory User",
       email: "factory@example.com",
       linkedLicensees: [
@@ -68,6 +70,7 @@ class MockEventSource {
 describe("Dashboard manufacturer multi-licensee scope", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    selectedLicenseeId = "lic-1";
     mockNavigate.mockReset();
 
     Object.defineProperty(globalThis, "EventSource", {
@@ -203,6 +206,64 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect(await screen.findByText("Recent activity is temporarily unavailable.")).toBeInTheDocument();
     expect(screen.queryByText(/No recent activity yet/)).not.toBeInTheDocument();
+  });
+
+  it("coalesces print-job signals into one selected-brand activity read and keeps related refreshes", async () => {
+    let onEvent: Parameters<typeof apiClient.streamDashboardEvents>[0] | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback;
+      return () => undefined;
+    });
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    try {
+      renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await screen.findByText(/No recent activity yet/);
+      vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
+        success: true,
+        data: { logs: [{ id: "created", action: "PRINT_JOB_CREATED", createdAt: new Date().toISOString() }] },
+      });
+
+      vi.useFakeTimers();
+      act(() => onEvent?.({ type: "summary.refresh", payload: { reason: "audit", entityType: "User" } }));
+      await act(() => vi.advanceTimersByTimeAsync(250));
+      expect(apiClient.getAuditLogs).toHaveBeenCalledTimes(1);
+      expect(invalidate).not.toHaveBeenCalled();
+
+      act(() => {
+        onEvent?.({ type: "summary.refresh", payload: { reason: "print_job", type: "print_job.created" } });
+        onEvent?.({ type: "summary.refresh", payload: { reason: "print_job", type: "label_confirmed" } });
+      });
+      await act(() => vi.advanceTimersByTimeAsync(249));
+      expect(apiClient.getAuditLogs).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(1));
+
+      expect(apiClient.getAuditLogs).toHaveBeenCalledTimes(2);
+      expect(apiClient.getAuditLogs).toHaveBeenLastCalledWith({
+        limit: 5, licenseeId: "lic-1", purpose: "dashboard-personal-activity",
+      });
+      for (const key of ["batches", "printing"]) {
+        expect(invalidate.mock.calls.filter(([filters]) => filters?.queryKey?.[0] === key)).toHaveLength(1);
+      }
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(screen.getByText(/print job created/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      invalidate.mockRestore();
+    }
+  });
+
+  it("refreshes stats without retrieving activity when the actor has no selected brand", async () => {
+    selectedLicenseeId = undefined;
+    let onEvent: Parameters<typeof apiClient.streamDashboardEvents>[0] | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback;
+      return () => undefined;
+    });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(onEvent).toBeDefined());
+    act(() => onEvent?.({ type: "summary.refresh", payload: { reason: "print_job" } }));
+    await waitFor(() => expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(2));
+    expect(apiClient.getAuditLogs).not.toHaveBeenCalled();
   });
 
   it("re-reads personal activity on a live activity signal", async () => {
