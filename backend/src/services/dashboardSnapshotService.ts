@@ -7,6 +7,7 @@ import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonical
 import { AuthRequest } from "../middleware/auth";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { timeReliabilityStage } from "../observability/reliabilityStageTiming";
+import { isManufacturerRole } from "./manufacturerScopeService";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
 
@@ -16,11 +17,6 @@ const DASHBOARD_PURPOSE = "dashboard-snapshot-read";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
-const manufacturerRoles = new Set<UserRole>([
-  UserRole.MANUFACTURER,
-  UserRole.MANUFACTURER_ADMIN,
-  UserRole.MANUFACTURER_USER,
-]);
 const tenantRoles = new Set<UserRole>([UserRole.LICENSEE_ADMIN, UserRole.ORG_ADMIN]);
 const platformRoles = new Set<UserRole>([UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN]);
 
@@ -97,7 +93,7 @@ export const buildDashboardSnapshotBoundary = (
 
   const selector = selectorOverride === undefined ? requestedLicensee(req) : normalizeLicenseeSelector(selectorOverride);
   const tenant = tenantRoles.has(user.role);
-  const manufacturer = manufacturerRoles.has(user.role);
+  const manufacturer = isManufacturerRole(user.role);
   const platform = platformRoles.has(user.role);
   if (!tenant && !manufacturer && !platform) throw new DashboardSnapshotAccessError();
 

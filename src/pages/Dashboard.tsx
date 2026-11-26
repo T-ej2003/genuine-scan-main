@@ -46,10 +46,13 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const activePrintSuppressed = useActivePrintSessionSuppression();
   const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
-  const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
-  const canReadAuditFeed = Boolean(scopedLicenseeId) && (user?.role === "super_admin" || user?.role === "licensee_admin");
-  const dashboardQuery = useDashboardStats(scopedLicenseeId);
-  const auditLogsQuery = useDashboardAuditLogs(canReadAuditFeed, 5, scopedLicenseeId);
+  const isManufacturer = user?.role === "manufacturer";
+  const scopedLicenseeId = isManufacturer ? undefined : user?.licenseeId;
+  const canReadAuditFeed = Boolean(user?.licenseeId) &&
+    (isManufacturer || user?.role === "super_admin" || user?.role === "licensee_admin");
+  const dashboardQuery = useDashboardStats(scopedLicenseeId, isManufacturer);
+  const overviewSettled = !isManufacturer || dashboardQuery.isFetched;
+  const auditLogsQuery = useDashboardAuditLogs(canReadAuditFeed && overviewSettled, 5, user?.licenseeId, isManufacturer);
   const dashboardRefetch = dashboardQuery.refetch;
   const auditLogsRefetch = auditLogsQuery.refetch;
 
@@ -117,7 +120,7 @@ export default function Dashboard() {
       setSseConnected(false);
     };
 
-    if (!liveUpdates || activePrintSuppressed) {
+    if (!liveUpdates || activePrintSuppressed || !overviewSettled) {
       setLiveSummary(null);
       setLiveQrStats(null);
       setLiveLogs(null);
@@ -137,34 +140,40 @@ export default function Dashboard() {
       void refreshDashboard();
     }, STATS_POLL_MS);
 
+    let pendingStatsRefresh = false;
     let pendingBatchRefresh = false;
     let pendingPrintRefresh = false;
     let pendingAuditRefresh = false;
     const scheduleSummaryRefresh = (entityType?: string, reason?: string, action?: string) => {
-      if (action === "EXPORT_QR_CODES") return;
-      const affectsStats = reason === "print_job" || reason === "initial_race" ||
-        ["QRCode", "QRRange", "Batch", "PrintJob", "PrintItem", "QrAllocationRequest", "Licensee", "Manufacturer"].includes(entityType || "");
-      if (!affectsStats) {
+      const affectsActivity = reason === "personal_activity" && isManufacturer && canReadAuditFeed;
+      const affectsStats = action !== "EXPORT_QR_CODES" && (reason === "print_job" || reason === "initial_race" ||
+        ["QRCode", "QRRange", "Batch", "PrintJob", "PrintItem", "QrAllocationRequest", "Licensee", "Manufacturer"].includes(entityType || ""));
+      if (!affectsStats && !affectsActivity) {
         return;
       }
+      pendingStatsRefresh ||= affectsStats;
       pendingBatchRefresh ||= reason === "print_job" || ["QRCode", "QRRange", "Batch", "QrAllocationRequest"].includes(entityType || "");
       pendingPrintRefresh ||= reason === "print_job" || ["PrintJob", "PrintItem"].includes(entityType || "");
-      pendingAuditRefresh ||= reason === "initial_race" && canReadAuditFeed;
+      pendingAuditRefresh ||= affectsActivity || reason === "initial_race" && canReadAuditFeed;
+      if (affectsStats) lastAuthoritativeRefreshRef.current = Date.now();
       if (refreshTimerRef.current) return;
-      lastAuthoritativeRefreshRef.current = Date.now();
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
+        const refreshStats = pendingStatsRefresh;
+        pendingStatsRefresh = false;
         const refreshBatches = pendingBatchRefresh;
         const refreshPrinting = pendingPrintRefresh;
         const refreshAudit = pendingAuditRefresh;
         pendingBatchRefresh = false;
         pendingPrintRefresh = false;
         pendingAuditRefresh = false;
-        liveSummaryScopeRef.current = null;
-        setLiveSummary(null);
-        setLiveQrStats(null);
-        clearDashboardReadCache(["dashboard:stats", "qr:stats"]);
-        void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats(scopedLicenseeId) });
+        if (refreshStats) {
+          liveSummaryScopeRef.current = null;
+          setLiveSummary(null);
+          setLiveQrStats(null);
+          clearDashboardReadCache(["dashboard:stats", "qr:stats"]);
+          void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats(scopedLicenseeId) });
+        }
         if (refreshPrinting) {
           void queryClient.invalidateQueries({ queryKey: ["printing"] });
         }
@@ -197,7 +206,7 @@ export default function Dashboard() {
           setLastUpdated(new Date());
           return;
         }
-        if (envelope?.type === "audit.delta") {
+        if (envelope?.type === "audit.delta" && !isManufacturer) {
           const payload = envelope?.payload || {};
           const log = payload.log as AuditLogDTO | undefined;
           if (log) {
@@ -228,7 +237,7 @@ export default function Dashboard() {
           setLiveLogs(null);
           clearDashboardReadCache(["audit:logs"]);
           void auditLogsRefetch().then((result) => {
-            if (streamScope !== getAuthenticatedStreamScope() || !result.data?.logs) return;
+            if (isManufacturer || streamScope !== getAuthenticatedStreamScope() || !result.data?.logs) return;
             const fresh = result.data.logs as AuditLogDTO[];
             setLiveLogs((receivedDuringRead) => {
               if (!receivedDuringRead || liveLogsScopeRef.current !== streamScope) return null;
@@ -248,7 +257,7 @@ export default function Dashboard() {
     return () => {
       closeRealtime();
     };
-  }, [activePrintSuppressed, auditLogsRefetch, canReadAuditFeed, liveUpdates, queryClient, refreshDashboard, scopedLicenseeId, securityScope, user?.role]);
+  }, [activePrintSuppressed, auditLogsRefetch, canReadAuditFeed, isManufacturer, liveUpdates, overviewSettled, queryClient, refreshDashboard, scopedLicenseeId, securityScope, user?.role]);
 
   useEffect(() => {
     if (dashboardQuery.dataUpdatedAt) {
@@ -261,10 +270,13 @@ export default function Dashboard() {
   const currentLiveQrStats = liveSummaryScopeRef.current === currentScope ? liveQrStats : null;
   const summary = currentLiveSummary ?? dashboardQuery.data?.summary ?? null;
   const qrStats = currentLiveQrStats ?? dashboardQuery.data?.qrStats ?? null;
-  const logs = (liveLogsScopeRef.current === currentScope ? liveLogs : null) ?? auditLogsQuery.data?.logs ?? [];
+  const activityFailed = Boolean(auditLogsQuery.error || auditLogsQuery.data?.refreshPaused);
+  const logs = isManufacturer
+    ? activityFailed ? [] : auditLogsQuery.data?.logs ?? []
+    : (liveLogsScopeRef.current === currentScope ? liveLogs : null) ?? auditLogsQuery.data?.logs ?? [];
   const loading = dashboardQuery.isLoading && !dashboardQuery.data && !currentLiveSummary && !currentLiveQrStats;
   const rawError = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null;
-  const error = summary ? null : dashboardQuery.data?.summaryError || (
+  const error = summary && !isManufacturer ? null : dashboardQuery.data?.summaryError || (
     rawError && /no token provided/i.test(rawError)
       ? "Your secure session could not be refreshed. Please sign in again."
       : rawError);
@@ -272,35 +284,41 @@ export default function Dashboard() {
   const activityRateLimited =
     auditLogsQuery.error instanceof ApiResponseError &&
     String(auditLogsQuery.error.code || "").toUpperCase() === "RATE_LIMITED";
-  const activityRefreshPaused = Boolean(auditLogsQuery.data?.refreshPaused || dashboardQuery.data?.refreshPaused);
+  const activityRefreshPaused = Boolean(auditLogsQuery.data?.refreshPaused || !isManufacturer && dashboardQuery.data?.refreshPaused);
   const activityUnavailableMessage = activityRateLimited
     ? "Recent activity is temporarily unavailable. We're refreshing activity too often. Try again shortly."
     : activityRefreshPaused
       ? "Activity refresh is temporarily paused. Dashboard work can continue."
-      : undefined;
+      : auditLogsQuery.error ? "Recent activity is temporarily unavailable." : undefined;
 
   // totals (support multiple backend shapes)
   const activeLicenseesCount = summary?.activeLicensees ?? 0;
 
   // chart: support both { dormant: n } OR { byStatus: { DORMANT: n } }
+  const manufacturerTotal = isManufacturer ? qrStats?.total : undefined;
   const qrStatusData = useMemo(() => {
     const by = qrStats?.byStatus || qrStats?.statusCounts || {};
+    const allocated = qrStats?.allocated ?? (by.ALLOCATED ?? 0) + (by.ACTIVATED ?? 0);
+    const printed = qrStats?.printed ?? by.PRINTED ?? 0;
+    const scanned = qrStats?.scanned ?? (by.SCANNED ?? 0) + (by.REDEEMED ?? 0);
     return {
-      dormant: qrStats?.dormant ?? (by.DORMANT ?? 0) + (by.ACTIVE ?? 0),
-      allocated: qrStats?.allocated ?? (by.ALLOCATED ?? 0) + (by.ACTIVATED ?? 0),
-      printed: qrStats?.printed ?? by.PRINTED ?? 0,
-      scanned: qrStats?.scanned ?? (by.SCANNED ?? 0) + (by.REDEEMED ?? 0),
+      dormant: manufacturerTotal === undefined
+        ? qrStats?.dormant ?? (by.DORMANT ?? 0) + (by.ACTIVE ?? 0)
+        : manufacturerTotal - allocated - printed - scanned,
+      allocated,
+      printed,
+      scanned,
     };
-  }, [qrStats]);
+  }, [manufacturerTotal, qrStats]);
 
   const statusRows = useMemo(() => {
     const total = qrStatusData.dormant + qrStatusData.allocated + qrStatusData.printed + qrStatusData.scanned;
     return [
       {
         key: "dormant" as const,
-        label: "Not used yet",
+        label: isManufacturer ? "Other allocated" : "Not used yet",
         value: qrStatusData.dormant,
-        description: "Ready to assign to a batch",
+        description: isManufacturer ? "In other lifecycle states" : "Ready to assign to a batch",
         href: "/batches",
         pct: total > 0 ? Math.round((qrStatusData.dormant / total) * 100) : 0,
       },
@@ -308,7 +326,7 @@ export default function Dashboard() {
         key: "allocated" as const,
         label: "Assigned",
         value: qrStatusData.allocated,
-        description: "Assigned to batches or manufacturers",
+        description: isManufacturer ? "Assigned for production" : "Assigned to batches or manufacturers",
         href: "/batches",
         pct: total > 0 ? Math.round((qrStatusData.allocated / total) * 100) : 0,
       },
@@ -329,13 +347,13 @@ export default function Dashboard() {
         pct: total > 0 ? Math.round((qrStatusData.scanned / total) * 100) : 0,
       },
     ];
-  }, [qrStatusData]);
+  }, [isManufacturer, qrStatusData]);
 
   const focusedRow = statusFocus === "all" ? null : statusRows.find((row) => row.key === statusFocus) || null;
   const totalTracked = statusRows.reduce((acc, row) => acc + row.value, 0);
   const fulfilled = qrStatusData.printed + qrStatusData.scanned;
   const assignedOrPrinted = qrStatusData.allocated + fulfilled;
-  const fulfillmentPct = totalTracked > 0 ? Math.round((assignedOrPrinted / totalTracked) * 100) : 0;
+  const fulfillmentPct = totalTracked > 0 ? Math.round(((isManufacturer ? fulfilled : assignedOrPrinted) / totalTracked) * 100) : 0;
   const redemptionPct = fulfilled > 0 ? Math.round((qrStatusData.scanned / fulfilled) * 100) : 0;
   const qrStatsExtras = qrStats as QrStatsDashboardExtras | null;
   const scansToday = qrStats?.scansToday ?? dashboardQuery.data?.qrStats?.scansToday ?? null;
@@ -369,8 +387,6 @@ export default function Dashboard() {
   }, [user?.role]);
 
   const cards = useMemo(() => {
-    const totalQrHref = APP_PATHS.scanActivity;
-    const totalQrCta = "View scans";
     const scopeCard =
       user?.role === "manufacturer"
         ? {
@@ -407,13 +423,13 @@ export default function Dashboard() {
 
     const items = [
       {
-        title: "Unassigned QR labels",
-        value: qrLabelsAvailable,
+        title: isManufacturer ? "Allocated QR labels" : "Unassigned QR labels",
+        value: isManufacturer ? manufacturerTotal ?? "Unavailable" : qrLabelsAvailable,
         icon: QrCode,
         variant: "default" as const,
-        subtitle: `${qrStatusData.allocated.toLocaleString()} assigned to manufacturers`,
-        href: totalQrHref,
-        ctaLabel: totalQrCta,
+        subtitle: isManufacturer ? "QR labels allocated to your batches" : `${qrStatusData.allocated.toLocaleString()} assigned to manufacturers`,
+        href: isManufacturer ? APP_PATHS.batches : APP_PATHS.scanActivity,
+        ctaLabel: isManufacturer ? "View batches" : "View scans",
       },
       scopeCard,
       {
@@ -422,8 +438,8 @@ export default function Dashboard() {
         icon: Factory,
         variant: "warning" as const,
         subtitle: "QR labels confirmed as printed",
-        href: user?.role === "manufacturer" ? APP_PATHS.printerSetup : APP_PATHS.batches,
-        ctaLabel: user?.role === "manufacturer" ? "Setup printer" : "View batches",
+        href: isManufacturer ? APP_PATHS.auditHistory : APP_PATHS.batches,
+        ctaLabel: isManufacturer ? "View print history" : "View batches",
       },
       {
         title: "Scans today",
@@ -442,10 +458,11 @@ export default function Dashboard() {
     });
   }, [
     activeLicenseesCount,
+    isManufacturer,
+    manufacturerTotal,
     qrStatusData.dormant,
     qrStatusData.allocated,
     qrStatusData.printed,
-    qrStatusData.scanned,
     qrLabelsAvailable,
     scansToday,
     summary,
@@ -456,7 +473,7 @@ export default function Dashboard() {
   ]);
 
   const canViewAudit = user?.role === "super_admin" || user?.role === "licensee_admin" || user?.role === "manufacturer";
-  const overviewLifecycleSteps = useMemo(() => buildOverviewLifecycleSteps(qrStatusData), [qrStatusData]);
+  const overviewLifecycleSteps = useMemo(() => buildOverviewLifecycleSteps(qrStatusData, manufacturerTotal), [manufacturerTotal, qrStatusData]);
 
   if (loading) {
     return (
@@ -549,11 +566,11 @@ export default function Dashboard() {
           <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-medium text-mscqr-accent">QR label progress</p>
-              <h2 className="mt-2 text-xl font-semibold text-mscqr-primary">From request to customer scan</h2>
+              <h2 className="mt-2 text-xl font-semibold text-mscqr-primary">{isManufacturer ? "From allocation to customer scan" : "From request to customer scan"}</h2>
             </div>
             <PrintStateIndicator value={qrStatusData.printed > 0 ? "PRINT_CONFIRMED" : "PENDING"} label="print check" />
           </div>
-          <div className="grid gap-3 md:grid-cols-5">
+          <div className={cn("grid gap-3", isManufacturer ? "md:grid-cols-4" : "md:grid-cols-5")}>
             {overviewLifecycleSteps.map((step, index) => (
               <div key={step.label} className="rounded-2xl border border-mscqr-border bg-mscqr-surface-elevated p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -601,7 +618,7 @@ export default function Dashboard() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-mscqr-secondary">Labels assigned or printed</span>
+                  <span className="text-mscqr-secondary">{isManufacturer ? "Allocated labels printed or scanned" : "Labels assigned or printed"}</span>
                   <span className="font-medium text-mscqr-primary">{fulfillmentPct}%</span>
                 </div>
                 <Progress value={fulfillmentPct} />
@@ -661,9 +678,10 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-mscqr-secondary">
-                See how QR labels are moving through inventory, production, printing, and customer scans.
+                {isManufacturer ? "Lifecycle status of QR labels allocated to your batches."
+                  : "See how QR labels are moving through inventory, production, printing, and customer scans."}
               </p>
-              <QRStatusChart data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
+              <QRStatusChart dormantLabel={isManufacturer ? "Other allocated" : undefined} data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
             </CardContent>
           </Card>}
           <RecentActivityCard
@@ -675,7 +693,10 @@ export default function Dashboard() {
             }))}
             emptyMessage={
               activityUnavailableMessage ||
-              (canViewAudit
+              (canReadAuditFeed && auditLogsQuery.isPending && activePrintSuppressed ? "Activity refresh is temporarily paused."
+                : canReadAuditFeed && auditLogsQuery.isPending ? "Loading recent activity…"
+                : isManufacturer && !canReadAuditFeed ? "Select a brand to view recent activity."
+                : canViewAudit
                 ? "No recent activity yet. Actions in batches, users, and requests will appear here."
                 : "Activity feed is available for admin roles. Use Batches for your print operations.")
             }

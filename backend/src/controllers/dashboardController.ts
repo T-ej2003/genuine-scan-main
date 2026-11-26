@@ -1,7 +1,10 @@
+import { UserRole } from "@prisma/client";
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
 import { getAttentionQueueSnapshot } from "../services/attentionQueueService";
+import { readDailyScanCount } from "../rls-waves/session-c/c01/qrSystemRepository";
 import { getDashboardSnapshot } from "../services/dashboardSnapshotService";
+import { isManufacturerRole } from "../services/manufacturerScopeService";
 
 export const getDashboardStats = async (req: AuthRequest, res: Response) => {
   try {
@@ -10,6 +13,20 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     }
     const snapshot = await getDashboardSnapshot(req);
 
+    let scansToday: number | undefined;
+    const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "");
+    if (req.user.role === UserRole.MANUFACTURER_ADMIN) {
+      try {
+        scansToday = await readDailyScanCount({
+          capability: String(req.databaseSessionCapability || ""),
+          requestId,
+          licenseeId: (req.query?.licenseeId as string | undefined) || null,
+        });
+      } catch (error) {
+        console.error("Dashboard daily scan count unavailable", { requestId, error });
+      }
+    }
+
     return res.json({
       success: true,
       data: {
@@ -17,6 +34,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         activeLicensees: snapshot.activeLicensees,
         manufacturers: snapshot.manufacturers,
         totalBatches: snapshot.totalBatches,
+        ...(isManufacturerRole(req.user.role) && { qrStats: { ...snapshot.qr, scansToday } }),
       },
     });
   } catch (err) {

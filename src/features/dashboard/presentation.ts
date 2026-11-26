@@ -14,18 +14,18 @@ export const DASHBOARD_GRAPH_OPTIONS: Array<{ id: DashboardGraphView; label: str
   { id: "batches", label: "Top scanned batches", description: "Highlights the batches customers scan most often." },
 ];
 
-export const buildOverviewLifecycleSteps = (qrStatusData: QrStatusBreakdown) => [
-  {
+export const buildOverviewLifecycleSteps = (qrStatusData: QrStatusBreakdown, manufacturerTotal?: number) => [
+  ...(manufacturerTotal === undefined ? [{
     label: "Issue",
     title: "QR labels ready",
     body: `${qrStatusData.dormant.toLocaleString()} waiting for allocation.`,
     state: qrStatusData.dormant > 0 ? ("current" as const) : ("complete" as const),
-  },
+  }] : []),
   {
     label: "Assign",
-    title: "Batch assignment",
-    body: `${qrStatusData.allocated.toLocaleString()} assigned to production.`,
-    state: qrStatusData.allocated > 0 ? ("complete" as const) : ("pending" as const),
+    title: manufacturerTotal === undefined ? "Batch assignment" : "Allocated to your batches",
+    body: `${(manufacturerTotal ?? qrStatusData.allocated).toLocaleString()} assigned to production.`,
+    state: (manufacturerTotal ?? qrStatusData.allocated) > 0 ? ("complete" as const) : ("pending" as const),
   },
   {
     label: "Print",
@@ -36,7 +36,7 @@ export const buildOverviewLifecycleSteps = (qrStatusData: QrStatusBreakdown) => 
   {
     label: "Verify",
     title: "Public checks",
-    body: `${qrStatusData.scanned.toLocaleString()} customer verification events.`,
+    body: `${qrStatusData.scanned.toLocaleString()} ${manufacturerTotal === undefined ? "customer verification events" : "labels with customer verifications"}.`,
     state: qrStatusData.scanned > 0 ? ("complete" as const) : ("pending" as const),
   },
   {

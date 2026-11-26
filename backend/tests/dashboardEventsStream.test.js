@@ -25,7 +25,7 @@ mockModule("services/dashboardSnapshotService.js", {
 const { dashboardEvents } = require("../dist/controllers/eventsController");
 
 (async () => {
-  const req = { user: { licenseeId: "tenant-a" } };
+  const req = { user: { userId: "manufacturer-a", licenseeId: "tenant-a" } };
   const res = new EventEmitter();
   const writes = [];
   res.setHeader = () => undefined;
@@ -49,6 +49,13 @@ const { dashboardEvents } = require("../dist/controllers/eventsController");
   req.user.role = "MANUFACTURER";
   await auditListener({ id: "audit-a", licenseeId: "tenant-a", entityType: "Batch", action: "ALLOCATED", details: { private: "audit-detail" } });
   assert.equal(count(), before + 2);
+  assert(!writes.join("").includes('"reason":"personal_activity"'), "activity with no actor is never personal");
+  await auditListener({ licenseeId: "tenant-a", userId: "manufacturer-b", entityType: "Batch", action: "ALLOCATED" });
+  assert(!writes.join("").includes('"reason":"personal_activity"'), "another manufacturer's action is never personal");
+  await auditListener({ licenseeId: "tenant-a", userId: req.user.userId, action: "AUDIT_LOGS_READ" });
+  assert(!writes.join("").includes('"reason":"personal_activity"'), "activity reads cannot trigger their own refresh");
+  await auditListener({ licenseeId: "tenant-a", userId: req.user.userId, entityType: "Batch", action: "ALLOCATED" });
+  assert(writes.join("").includes('"reason":"personal_activity"'), "personal activity triggers an authenticated re-read");
   assert(!writes.join("").includes("audit-detail"), "manufacturer dashboard must not receive audit details");
   req.user.role = "LICENSEE_ADMIN";
   await auditListener({ id: "audit-b", licenseeId: "tenant-a", entityType: "Batch", action: "ALLOCATED" });

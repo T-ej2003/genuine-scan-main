@@ -1,3 +1,4 @@
+import { UserRole } from "@prisma/client";
 import { completeConnectorUpgradePairing, createConnectorUpgradePairing, issueVerifiedConnectorMaintenanceEvidence, issueVerifiedPostInstallEvidence, pollConnectorUpgradePairing, readConnectorUpgradePairing, redeemConnectorMaintenanceHandoff, requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
 import { issueConnectorUpgradeChallenge, preflightConnectorUpgradeCertification, verifyConnectorUpgradeProof } from "../controllers/connectorUpgradeDeviceProofController";
 import { Request, type RequestHandler, Router } from "express";
@@ -14,6 +15,7 @@ import { enforceTenantIsolation } from "../middleware/tenantIsolation";
 import { unsupportedWorkflowShutdown } from "../middleware/unsupportedWorkflowShutdown";
 import { sanitizeRequestInput } from "../middleware/requestSanitizer";
 import {
+  requireRole,
   requirePlatformAdmin,
   requireLicenseeAdmin,
   requireManufacturer,
@@ -1765,7 +1767,7 @@ protectedReadRouter.get("/qr/codes/legacy-report", qrReadPreAuthRouteLimiter, au
 protectedMutationRouter.post("/qr/codes/legacy-rotate", qrMutationPreAuthRouteLimiter, authenticate, requirePlatformAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, requireCsrf, rotateLegacyPublicCodes);
 
 // Stats is still allowed (needed for dashboard chart)
-protectedReadRouter.get("/qr/stats", qrReadPreAuthRouteLimiter, authenticate, requireTenantDirectoryReader, qrReadRouteLimiter, protectedReadRouteLimiter, getStats);
+protectedReadRouter.get("/qr/stats", qrReadPreAuthRouteLimiter, authenticate, requireRole(UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.LICENSEE_ADMIN), qrReadRouteLimiter, protectedReadRouteLimiter, getStats);
 
 // delete endpoints (admins)
 protectedMutationRouter.delete("/qr/batches/:id", qrMutationPreAuthRouteLimiter, authenticate, requireAnyAdmin, qrMutationRouteLimiter, protectedMutationRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation, requireCsrf, deleteBatch);

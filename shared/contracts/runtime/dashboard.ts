@@ -2,17 +2,9 @@ import { z } from "zod";
 
 import { statusCountRecordSchema, userSummarySchema } from "./common";
 
-export const dashboardStatsSchema = z
-  .object({
-    totalQRCodes: z.number().optional(),
-    activeLicensees: z.number().optional(),
-    manufacturers: z.number().optional(),
-    totalBatches: z.number().optional(),
-  })
-  .passthrough();
-
 export const qrStatsSchema = z
   .object({
+    total: z.number().int().nonnegative().optional(),
     dormant: z.number().optional(),
     allocated: z.number().optional(),
     printed: z.number().optional(),
@@ -20,6 +12,16 @@ export const qrStatsSchema = z
     scansToday: z.number().int().nonnegative().optional(),
     byStatus: statusCountRecordSchema.optional(),
     statusCounts: statusCountRecordSchema.optional(),
+  })
+  .passthrough();
+
+export const dashboardStatsSchema = z
+  .object({
+    totalQRCodes: z.number().optional(),
+    activeLicensees: z.number().optional(),
+    manufacturers: z.number().optional(),
+    totalBatches: z.number().optional(),
+    qrStats: qrStatsSchema.optional(),
   })
   .passthrough();
 

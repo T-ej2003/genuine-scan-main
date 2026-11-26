@@ -9,15 +9,16 @@ interface QRStatusChartProps {
     printed: number;
     scanned: number;
   };
+  dormantLabel?: string;
   selectedStatus?: "all" | "dormant" | "allocated" | "printed" | "scanned";
   onStatusSelect?: (status: "all" | "dormant" | "allocated" | "printed" | "scanned") => void;
 }
 
 type ChartStatus = "dormant" | "allocated" | "printed" | "scanned";
 
-export function QRStatusChart({ data, selectedStatus = "all", onStatusSelect }: QRStatusChartProps) {
+export function QRStatusChart({ data, dormantLabel = "Ready", selectedStatus = "all", onStatusSelect }: QRStatusChartProps) {
   const chartData = [
-    { key: "dormant" as ChartStatus, name: 'Ready', value: data.dormant, color: 'hsl(215, 16%, 47%)' },
+    { key: "dormant" as ChartStatus, name: dormantLabel, value: data.dormant, color: 'hsl(215, 16%, 47%)' },
     { key: "allocated" as ChartStatus, name: 'Assigned', value: data.allocated, color: 'hsl(199, 89%, 48%)' },
     { key: "printed" as ChartStatus, name: 'Printed', value: data.printed, color: 'hsl(38, 92%, 50%)' },
     { key: "scanned" as ChartStatus, name: 'Scanned', value: data.scanned, color: 'hsl(160, 84%, 39%)' },
@@ -37,7 +38,7 @@ export function QRStatusChart({ data, selectedStatus = "all", onStatusSelect }: 
                 outerRadius={100}
                 paddingAngle={2}
                 dataKey="value"
-                onClick={(entry: any) => {
+                onClick={(entry) => {
                   const key = entry?.key as ChartStatus | undefined;
                   if (!key || !onStatusSelect) return;
                   onStatusSelect(selectedStatus === key ? "all" : key);

@@ -1,6 +1,8 @@
 import { UserRole } from "@prisma/client";
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth";
+import { DASHBOARD_ACTIVITY_READ_ACTIONS } from "../services/auditLogQueryService";
+import { isManufacturerRole } from "../services/manufacturerScopeService";
 import { onAuditLog } from "../services/auditService";
 import { canUserReceivePrintJobEvent, onPrintJobRealtimeEvent } from "../services/printJobRealtimeService";
 import { canDeliverDashboardAuditDelta, getDashboardSnapshot } from "../services/dashboardSnapshotService";
@@ -30,13 +32,15 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
       try {
         if (closed) return;
         if (!await canDeliverDashboardAuditDelta(req, log.licenseeId) || closed) return;
+        const personalActivity = req.user?.userId && isManufacturerRole(req.user.role) &&
+          log.licenseeId === req.user.licenseeId && log.userId === req.user.userId && !DASHBOARD_ACTIVITY_READ_ACTIONS.includes(log.action);
         if (!ready) { changedWhileLoading = true; return; }
         if (req.user!.role === UserRole.SUPER_ADMIN || req.user!.role === UserRole.PLATFORM_SUPER_ADMIN || req.user!.role === UserRole.LICENSEE_ADMIN || req.user!.role === UserRole.ORG_ADMIN) {
           writeSseRealtimeEnvelope(res, { channel: "dashboard", type: "audit.delta", payload: { log } });
         }
         writeSseRealtimeEnvelope(res, {
           channel: "dashboard", type: "summary.refresh",
-          payload: { reason: "audit", entityType: log.entityType, action: log.action },
+          payload: { reason: personalActivity ? "personal_activity" : "audit", entityType: log.entityType, action: log.action },
         });
       } catch {
         // A single audit event must not terminate the stream.
