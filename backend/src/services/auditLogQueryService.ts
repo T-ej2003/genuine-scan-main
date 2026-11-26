@@ -7,9 +7,6 @@ import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { hiddenActionsForNonSuper, isAuditManufacturerUser, isAuditSuperUser, redactAuditDetails } from "./auditExportRedactionService";
 import { createAuditLogInTransaction } from "./auditService";
 
-export const DASHBOARD_PERSONAL_ACTIVITY_PURPOSE = "dashboard-personal-activity";
-export const DASHBOARD_ACTIVITY_READ_ACTIONS = ["AUDIT_LOGS_READ", "DASHBOARD_SNAPSHOT_READ"];
-
 export type AuditLogQueryFilters = {
   limit: number;
   offset: number;
@@ -133,19 +130,12 @@ export const queryAuditLogs = async (
     throw new AuditLogQueryAccessError("Audit-log scope does not match canonical context");
   }
   const clauses: Prisma.AuditLogWhereInput[] = [{ licenseeId: context.licenseeId }];
-  if (boundary.isManufacturer) clauses.push({ userId: context.userId });
+  if (boundary.isManufacturer) clauses.push(...manufacturerAuditFilters(boundary));
   if (filters.organizationId) clauses.push({ orgId: filters.organizationId });
   if (filters.userId) clauses.push({ userId: filters.userId });
   if (filters.entityType) clauses.push({ entityType: filters.entityType });
   if (filters.entityId) clauses.push({ entityId: filters.entityId });
   if (filters.entityIds) clauses.push({ entityId: { in: filters.entityIds } });
-  if (boundary.isManufacturer && boundary.requestedPurpose === DASHBOARD_PERSONAL_ACTIVITY_PURPOSE) {
-    const now = Date.now();
-    clauses.push(
-      { createdAt: { gte: new Date(now - 48 * 60 * 60 * 1000), lte: new Date(now) } },
-      { action: { notIn: DASHBOARD_ACTIVITY_READ_ACTIONS } }
-    );
-  }
   if (filters.action) clauses.push({ action: filters.action });
   else if (!boundary.isPlatformAdmin) clauses.push({ action: { notIn: hiddenActionsForNonSuper } });
   if (!boundary.isPlatformAdmin && filters.action && hiddenActionsForNonSuper.includes(filters.action)) clauses.push({ id: { in: [] } });
@@ -231,4 +221,19 @@ export const queryAuditLogs = async (
     total,
     nextCursor: logs.length === filters.limit ? encodeDateCursor(logs[logs.length - 1]) : null,
   };
+};
+
+const DASHBOARD_PERSONAL_ACTIVITY_PURPOSE = "dashboard-personal-activity";
+export const DASHBOARD_ACTIVITY_READ_ACTIONS = ["AUDIT_LOGS_READ", "DASHBOARD_SNAPSHOT_READ"];
+
+const manufacturerAuditFilters = (boundary: AuditLogBoundary): Prisma.AuditLogWhereInput[] => {
+  const clauses: Prisma.AuditLogWhereInput[] = [{ userId: boundary.context.userId }];
+  if (boundary.requestedPurpose === DASHBOARD_PERSONAL_ACTIVITY_PURPOSE) {
+    const now = Date.now();
+    clauses.push(
+      { createdAt: { gte: new Date(now - 48 * 60 * 60 * 1000), lte: new Date(now) } },
+      { action: { notIn: DASHBOARD_ACTIVITY_READ_ACTIONS } }
+    );
+  }
+  return clauses;
 };
