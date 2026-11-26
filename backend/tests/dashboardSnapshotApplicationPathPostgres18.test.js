@@ -501,6 +501,55 @@ const main = async () => {
     ]) assert(!auditRows.some((row) => row.details?.requestId === requestId), `${requestId} denial must not commit attribution`);
     assert(auditRows.filter((row) => row.details?.requestId === "dashboard-pg-manufacturer-selected").every((row) => row.orgId === ids.orgB && row.licenseeId === ids.licenseeB));
 
+    const expiryRequestId = "dashboard-pg-mid-snapshot-expiry";
+    const auditId = randomUUID();
+    let snapshotResult;
+    await bootstrap.$transaction(async (blocker) => {
+      // Let scope authorization finish, then hold the QR aggregate past the session deadline.
+      await blocker.$executeRawUnsafe('LOCK TABLE public."QRCode" IN ACCESS EXCLUSIVE MODE');
+      const expiresAt = new Date(Date.now() + 2000);
+      await bootstrap.refreshToken.updateMany({
+        where: { userId: ids.platformA },
+        data: { sessionCapabilityExpiresAt: expiresAt },
+      });
+      snapshotResult = prisma.$transaction(async (tx) => {
+        const [scope] = await tx.$queryRaw`
+          SELECT scope_fingerprint FROM app_rls.dashboard_snapshot_scope(
+            ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
+            ${auditId}, NULL, 'GET /api/dashboard/stats'
+          )
+        `;
+        await tx.$queryRaw`
+          SELECT * FROM app_rls.dashboard_snapshot_data(
+            ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
+            ${auditId}, NULL, 'GET /api/dashboard/stats', ${scope.scope_fingerprint}
+          )
+        `;
+      }).then(() => null, (error) => error);
+
+      while (Date.now() < expiresAt.getTime()) {
+        const [{ waiting }] = await blocker.$queryRaw`
+          SELECT EXISTS (
+            SELECT 1 FROM pg_locks
+            WHERE locktype = 'relation' AND relation = 'public."QRCode"'::regclass AND NOT granted
+          ) AS waiting
+        `;
+        if (waiting) {
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, expiresAt.getTime() - Date.now()) + 20));
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.fail("The snapshot did not reach the QR aggregate before the capability deadline");
+    });
+    assert.match(String((await snapshotResult)?.message), /dashboard access denied: session expired during snapshot/);
+    assert.equal(await bootstrap.auditLog.count({ where: { id: auditId } }), 0,
+      "expired partial snapshot rolls back its success audit");
+    await bootstrap.refreshToken.updateMany({
+      where: { userId: ids.platformA },
+      data: { sessionCapabilityExpiresAt: sessionExpiry },
+    });
+
     const stressRows = Number(process.env.MSCQR_PERF_ROWS || 200000);
     assert(Number.isInteger(stressRows) && stressRows >= 1 && stressRows <= 200000);
     await bootstrap.$executeRawUnsafe(`
@@ -519,30 +568,6 @@ const main = async () => {
       totalQRCodes: stressRows + 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
     }, "large platform fallback");
     assert(performance.now() - platformStart < 5000, "large platform dashboard stays within its transaction budget");
-    if (stressRows === 200000) {
-      const expiryRequestId = "dashboard-pg-mid-snapshot-expiry";
-      const auditId = randomUUID();
-      await bootstrap.refreshToken.updateMany({
-        where: { userId: ids.platformA },
-        data: { sessionCapabilityExpiresAt: new Date(Date.now() + 400) },
-      });
-      await assert.rejects(prisma.$transaction(async (tx) => {
-        const [scope] = await tx.$queryRaw`
-          SELECT scope_fingerprint FROM app_rls.dashboard_snapshot_scope(
-            ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
-            ${auditId}, NULL, 'GET /api/dashboard/stats'
-          )
-        `;
-        await tx.$queryRaw`
-          SELECT * FROM app_rls.dashboard_snapshot_data(
-            ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
-            ${auditId}, NULL, 'GET /api/dashboard/stats', ${scope.scope_fingerprint}
-          )
-        `;
-      }), /dashboard access denied: session expired during snapshot/);
-      assert.equal(await bootstrap.auditLog.count({ where: { id: auditId } }), 0,
-        "expired partial snapshot rolls back its success audit");
-    }
     console.log(`${stressRows} dashboard application paths ${Math.round(performance.now() - stressStart)}ms`);
 
     console.log("dashboard snapshot PostgreSQL 18 application-path proof passed");
