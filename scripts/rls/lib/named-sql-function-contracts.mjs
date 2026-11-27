@@ -89,6 +89,7 @@ const qrSystemSource = "backend/src/rls-waves/session-c/c01/qrSystem.sql";
 const qrSystemRollback = "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql";
 const printingLifecycleSource = "backend/src/rls-waves/session-c/c02/printingLifecycle.sql";
 const printingUpgradeNoReplaySource = "backend/src/rls-waves/session-c/c02/printingUpgradeNoReplayDefinitions.sql";
+const printingRetirementSource = "backend/src/rls-waves/session-c/c02/printingRetirement.sql";
 const printingRunProjectionSource = "backend/src/rls-waves/session-c/c02/printingRunProjection.sql";
 const printingLifecycleRollback = "backend/src/rls-waves/session-c/c02/printingLifecycleRollback.sql";
 const publicVerificationSource = "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql";
@@ -905,6 +906,10 @@ const printingPrinterId = `current_setting('app.printing_printer_id',true)`;
 const printingRegistrationId = `current_setting('app.printing_registration_id',true)`;
 const printingReissueId = `current_setting('app.printing_reissue_id',true)`;
 const printingIdempotencyKeyHash = `current_setting('app.printing_idempotency_key_hash',true)`;
+const printingRetirementRead = `${printingSession} AND ${printingOperation}='printing-qr-retirement' AND current_setting('app.printing_role',true) IN ('MANUFACTURER_ADMIN','LICENSEE_ADMIN')`;
+const printingRetirementReviewer = `${printingRetirementRead} AND current_setting('app.printing_role',true)='LICENSEE_ADMIN'`;
+const printingRetirementId = `current_setting('app.printing_retirement_approval_id',true)`;
+const printingRetirementRecord = `"actionKey"='PRINT_QR_RETIREMENT' AND "entityType"='PrintItem' AND "licenseeId"=current_setting('app.printing_licensee_id',true) AND payload->'binding'->>'jobId'=${printingJobId}`;
 const printingConnector = `current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE}} AND ${printingOperation} LIKE 'printing-connector-%'`;
 const printingConnectorEvidence = `${printingConnector} AND ${printingOperation} IN ('printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail')`;
 const printingWorker = `current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND ${printingOperation} LIKE 'printing-worker-%'`;
@@ -965,16 +970,16 @@ const printingOwnerPolicies = [
   ["Batch","SELECT",`(${printingSession} AND (id=${printingBatchId} OR ${printingOperation}='printing-readiness')) OR (${printingConnector} AND id=${printingBatchId}) OR ${printingWorker}`],
   ["Batch","UPDATE",`(${printingSession} AND id=${printingBatchId} AND ${printingOperation} IN ('printing-create-job','printing-sample-scan','printing-release','printing-reissue')) OR ${printingConnector} OR ${printingWorker}`],
   ["QRCode","SELECT",`(${printingSession} AND "batchId"=${printingBatchId}) OR (${printingConnector} AND "printJobId"=${printingJobId}) OR (${printingWorker} AND ${printingOperation}='printing-worker-network' AND "printJobId"=${printingJobId})`],
-  ["QRCode","UPDATE",`(${printingSession} AND "batchId"=${printingBatchId} AND ${printingOperation} IN ('printing-create-job','printing-release','printing-sample-scan','printing-reissue')) OR (${printingSession} AND ${printingOperation}='printing-job-control' AND "printJobId"=${printingJobId}) OR (${printingConnector} AND "printJobId"=${printingJobId}) OR (${printingWorker} AND ${printingOperation}='printing-worker-network' AND "printJobId"=${printingJobId})`],
+  ["QRCode","UPDATE",`(${printingSession} AND "batchId"=${printingBatchId} AND ${printingOperation} IN ('printing-create-job','printing-release','printing-sample-scan','printing-reissue')) OR (${printingSession} AND ${printingOperation}='printing-job-control' AND "printJobId"=${printingJobId}) OR (${printingRetirementRead} AND "printJobId"=${printingJobId} AND "batchId"=${printingBatchId}) OR (${printingConnector} AND "printJobId"=${printingJobId}) OR (${printingWorker} AND ${printingOperation}='printing-worker-network' AND "printJobId"=${printingJobId})`],
   ["PrintJob","SELECT",`(${printingSession} AND ${printingOperation} IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND "printerId" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_printers',true),'')::jsonb))) OR (${printingSession} AND (${printingOperation}='printing-readiness' OR id=${printingJobId} OR "batchId"=${printingBatchId} OR (${printingOperation}='printing-printer-admin-delete' AND "printerId"=${printingPrinterId}))) OR (${printingConnector} AND (id=${printingJobId} OR (${printingOperation} IN ('printing-connector-claim','printing-connector-gateway-claim') AND "printerId"=${printingPrinterId}))) OR ${printingWorker}`],
   ["PrintJob","INSERT",`${printingSession} AND ${printingOperation} IN ('printing-create-job','printing-reissue') AND id=${printingJobId} AND "batchId"=${printingBatchId}`],
-  ["PrintJob","UPDATE",`(${printingSession} AND id=${printingJobId} AND ${printingOperation} IN ('printing-job-control','printing-sample-scan','printing-reissue')) OR (${printingConnector} AND (id=${printingJobId} OR (${printingOperation} IN ('printing-connector-claim','printing-connector-gateway-claim') AND "printerId"=${printingPrinterId}))) OR ${printingWorker}`],
+  ["PrintJob","UPDATE",`(${printingSession} AND id=${printingJobId} AND ${printingOperation} IN ('printing-job-control','printing-sample-scan','printing-reissue','printing-qr-retirement')) OR (${printingConnector} AND (id=${printingJobId} OR (${printingOperation} IN ('printing-connector-claim','printing-connector-gateway-claim') AND "printerId"=${printingPrinterId}))) OR ${printingWorker}`],
   ["PrintSession","SELECT",`(${printingSession} AND ${printingOperation} IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND "printerId" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_printers',true),'')::jsonb))) OR (${printingSession} AND ${printingOperation}='printing-printer-admin-diagnostic_lease' AND "printerId"=${printingPrinterId}) OR (${printingSession} AND ("batchId"=${printingBatchId} OR id=${printingSessionRowId})) OR (${printingConnector} AND (${printingOperation}='printing-connector-gateway-claim' AND "printerId"=${printingPrinterId} OR id=${printingSessionRowId} OR ("printJobId"=${printingJobId} AND ("printerRegistrationId"=${printingRegistrationId} OR (${printingOperation} IN ('printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail') AND "printerId"=${printingPrinterId}))))) OR ${printingWorker}`],
   ["PrintSession","INSERT",`${printingSession} AND ${printingOperation} IN ('printing-create-job','printing-reissue') AND id=${printingSessionRowId} AND "batchId"=${printingBatchId}`],
-  ["PrintSession","UPDATE",`(${printingSession} AND id=${printingSessionRowId} AND ${printingOperation}='printing-job-control') OR (${printingConnector} AND (id=${printingSessionRowId} OR ("printJobId"=${printingJobId} AND ("printerRegistrationId"=${printingRegistrationId} OR (${printingOperation} IN ('printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail') AND "printerId"=${printingPrinterId}))))) OR ${printingWorker}`],
+  ["PrintSession","UPDATE",`(${printingSession} AND id=${printingSessionRowId} AND ${printingOperation} IN ('printing-job-control','printing-qr-retirement')) OR (${printingConnector} AND (id=${printingSessionRowId} OR ("printJobId"=${printingJobId} AND ("printerRegistrationId"=${printingRegistrationId} OR (${printingOperation} IN ('printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail') AND "printerId"=${printingPrinterId}))))) OR ${printingWorker}`],
   ["PrintItem","SELECT",`(${printingSession} AND ${printingOperation} IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printerId" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_printers',true),'')::jsonb)))) OR (${printingSession} AND ${printingOperation}='printing-printer-admin-diagnostic_lease' AND "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printerId"=${printingPrinterId})) OR (${printingSession} AND (${printingOperation}='printing-readiness' OR "printSessionId"=${printingSessionRowId} OR (${printingOperation}='printing-reissue' AND "printSessionId"=current_setting('app.printing_original_session_id',true)))) OR (${printingConnector} AND (${printingOperation}='printing-connector-gateway-claim' AND "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printerId"=${printingPrinterId}) OR "printSessionId"=${printingSessionRowId})) OR ${printingWorker}`],
   ["PrintItem","INSERT",`${printingSession} AND ${printingOperation}='printing-create-job' AND "printSessionId"=${printingSessionRowId}`],
-  ["PrintItem","UPDATE",`(${printingSession} AND ${printingOperation}='printing-job-control' AND "printSessionId"=${printingSessionRowId}) OR (${printingSession} AND ${printingOperation}='printing-reissue' AND "printSessionId" IN (current_setting('app.printing_original_session_id',true),${printingSessionRowId})) OR (${printingConnector} AND "printSessionId"=${printingSessionRowId}) OR ${printingWorker}`],
+  ["PrintItem","UPDATE",`(${printingSession} AND ${printingOperation}='printing-job-control' AND "printSessionId"=${printingSessionRowId}) OR (${printingRetirementRead} AND "printSessionId"=${printingSessionRowId} AND id=${printingItemId}) OR (${printingSession} AND ${printingOperation}='printing-reissue' AND "printSessionId" IN (current_setting('app.printing_original_session_id',true),${printingSessionRowId})) OR (${printingConnector} AND "printSessionId"=${printingSessionRowId}) OR ${printingWorker}`],
   ["PrintItemEvent","SELECT",`${printingSession} AND ${printingOperation}='printing-reissue' AND "printItemId" IN (SELECT pi.id FROM public."PrintItem" pi WHERE pi."printSessionId"=current_setting('app.printing_original_session_id',true))`],
   ["PrintItemEvent","INSERT",`(${printingConnector} OR (${printingWorker} AND ${printingOperation}='printing-worker-recover_unsubmitted')) AND "printItemId"=${printingItemId}`],
   ["PrintJobChunk","SELECT",`${printingSession} AND ${printingOperation}='printing-reissue' AND ("printJobId"=${printingJobId} OR "printSessionId"=current_setting('app.printing_original_session_id',true))`],
@@ -983,9 +988,9 @@ const printingOwnerPolicies = [
   ["PrintReissueRequest","SELECT",`${printingSession} AND (${printingOperation}='printing-readiness' OR id=${printingReissueId} OR "batchId"=${printingBatchId})`],
   ["PrintReissueRequest","INSERT",`${printingSession} AND ${printingOperation}='printing-reissue' AND id=${printingReissueId}`],
   ["PrintReissueRequest","UPDATE",`${printingSession} AND ${printingOperation}='printing-reissue' AND id=${printingReissueId}`],
-  ["SensitiveActionApproval","SELECT",`${printingSession} AND ${printingOperation}='printing-release' AND "actionKey"='BATCH_RELEASE' AND "entityType"='Batch' AND "entityId"=${printingBatchId}`],
-  ["SensitiveActionApproval","INSERT",`${printingSession} AND ${printingOperation}='printing-release' AND "actionKey"='BATCH_RELEASE' AND "entityType"='Batch' AND "entityId"=${printingBatchId} AND "licenseeId"=current_setting('app.printing_licensee_id',true)`],
-  ["SensitiveActionApproval","UPDATE",`${printingSession} AND ${printingOperation}='printing-release' AND "actionKey"='BATCH_RELEASE' AND "entityType"='Batch' AND "entityId"=${printingBatchId}`],
+  ["SensitiveActionApproval","SELECT",`(${printingSession} AND ${printingOperation}='printing-release' AND "actionKey"='BATCH_RELEASE' AND "entityType"='Batch' AND "entityId"=${printingBatchId}) OR (${printingRetirementRead} AND ${printingRetirementRecord})`],
+  ["SensitiveActionApproval","INSERT",`(${printingSession} AND ${printingOperation}='printing-release' AND "actionKey"='BATCH_RELEASE' AND "entityType"='Batch' AND "entityId"=${printingBatchId} AND "licenseeId"=current_setting('app.printing_licensee_id',true)) OR (${printingRetirementRead} AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND id=${printingRetirementId} AND ${printingRetirementRecord})`],
+  ["SensitiveActionApproval","UPDATE",`(${printingSession} AND ${printingOperation}='printing-release' AND "actionKey"='BATCH_RELEASE' AND "entityType"='Batch' AND "entityId"=${printingBatchId}) OR (${printingRetirementRead} AND ${printingRetirementRecord} AND "entityId"=${printingItemId})`],
   ["Printer","SELECT",`${printingSession} OR (${printingConnector} AND (("printerRegistrationId"=${printingRegistrationId}) OR (${printingOperation} IN ('printing-connector-identity','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail','printing-connector-gateway-check_dispatch') AND "gatewayId"=current_setting('app.printing_gateway_id',true) AND "gatewaySecretHash"=current_setting('app.printing_gateway_secret_hash',true)))) OR (${printingWorker} AND ${printingOperation}='printing-worker-network' AND (id=${printingPrinterId} OR ("deliveryMode"='DIRECT' AND "isActive" AND "connectionType" IN ('NETWORK_DIRECT','NETWORK_IPP'))))`],
   ["Printer","INSERT",`${printingSession} AND ((${printingOperation}='printing-printer-admin-create' AND id=${printingPrinterId} AND "licenseeId"=current_setting('app.printing_licensee_id',true)) OR (${printingOperation}='printing-connector-registration-heartbeat' AND "assignedUserId"=current_setting('app.printing_user_id',true) AND "printerRegistrationId"=${printingRegistrationId}))`],
   ["Printer","UPDATE",`(${printingSession} AND ((${printingOperation} IN ('printing-printer-admin-update','printing-test-label-queue','printing-printer-admin-maintenance_request','printing-printer-admin-maintenance_status','printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release','printing-printer-admin-diagnostic_lease','printing-printer-admin-diagnostic_complete','printing-printer-admin-diagnostic_abort') AND id=${printingPrinterId}) OR (${printingOperation}='printing-printer-admin-retire' AND "assignedUserId"=current_setting('app.printing_user_id',true) AND (id=${printingPrinterId} OR "printerRegistrationId"=${printingRegistrationId})) OR (${printingOperation}='printing-printer-admin-relink' AND (id=${printingPrinterId} OR "assignedUserId"=current_setting('app.printing_user_id',true))) OR (${printingOperation}='printing-connector-registration-heartbeat' AND "assignedUserId"=current_setting('app.printing_user_id',true) AND "printerRegistrationId"=${printingRegistrationId}))) OR (${printingConnector} AND ${printingOperation} IN ('printing-connector-identity','printing-connector-session','printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail','printing-connector-intent','printing-connector-abort','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail','printing-connector-gateway-check_dispatch','printing-connector-test-label-claim','printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail') AND (id=${printingPrinterId} OR (${printingOperation} IN ('printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail','printing-connector-intent','printing-connector-abort') AND "printerRegistrationId"=${printingRegistrationId}) OR ("gatewayId"=current_setting('app.printing_gateway_id',true) AND "gatewaySecretHash"=current_setting('app.printing_gateway_secret_hash',true))))`],
@@ -1000,9 +1005,15 @@ const printingOwnerPolicies = [
     current_setting('app.printing_user_id',true),
     current_setting('app.printing_released_user_id',true),
     current_setting('app.printing_approved_user_id',true)
-  )) OR (${printingConnector} AND id=current_setting('app.printing_user_id',true))`],
+  )) OR (${printingConnector} AND id=current_setting('app.printing_user_id',true)) OR (${printingRetirementReviewer} AND role='SUPER_ADMIN')`],
   ["PrinterAttestation","SELECT",`(${printingSession} OR ${printingConnector}) AND "printerRegistrationId"=${printingRegistrationId}`],
   ["PrinterAttestation","INSERT",`(${printingSession} AND ${printingOperation}='printing-connector-registration-heartbeat' AND "printerRegistrationId"=${printingRegistrationId}) OR (${printingConnector} AND "printerRegistrationId"=${printingRegistrationId})`],
+  ["Notification","INSERT",`${printingRetirementReviewer} AND audience='SUPER_ADMIN' AND channel='WEB'
+    AND type='print_qr_retired' AND data->>'approvalId'=${printingRetirementId}
+    AND data->>'jobId'=${printingJobId}
+    AND EXISTS (SELECT 1 FROM public."User" recipient WHERE recipient.id="userId" AND recipient.role='SUPER_ADMIN')
+    AND EXISTS (SELECT 1 FROM public."SensitiveActionApproval" approval WHERE approval.id=${printingRetirementId}
+      AND approval.status='EXECUTED' AND approval."reviewedByUserId"=current_setting('app.printing_user_id',true))`],
   ["ManufacturerLicenseeLink","SELECT",printingSession],
   ["Licensee","SELECT",`${printingSession} OR (${printingConnector} AND id=current_setting('app.printing_licensee_id',true))`],
   ["Organization","SELECT",printingSession],
@@ -1023,6 +1034,22 @@ const printingRunOwnerPolicies = [
   ["PrintItemEvent","SELECT",`${printingRunRead} AND "printItemId" IN (SELECT pi.id FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" WHERE ps."printJobId" IN (${printingRunJobs}))`],
   ["PrintJobChunk","SELECT",`${printingRunRead} AND ("printJobId" IN (${printingRunJobs}) OR "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printJobId" IN (${printingRunJobs})))`],
   ["PrintAuditEvent","SELECT",`${printingRunRead} AND "printJobId" IN (${printingRunJobs})`],
+];
+const printingHistoryBatches = `SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_history_batches',true),'')::jsonb,'[]'::jsonb))`;
+const printingHistoryRead = `${printingSession} AND ${printingOperation}='printing-manufacturer-batch-history' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN'`;
+const printingHistoryLicensee = `current_setting('app.printing_licensee_id',true)`;
+const printingHistoryJobs = `SELECT j.id FROM public."PrintJob" j WHERE j."batchId" IN (${printingHistoryBatches}) AND j."manufacturerId"=current_setting('app.printing_user_id',true)`;
+const printingHistoryOwnerPolicies = [
+  ["PrintJob","SELECT",`${printingHistoryRead} AND "batchId" IN (${printingHistoryBatches}) AND "manufacturerId"=current_setting('app.printing_user_id',true)`],
+  ["PrintAuditEvent","SELECT",`${printingHistoryRead} AND "batchId" IN (${printingHistoryBatches}) AND "printJobId" IN (${printingHistoryJobs})`],
+  ["PrintReissueRequest","SELECT",`${printingHistoryRead} AND "originalPrintJobId" IN (${printingHistoryJobs})`],
+  ["TraceEvent","SELECT",`${printingHistoryRead} AND "licenseeId"=${printingHistoryLicensee} AND "batchId" IN (${printingHistoryBatches}) AND "qrCodeId" IS NULL AND "eventType"='ASSIGNED'`],
+  ["AuditLog","SELECT",`${printingHistoryRead} AND "licenseeId"=${printingHistoryLicensee} AND (
+    ("entityType"='Batch' AND "entityId" IN (${printingHistoryBatches}))
+    OR ("entityType"='PrintJob' AND "entityId" IN (${printingHistoryJobs}))
+    OR ("entityType"='PrintReissueRequest' AND "entityId" IN (
+      SELECT r.id FROM public."PrintReissueRequest" r WHERE r."originalPrintJobId" IN (${printingHistoryJobs})
+    )))`],
 ];
 const printingLifecycleSecurity = Object.freeze({
   mode:"SECURITY DEFINER",ownerIdentity:"identity-auth-function-owner",ownerRole:"authOwner",
@@ -1473,6 +1500,22 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     outputColumns:["result"],disposableProbes:["printing-lifecycle-postgres18"],
   })),
   {
+    id:"print-qr-retirement",schema:"app_rls",name:"printing_retirement",
+    signature:"text,text,text,text,text,text",returnType:"jsonb",
+    identityArguments:"p_capability text, p_request_id text, p_operation text, p_job_id text, p_item_id text, p_reason text",
+    definitionLocation:printingRetirementSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",
+    security:{...printingLifecycleSecurity,functionSource:printingRetirementSource,ownerPolicies:[],ownerPrivileges:[]},
+    tableCommands:[["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],
+      ["Batch","SELECT"],["PrintJob","SELECT"],["PrintSession","SELECT"],["PrintItem","SELECT"],["PrintItem","UPDATE"],
+      ["QRCode","SELECT"],["QRCode","UPDATE"],["SensitiveActionApproval","SELECT"],["SensitiveActionApproval","INSERT"],
+      ["SensitiveActionApproval","UPDATE"],["Notification","INSERT"],["AuditLog","INSERT"],["SecurityEventOutbox","INSERT"]],
+    context:"Stores independent licensee decisions for one proven original attempt and retains the old device fence.",
+    canonicalWorkflowIds:["workflow-release-fix-5-job-control"],
+    repositoryCallers:["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:operatePrintingRetirement"],
+    inputAuthority:"authenticated capability with scoped ownership and the existing signed dispatch attempt",
+    outputColumns:["result"],disposableProbes:["printing-lifecycle-postgres18"],
+  },
+  {
     id:"manufacturer-print-run-projection",schema:"app_rls",name:"printing_run_projection",
     signature:"text,text,text,text,text,jsonb",returnType:"jsonb",
     identityArguments:"p_capability text, p_purpose text, p_request_id text, p_operation text, p_subject_id text, p_options jsonb",
@@ -1485,6 +1528,25 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     context:"Uses the existing printing readiness boundary and limits additional reads to its bounded manufacturer job set.",
     canonicalWorkflowIds:["workflow-release-fix-5-readiness"],
     repositoryCallers:["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:readPrintingProjection"],
+    inputAuthority:"database-verified session and current manufacturer assignments",
+    outputColumns:["result"],disposableProbes:["printing-lifecycle-postgres18"],
+  },
+  {
+    id:"manufacturer-batch-history",schema:"app_rls",name:"manufacturer_batch_history",
+    signature:"text,text,text,text,jsonb",returnType:"jsonb",
+    identityArguments:"p_capability text, p_request_id text, p_batch_id text, p_licensee_id text, p_options jsonb",
+    definitionLocation:printingRunProjectionSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",
+    security:{...printingLifecycleSecurity,functionSource:printingRunProjectionSource,
+      ownerPolicies:printingHistoryOwnerPolicies,ownerPrivileges:[
+        ["Batch","SELECT",["parentBatchId","rootBatchId"]],["AuditLog","SELECT",["id","createdAt"]],
+        ["TraceEvent","SELECT",["id","createdAt","batchId","licenseeId","qrCodeId","eventType","details"]],
+      ]},
+    tableCommands:[["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],
+      ["Batch","SELECT"],["AuditLog","SELECT"],["PrintJob","SELECT"],["PrintAuditEvent","SELECT"],
+      ["TraceEvent","SELECT"],["PrintReissueRequest","SELECT"]],
+    context:"Projects bounded allowlisted batch operations through live manufacturer ownership and an exact licensee scope.",
+    canonicalWorkflowIds:["workflow-release-fix-5-readiness"],
+    repositoryCallers:["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:readManufacturerBatchHistory"],
     inputAuthority:"database-verified session and current manufacturer assignments",
     outputColumns:["result"],disposableProbes:["printing-lifecycle-postgres18"],
   },

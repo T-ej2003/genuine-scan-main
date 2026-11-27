@@ -6,7 +6,8 @@ const repoRoot = path.resolve(__dirname, "..", "..");
 const read = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 
 const workflowSource = read("backend/src/services/printReissueRequestWorkflowService.ts");
-const controllerSource = read("backend/src/controllers/print-job/queryHandlers.ts");
+const controllerSource = read("backend/src/controllers/print-job/reissueOutcomeResponse.ts");
+assert(read("backend/src/controllers/print-job/queryHandlers.ts").includes("return sendPrintReissueExecutionError(res, error)"));
 const directConfirmationSource = read("backend/src/controllers/print-job/directPrintConfirmationHandlers.ts");
 const reissueServiceSource = read("backend/src/services/printReissueService.ts");
 const verificationHandlerSource = read("backend/src/controllers/verify/verificationHandlers.ts");

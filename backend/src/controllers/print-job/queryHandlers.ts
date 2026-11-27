@@ -18,7 +18,8 @@ import {
   handleUserSafeError,
   reissuePrintJobSchema,
 } from "./shared";
-import { describeMissingPrinterReadinessFields, isPhysicalOutcomeUnconfirmed } from "./errorResponses";
+import { isPhysicalOutcomeUnconfirmed } from "./errorResponses";
+import { sendPrintReissueExecutionError } from "./reissueOutcomeResponse";
 import {
   createReissueRequestSchema,
   listReissueRequestsQuerySchema,
@@ -368,44 +369,7 @@ export const printApprovedManufacturerPrintReissueRequest = async (req: AuthRequ
     });
   } catch (error: any) {
     console.error("printApprovedManufacturerPrintReissueRequest error:", error);
-    const message = String(error?.message || "");
-    if (message.includes("PRINTER_NOT_TRUSTED")) {
-      const printerStatus = error?.printerStatus || null;
-      return res.status(409).json({
-        success: false,
-        error: "Printer verification expired. Refresh printer helper before printing.",
-        message: "Printer verification expired. Refresh printer helper before printing.",
-        code: "PRINTER_ATTESTATION_STALE",
-        errorCode: "PRINTER_ATTESTATION_STALE",
-        recoveryAction: "refresh_printer_status",
-        canRetry: true,
-        details: { missingFields: describeMissingPrinterReadinessFields(printerStatus) },
-        data: { printerStatus },
-      });
-    }
-    if (message.startsWith("NOT_ENOUGH_CODES")) {
-      return res.status(409).json({
-        success: false,
-        error: "Not enough unprinted codes remain in this source batch to authorize a controlled reissue.",
-      });
-    }
-    if (message === "BATCH_BUSY") {
-      return res.status(409).json({
-        success: false,
-        error: "This source batch is busy. Refresh the workspace and try the reissue again.",
-      });
-    }
-    if (typeof error?.statusCode === "number") {
-      const safeMessage = message || "Replacement labels could not be printed.";
-      return res.status(error.statusCode).json({
-        success: false,
-        error: safeMessage,
-        message: safeMessage,
-        ...(typeof error?.code === "string" ? { code: error.code, errorCode: error.code } : {}),
-        ...(error?.details ? { details: error.details } : {}),
-      });
-    }
-    return handleUserSafeError(res, error, "Replacement labels could not be printed.");
+    return sendPrintReissueExecutionError(res, error);
   }
 };
 

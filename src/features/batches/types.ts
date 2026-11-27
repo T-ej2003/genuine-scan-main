@@ -70,12 +70,23 @@ export type TraceEventRow = {
   eventType?: TraceEventType;
   action?: string;
   sourceAction?: string | null;
+  actorLabel?: string;
   createdAt: string;
   details?: Record<string, unknown>;
   user?: { id: string; name?: string | null; email?: string | null } | null;
   manufacturer?: { id: string; name?: string | null; email?: string | null } | null;
   qrCode?: { id: string; code?: string | null } | null;
   userId?: string | null;
+};
+
+export type PrintRetirementRow = {
+  itemId: string;
+  serial: string | null;
+  status: "UNREQUESTED" | "PENDING" | "REJECTED" | "EXECUTED";
+  canRequest: boolean;
+  canApprove: boolean;
+  canReject: boolean;
+  requestReason: string | null;
 };
 
 export type AuditLogRow = {

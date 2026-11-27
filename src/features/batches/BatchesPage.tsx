@@ -86,7 +86,11 @@ export default function BatchesPage() {
     toast,
   });
 
+  const requestedTab = searchParams.get("tab");
+  const initialWorkspaceTab = requestedTab === "audit" ? "audit" : requestedTab === "reissue" ? "operations" : "overview";
   const workspace = useBatchWorkspaceController({
+    initialTab: initialWorkspaceTab,
+    manufacturerActorId: isManufacturer ? user?.id : undefined,
     rows: operations.rows,
     stableRows: operations.stableRows,
     isManufacturer,
@@ -218,7 +222,7 @@ export default function BatchesPage() {
           decision === "approve"
             ? forwardedToSuperAdmin
               ? "MSCQR recorded your review and forwarded the replacement request for final approval."
-              : "Replacement labels are approved and ready for the manufacturer to print."
+              : "Reissue is approved. Printing still requires eligible original labels and a verified printer."
             : "MSCQR recorded the rejection and notified the requester.",
       });
       await Promise.allSettled([fetchReissueRequests({ force: true }), workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
@@ -448,6 +452,17 @@ export default function BatchesPage() {
         historyError={workspace.workspaceHistoryError}
         historyLogs={workspace.workspaceHistoryLogs}
         historyLastUpdatedAt={workspace.workspaceHistoryLastUpdatedAt}
+        retirementActorId={user?.id}
+        onRetirementChanged={() => {
+          void Promise.allSettled([workspacePrintJobsQuery.refetch(), operations.fetchBatches()]);
+        }}
+        onTabChange={workspace.setWorkspaceTab}
+        historyIncomplete={workspace.historyIncomplete}
+        onLoadMoreHistory={workspace.historyNextCursor ? () => {
+          if (workspace.workspaceBatch && workspace.historyNextCursor) {
+            void workspace.fetchWorkspaceHistory(workspace.workspaceBatch, { cursor: workspace.historyNextCursor });
+          }
+        } : undefined}
         onRefreshHistory={() => {
           if (workspace.workspaceBatch) {
             void workspace.fetchWorkspaceHistory(workspace.workspaceBatch);
@@ -484,7 +499,7 @@ export default function BatchesPage() {
           continuePrintRecovery(job);
         }}
         onRefreshPrinterStatus={printWorkflow.dialogProps.onRefreshPrinters}
-        initialTab={searchParams.get("tab") === "audit" ? "audit" : searchParams.get("tab") === "reissue" ? "operations" : "overview"}
+        initialTab={initialWorkspaceTab}
         highlightedReissueRequestId={searchParams.get("reissueRequestId")}
       />
 

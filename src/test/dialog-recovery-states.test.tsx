@@ -701,11 +701,11 @@ describe("dialog recovery states", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText(/Super admin approves or rejects replacement allocation/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve replacement allocation" })).toBeInTheDocument();
+    expect(screen.getByText(/Super admin gives final approval/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve reissue" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Print replacement labels" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Sample scan proof/i)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Approve replacement allocation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve reissue" }));
     expect(onDecide).toHaveBeenCalledWith("reissue-1", "approve");
   });
 

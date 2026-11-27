@@ -3063,6 +3063,41 @@
       "ownerIdentity": "identity-auth-function-owner"
     },
     {
+      "table": "Batch",
+      "command": "SELECT",
+      "columns": [
+        "parentBatchId",
+        "rootBatchId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "AuditLog",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "TraceEvent",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "createdAt",
+        "batchId",
+        "licenseeId",
+        "qrCodeId",
+        "eventType",
+        "details"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
       "table": "SystemCheckpoint",
       "command": "SELECT",
       "columns": [

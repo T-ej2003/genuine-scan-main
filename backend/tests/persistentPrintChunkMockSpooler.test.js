@@ -13,16 +13,27 @@ const payload = {
   chunkId: "isolated-chunk",
   printJobId: "isolated-job",
   printer: { name: "isolated-queue", languages: ["ZPL"], dpi: 300 },
-  labels: [{ printItemId: "isolated-item", code: "isolated-code", scanUrl: "https://example.test/scan",
+  labels: [{ attemptId: "isolated-attempt", printItemId: "isolated-item", code: "isolated-code", scanUrl: "https://example.test/scan",
     payloadType: "ZPL", payloadContent: zpl, payloadHash, commandLanguage: "ZPL" }],
 };
 const session = { sessionId: "isolated-session", registrationId: "isolated-registration",
   selectedPrinterId: "isolated-printer", connectorVersion: "test", messageSeq: 0 };
 
+const runChunk = (currentSession, chunk, adapters) => runPersistentPrintChunk(
+  { close: () => undefined }, currentSession, chunk, session.selectedPrinterId, {
+    evidence: async (entry) => {
+      assert.equal(entry.attemptId, "isolated-attempt");
+      assert.equal(entry.registrationId, session.registrationId);
+      assert.equal(entry.payloadHash, payloadHash);
+    },
+    ...adapters,
+  }
+);
+
 const run = async ({ print, wait } = {}) => {
   const events = [];
   const writes = [];
-  await runPersistentPrintChunk({}, { ...session }, payload, session.selectedPrinterId, {
+  await runChunk({ ...session }, payload, {
     send: async (_socket, _session, printerId, event) => {
       assert.equal(printerId, session.selectedPrinterId);
       events.push(event.type);
@@ -57,19 +68,32 @@ const run = async ({ print, wait } = {}) => {
     },
     wait: async () => ({ confirmed: true }),
   };
-  await runPersistentPrintChunk({}, duplicateSession, payload, session.selectedPrinterId, duplicateAdapters);
-  await runPersistentPrintChunk({}, duplicateSession, payload, session.selectedPrinterId, duplicateAdapters);
+  await runChunk(duplicateSession, payload, duplicateAdapters);
+  await runChunk(duplicateSession, payload, duplicateAdapters);
   assert.equal(duplicateWrites, 1, "A duplicate chunk on the same authenticated session must not spool twice");
   const concurrentSession = { ...session };
   duplicateWrites = 0;
   await Promise.all([
-    runPersistentPrintChunk({}, concurrentSession, payload, session.selectedPrinterId, duplicateAdapters),
-    runPersistentPrintChunk({}, concurrentSession, payload, session.selectedPrinterId, duplicateAdapters),
+    runChunk(concurrentSession, payload, duplicateAdapters),
+    runChunk(concurrentSession, payload, duplicateAdapters),
   ]);
   assert.equal(duplicateWrites, 1, "Concurrent duplicate delivery must not spool twice");
 
+  let preSpoolWrites = 0;
+  const evidenceOperations = [];
+  await assert.rejects(runChunk({ ...session }, payload, {
+    evidence: async (entry) => {
+      evidenceOperations.push(entry.action);
+      if (entry.action === "dispatch_intent") throw new Error("intent was not acknowledged");
+    },
+    send: async () => { throw new Error("no printer message without intent"); },
+    print: async () => { preSpoolWrites += 1; throw new Error("must not spool"); },
+  }), /intent was not acknowledged/);
+  assert.equal(preSpoolWrites, 0);
+  assert.deepEqual(evidenceOperations, ["dispatch_intent", "abort_unsubmitted"]);
+
   const unavailable = [];
-  await assert.rejects(runPersistentPrintChunk({}, { ...session }, payload, session.selectedPrinterId, {
+  await assert.rejects(runChunk({ ...session }, payload, {
     send: async (_ws, _session, _printer, event) => unavailable.push(event.type),
     print: async () => { throw new Error("mock spooler unavailable"); },
     wait: async () => { throw new Error("must not wait after rejected submission"); },
@@ -77,7 +101,7 @@ const run = async ({ print, wait } = {}) => {
   assert.deepEqual(unavailable, ["chunk_ack", "label_failed"]);
 
   const uncertain = [];
-  await assert.rejects(runPersistentPrintChunk({}, { ...session }, payload, session.selectedPrinterId, {
+  await assert.rejects(runChunk({ ...session }, payload, {
     send: async (_ws, _session, _printer, event) => {
       uncertain.push(event.type);
       if (event.type === "label_failed") assert.equal(event.error, "physical_outcome_unconfirmed");
@@ -99,9 +123,9 @@ const run = async ({ print, wait } = {}) => {
     },
     wait: async () => ({ confirmed: false, confirmationUnavailable: true }),
   };
-  await assert.rejects(runPersistentPrintChunk({}, receiptFailureSession, payload, session.selectedPrinterId, receiptFailureAdapters),
+  await assert.rejects(runChunk(receiptFailureSession, payload, receiptFailureAdapters),
     { errorCode: "queue_confirmation_unavailable" }, "transport failure must not hide the original physical uncertainty");
-  await runPersistentPrintChunk({}, receiptFailureSession, payload, session.selectedPrinterId, receiptFailureAdapters);
+  await runChunk(receiptFailureSession, payload, receiptFailureAdapters);
   assert.equal(receiptFailureWrites, 1, "a lost uncertainty receipt must not trigger another physical print");
 
   let acceptedWrites = 0;
@@ -118,16 +142,16 @@ const run = async ({ print, wait } = {}) => {
     },
     wait: async () => { throw new Error("confirmation must not run before a spool receipt is accepted"); },
   };
-  await assert.rejects(runPersistentPrintChunk({}, lostReceiptSession, payload, session.selectedPrinterId, lostReceiptAdapters),
+  await assert.rejects(runChunk(lostReceiptSession, payload, lostReceiptAdapters),
     /signed receipt transport lost/);
-  await runPersistentPrintChunk({}, lostReceiptSession, payload, session.selectedPrinterId, lostReceiptAdapters);
+  await runChunk(lostReceiptSession, payload, lostReceiptAdapters);
   assert.equal(acceptedWrites, 1, "An accepted spool submission must not be retried after a lost receipt");
   assert.deepEqual(lostReceipt, ["chunk_ack", "label_spooled", "label_failed"]);
 
   let attempted = false;
-  await assert.rejects(runPersistentPrintChunk({}, { ...session }, {
+  await assert.rejects(runChunk({ ...session }, {
     ...payload, labels: [{ ...payload.labels[0], payloadHash: "invalid" }],
-  }, session.selectedPrinterId, {
+  }, {
     send: async () => undefined,
     print: async () => { attempted = true; throw new Error("unexpected spooler call"); },
     wait: async () => ({ confirmed: true }),

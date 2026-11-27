@@ -13,11 +13,50 @@ vi.mock("@/lib/api-client", () => ({
     getBatchAllocationMap: vi.fn(),
     getTraceTimeline: vi.fn(async () => ({ success: true, data: [] })),
     getAuditLogs: vi.fn(async () => ({ success: true, data: [] })),
+    getManufacturerBatchHistory: vi.fn(),
   },
 }));
 
 describe("batch workspace allocation map", () => {
   afterEach(() => { window.dispatchEvent(new Event("auth:logout")); vi.restoreAllMocks(); vi.clearAllMocks(); });
+  it("loads only scoped manufacturer history when Audit opens and paginates safely", async () => {
+    const child: BatchRow = {
+      id: "child", name: "My allocation", licenseeId: "brand", manufacturerId: "factory",
+      batchKind: "MANUFACTURER_CHILD", parentBatchId: "source", rootBatchId: "source",
+      startCode: "L0001", endCode: "L0010", totalCodes: 10, printedAt: null, createdAt: "2026-11-26T12:00:00Z",
+    };
+    const rows = buildStableBatchOverviewRows([child]);
+    const currentEvent = { id: "new", createdAt: "2026-11-27T10:00:00Z", action: "PRINT_JOB_STOP" };
+    const olderEvent = { id: "old", createdAt: "2026-11-26T12:00:00Z", action: "ALLOCATED" };
+    const history = vi.mocked(apiClient.getManufacturerBatchHistory);
+    history.mockResolvedValueOnce({
+      success: true, data: { events: [currentEvent], incomplete: true, nextCursor: "older" },
+    }).mockResolvedValueOnce({
+      success: true, data: { events: [currentEvent, olderEvent], incomplete: true, nextCursor: null },
+    }).mockResolvedValueOnce({
+      success: false, error: "Batch history could not be loaded.",
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useBatchWorkspaceController({
+      rows: [child], stableRows: rows, isManufacturer: true, toast: vi.fn(),
+    }), { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
+
+    await act(async () => { await result.current.openWorkspace(rows[0]); });
+    expect(history).not.toHaveBeenCalled();
+    act(() => { result.current.setWorkspaceTab("audit"); });
+    await waitFor(() => expect(result.current.workspaceHistoryLogs).toEqual([currentEvent]));
+    expect(history).toHaveBeenCalledWith("child", "brand", undefined);
+    expect(apiClient.getAuditLogs).not.toHaveBeenCalled();
+    expect(apiClient.getTraceTimeline).not.toHaveBeenCalled();
+    expect(result.current.historyIncomplete).toBe(true);
+    await act(async () => { await result.current.fetchWorkspaceHistory(rows[0], { cursor: "older" }); });
+    expect(result.current.workspaceHistoryLogs).toEqual([currentEvent, olderEvent]);
+    expect(result.current.historyNextCursor).toBeNull();
+    await act(async () => { await result.current.fetchWorkspaceHistory(rows[0]); });
+    expect(result.current.workspaceHistoryError).toBe("Batch history could not be loaded.");
+    expect(result.current.workspaceHistoryLogs).toEqual([currentEvent, olderEvent]);
+  });
+
   it("uses the complete tenant-scoped map when a child is beyond the current page", async () => {
     const source: BatchRow = {
       id: "source", name: "Source", licenseeId: "tenant", batchKind: "RECEIVED_PARENT",

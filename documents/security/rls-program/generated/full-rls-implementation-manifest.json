@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f",
+  "sourceContractSha256": "8ae44188a7ffb52b79ef2119f8267c3a79b8443c7cfae10eb7ed91461caa467c",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -64,11 +64,15 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "f6167aee6fbef6ea5f3453e833e23cdb8ab813a73545d7adde9c029a263adf56"
+      "sha256": "6eb6381c4f2b76e8eae94d0bf648c544b61512716f747926e8a14d235d05c6ca"
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingRunProjection.sql",
-      "sha256": "03e71e8c191830d6149d2526749fe40ec88dbc4fb33e19bbd4e450540defa46c"
+      "sha256": "a2c4fa35207b4f2401b753c2f1e131395002c9230256cfdc2d281a020eb6a9ea"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c02/printingRetirement.sql",
+      "sha256": "21dcea0ef9684ee918d20ac1cb96450a82c4ec46f63996b5a0edcf298299a21a"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -80,7 +84,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "cf748897403a953061b352fed8812aee57451347d76eceac76b7378bddf28725"
+      "sha256": "070aeb9f67914a95f2b774b0c26a1840104a670b2fb8d859bc8811dd56d51786"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -96,7 +100,7 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "7a8a7f5d814b92a6143da62ef12af0483d425f583f14545f730425512c1c5fd3"
+      "sha256": "b51e63da0ebd22802cc72891fb2fa1efbf874b39ef75f9addc4310f04e2f4ae4"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -112,7 +116,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "8bd47948dad11ae8281513c8b5d6cc06271cda3393dae3e30d1b750f6a1f4d1a"
+      "sha256": "d0829113c8bbb0974d50c5a05a7f3797cc8fe46a991b3264beceed035c73bd17"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -398,7 +402,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 400,
+    "generatedPolicies": 406,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 57,
     "prismaEnums": 58,
@@ -416,7 +420,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:8ae44188a7ffb52b79ef2119f8267c3a79b8443c7cfae10eb7ed91461caa467c",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

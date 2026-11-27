@@ -41,6 +41,34 @@ export const readPrintingProjection = (input: {
     ) AS result
   `);
 
+export const readManufacturerBatchHistory = (input: {
+  capability: string;
+  requestId: string;
+  batchId: string;
+  licenseeId: string;
+  options: { limit: number; beforeAt?: string; beforeId?: string };
+}): Promise<{ events: Array<{ id: string; createdAt: string }>; incomplete: boolean }> =>
+  oneJson(prisma, Prisma.sql`
+    SELECT app_rls.manufacturer_batch_history(
+      ${input.capability}::text,${input.requestId}::text,${input.batchId}::text,
+      ${input.licenseeId}::text,${input.options}::jsonb
+    ) AS result
+  `);
+
+export const operatePrintingRetirement = (input: {
+  capability: string;
+  requestId: string;
+  jobId: string;
+  operation: "LIST" | "REQUEST" | "APPROVE" | "REJECT";
+  itemId?: string;
+  reason?: string;
+}) => oneJson(prisma, Prisma.sql`
+  SELECT app_rls.printing_retirement(
+    ${input.capability}::text,${input.requestId}::text,${input.operation}::text,${input.jobId}::text,
+    ${input.itemId ?? null}::text,${input.reason ?? null}::text
+  ) AS result
+`);
+
 export const administerPrintingPrinter = (input: {
   capability: string;
   requestId: string;

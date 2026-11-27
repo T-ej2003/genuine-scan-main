@@ -111,6 +111,7 @@ export function usePrintJobs(batchId?: string, limit = 8, enabled = true) {
   return useQuery({
     queryKey: queryKeys.printing.jobs(batchId, limit),
     enabled,
+    staleTime: 5_000,
     queryFn: async (): Promise<PrintJobDTO[]> =>
       unwrapParsedApiResponse(
         await apiClient.listPrintJobs({ batchId, limit }),

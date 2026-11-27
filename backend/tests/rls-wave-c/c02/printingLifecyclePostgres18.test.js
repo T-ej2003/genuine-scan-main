@@ -235,6 +235,90 @@ async function main() {
   for (const table of ["Batch", "QRCode", "PrintJob", "PrintSession", "PrintItem", "PrintItemEvent", "PrintJobChunk", "Printer", "PrinterRegistration", "PrinterAgentSession", "ActionIdempotencyKey"]) {
     denied(app, `SELECT * FROM public."${table}" LIMIT 1`);
   }
+  const historyJobId = randomUUID();
+  psql(admin, `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId",status,quantity,"updatedAt")
+    VALUES('${historyJobId}','${ids.batch}','${ids.maker}','STOPPED',1,now());
+    INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId","createdAt")
+    VALUES(gen_random_uuid()::text,'${ids.maker}','${ids.orgA}','${ids.licenseeA}',
+      'PRINT_JOB_CREATED','PrintJob','${historyJobId}',now() - interval '1 minute')`);
+  const batchHistory = (capability, batchId, licenseeId, options = {}) =>
+    `SELECT app_rls.manufacturer_batch_history('${capability}','${requestId()}','${batchId}','${licenseeId}','${JSON.stringify(options)}'::jsonb)`;
+  const initialHistory = json(app, batchHistory(caps.maker, ids.batch, ids.licenseeA));
+  assert.equal(initialHistory.incomplete, true, "missing historical allocation evidence is explicit");
+  assert.deepEqual(initialHistory.events.map(event => event.action), ["PRINT_JOB_CREATED"]);
+  boundaryDenied(app, batchHistory(caps.checker, ids.batch, ids.licenseeA));
+  boundaryDenied(app, batchHistory(caps.outsider, ids.batch, ids.licenseeA));
+  boundaryDenied(app, batchHistory(caps.maker, ids.batch, ids.licenseeB));
+  psql(admin, `INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"createdAt")
+    VALUES(gen_random_uuid()::text,'${ids.checker}','${ids.orgA}','${ids.licenseeA}','ALLOCATED','Batch','${ids.batch}',
+        '{"quantity":1,"privateEvidence":"restricted"}'::jsonb,now()),
+      (gen_random_uuid()::text,'${ids.checker}','${ids.orgA}','${ids.licenseeA}','USER_LOGIN','Batch','${ids.batch}',
+        '{}'::jsonb,now()),
+      (gen_random_uuid()::text,'${ids.checker}','${ids.orgA}','${ids.licenseeA}','ALLOCATED','Batch','${ids.raceBatch}',
+        '{"quantity":987,"batchId":"${ids.batch}"}'::jsonb,now());
+    INSERT INTO public."TraceEvent"(id,"eventType","licenseeId","batchId","manufacturerId","sourceAction","createdAt")
+    VALUES(gen_random_uuid()::text,'ASSIGNED','${ids.licenseeA}','${ids.batch}','${ids.maker}','ALLOCATED',now())`);
+  const filledHistory = json(app, batchHistory(caps.maker, ids.batch, ids.licenseeA, { limit: 1 }));
+  assert.equal(filledHistory.incomplete, false);
+  assert.deepEqual(filledHistory.events.map(event => event.action), ["ALLOCATED", "PRINT_JOB_CREATED"]);
+  assert.equal(filledHistory.events[0].actorLabel, "Licensee");
+  assert.deepEqual(filledHistory.events[0].details, { quantity: 1 });
+  const boundaryEvent = filledHistory.events[0];
+  assert.deepEqual(json(app, batchHistory(caps.maker, ids.batch, ids.licenseeA, {
+    beforeAt: boundaryEvent.createdAt, beforeId: boundaryEvent.id,
+  })).events.map(event => event.action), ["PRINT_JOB_CREATED"]);
+  psql(admin, `DELETE FROM public."AuditLog" WHERE "entityId" IN ('${historyJobId}','${ids.batch}','${ids.raceBatch}');
+    DELETE FROM public."TraceEvent" WHERE "batchId"='${ids.batch}';
+    DELETE FROM public."PrintJob" WHERE id='${historyJobId}'`);
+
+  const retirementJob = randomUUID();
+  const retirementSession = randomUUID();
+  const retirementSuperAdmin = randomUUID();
+  const retirementItems = Array.from({ length: 2 }, () => ({ item: randomUUID(), qr: randomUUID(), attempt: randomUUID() }));
+  psql(admin, `INSERT INTO public."User"(id,email,name,role,status,"isActive","updatedAt")
+    VALUES('${retirementSuperAdmin}','retirement-super@example.invalid','Retirement observer','SUPER_ADMIN','ACTIVE',true,now());
+    INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"pipelineState","printMode",quantity,"updatedAt")
+    VALUES('${retirementJob}','${ids.batch}','${ids.maker}','${ids.printer}','STOPPED','NEEDS_OPERATOR_ACTION','LOCAL_AGENT',2,now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerId","printerRegistrationId",status,"totalItems","updatedAt")
+    VALUES('${retirementSession}','${retirementJob}','${ids.batch}','${ids.maker}','${ids.printer}','${ids.registration}','STOPPED',2,now());
+    ${retirementItems.map(({ item, qr, attempt }, index) => `INSERT INTO public."QRCode"(id,code,"displayCode","batchId","licenseeId","printJobId",status,"updatedAt")
+      VALUES('${qr}','synthetic-retirement-${qr}','RET-${index}','${ids.batch}','${ids.licenseeA}','${retirementJob}','ACTIVATED',now());
+      INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","issuedAt","dispatchedAt","dispatchMetadata","updatedAt")
+      VALUES('${item}','${retirementSession}','${qr}','synthetic-retirement-${qr}','ISSUED','NEEDS_OPERATOR_ACTION',now(),now(),
+        jsonb_build_object('attemptId','${attempt}','payloadHash','${hash(qr)}','dispatchEvidenceVersion',1),now());`).join("\n")}`);
+  const mutateRetirement = (cap, op, item = null) => `SELECT app_rls.printing_retirement('${cap}','${requestId()}','${op}',
+    '${retirementJob}',${item ? "'"+item+"'" : "NULL"},'Verify the original label retirement')`;
+  assert.equal(json(app, mutateRetirement(caps.maker, "LIST")).filter(row => row.canRequest).length, 2);
+  assert.deepEqual(json(app, mutateRetirement(caps.checker, "LIST")), []);
+  boundaryDenied(app, mutateRetirement(caps.outsider, "LIST"));
+  boundaryDenied(app, mutateRetirement(caps.checker, "REQUEST", retirementItems[0].item));
+  const duplicated = await Promise.all(retirementItems.slice(0, 1).flatMap(({ item }) =>
+    [psqlAsync(app, mutateRetirement(caps.maker, "REQUEST", item)), psqlAsync(app, mutateRetirement(caps.maker, "REQUEST", item))]));
+  assert.deepEqual(duplicated.map(row => row.status), [0, 0]);
+  const [firstRequest, duplicateRequest] = duplicated.map(row => JSON.parse(row.output));
+  assert.equal(firstRequest.id, duplicateRequest.id);
+  assert.equal(duplicated.map(row => JSON.parse(row.output)).filter(row => row.idempotent).length, 1);
+  assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${retirementItems[0].qr}'`), "ACTIVATED");
+  assert.equal(json(app, mutateRetirement(caps.checker, "LIST"))[0].canApprove, true);
+  boundaryDenied(app, mutateRetirement(caps.maker, "APPROVE", retirementItems[0].item));
+  assert.equal(json(app, mutateRetirement(caps.checker, "APPROVE", retirementItems[0].item)).status, "EXECUTED");
+  assert.equal(json(app, mutateRetirement(caps.checker, "APPROVE", retirementItems[0].item)).idempotent, true);
+  assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${retirementItems[0].qr}'`), "BLOCKED");
+  assert.equal(psql(admin, `SELECT "pipelineState" FROM public."PrintJob" WHERE id='${retirementJob}'`), "NEEDS_OPERATOR_ACTION");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."Notification" WHERE "userId"='${retirementSuperAdmin}'
+    AND type='print_qr_retired' AND data->>'approvalId'='${firstRequest.id}'`), "1");
+  json(app, mutateRetirement(caps.maker, "REQUEST", retirementItems[1].item));
+  assert.equal(json(app, mutateRetirement(caps.checker, "REJECT", retirementItems[1].item)).status, "REJECTED");
+  assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${retirementItems[1].qr}'`), "ACTIVATED");
+  psql(admin, `DELETE FROM public."AuditLog" WHERE "entityId"='${retirementJob}';
+    DELETE FROM public."Notification" WHERE "userId"='${retirementSuperAdmin}';
+    DELETE FROM public."SensitiveActionApproval" WHERE "actionKey"='PRINT_QR_RETIREMENT';
+    DELETE FROM public."PrintItem" WHERE "printSessionId"='${retirementSession}';
+    DELETE FROM public."PrintSession" WHERE id='${retirementSession}';
+    DELETE FROM public."QRCode" WHERE "printJobId"='${retirementJob}';
+    DELETE FROM public."PrintJob" WHERE id='${retirementJob}';
+    DELETE FROM public."User" WHERE id='${retirementSuperAdmin}'`);
+
   const retainedLookup = () => `SELECT app_rls.printing_connector_registration(
     '${caps.maker}','printing-connector-registration','${requestId()}','LOOKUP',
     '{"deviceFingerprint":"printing-device"}'::jsonb)`;
@@ -1970,6 +2054,7 @@ async function main() {
   psql(preauth, `SELECT id FROM app_auth.issue_authenticated_session_capability(
     '${foreignMakerSession}','${hash("other-maker-refresh")}','${foreignMakerCapability}','ADMIN_MFA',(now()+interval '1 hour')::timestamp)`);
   assert.deepEqual(listRuns(ids.raceBatch, foreignMakerCapability), []);
+  boundaryDenied(app, batchHistory(foreignMakerCapability, ids.raceBatch, ids.licenseeA));
   denied(app, `SELECT app_rls.printing_run_projection('${foreignMakerCapability}','printing-readiness','${requestId()}','JOB','${expiredJobId}','{}'::jsonb)`,
     /PRINTING_BOUNDARY_DENIED|query returned no rows/);
   denied(app, `SELECT app_rls.printing_run_projection('${caps.outsider}','printing-readiness','${requestId()}','JOB','${expiredJobId}','{}'::jsonb)`, /PRINTING_BOUNDARY_DENIED|query returned no rows/);
@@ -2072,8 +2157,29 @@ async function main() {
   denied(app, createHistoricalReissue(1, foreignMakerCapability), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
   const confirmedRequest = json(app, createHistoricalReissue(1));
   assert.deepEqual(readRun(expiredJobId).job.runSummary.allowedActions, []);
-  psql(admin, `UPDATE public."PrintReissueRequest" SET status='APPROVED',"approvedByUserId"='${ids.checker}',
-    "approvedAt"=now() WHERE id='${confirmedRequest.id}'`);
+  const reissueApproverId = randomUUID();
+  const reissueApproverSession = randomUUID();
+  const reissueApproverCapability = "Q".repeat(43);
+  psql(admin, `INSERT INTO public."User"(id,email,name,role,status,"isActive","updatedAt")
+    VALUES('${reissueApproverId}','final-reissue-approver@example.invalid','Final approver','SUPER_ADMIN','ACTIVE',true,now());
+    INSERT INTO public."RefreshToken"(id,"userId","tokenHash","expiresAt","authenticatedAt","mfaVerifiedAt")
+    VALUES('${reissueApproverSession}','${reissueApproverId}','${hash("reissue-approver-refresh")}',now()+interval '1 day',now(),now())`);
+  psql(preauth, `SELECT id FROM app_auth.issue_authenticated_session_capability(
+    '${reissueApproverSession}','${hash("reissue-approver-refresh")}','${reissueApproverCapability}','ADMIN_MFA',
+    (now()+interval '1 hour')::timestamp)`);
+  const reviewReissue = (capability, operation) => `SELECT app_rls.printing_reissue_request(
+    '${capability}','printing-reissue','${requestId()}','${operation}','${confirmedRequest.id}',
+    NULL,NULL,NULL,NULL,NULL,'Checked original print run evidence')`;
+  boundaryDenied(app, reviewReissue(caps.checker, "APPROVE"));
+  boundaryDenied(app, reviewReissue(caps.outsider, "FORWARD"));
+  boundaryDenied(app, reviewReissue(reissueApproverCapability, "APPROVE"));
+  const forwarded = json(app, reviewReissue(caps.checker, "FORWARD"));
+  assert.equal(forwarded.status, "PENDING");
+  assert.equal(forwarded.targetApproverRole, "SUPER_ADMIN");
+  boundaryDenied(app, reviewReissue(caps.checker, "APPROVE"));
+  const approved = json(app, reviewReissue(reissueApproverCapability, "APPROVE"));
+  assert.equal(approved.status, "APPROVED");
+  assert.equal(approved.approvedByUserId, reissueApproverId);
   assert.deepEqual(readRun(expiredJobId).job.runSummary.allowedActions, []);
   denied(app, `SELECT app_rls.printing_reissue_request(
     '${caps.maker}','printing-reissue','${requestId()}','EXECUTE','${confirmedRequest.id}',
@@ -2692,11 +2798,11 @@ async function main() {
     RESET ROLE;
     COMMIT;`);
   const remainingPrintingPolicies=psql(admin, `SELECT coalesce(string_agg(tablename||'.'||policyname,',' ORDER BY tablename,policyname),'')
-    FROM pg_policies WHERE schemaname='public' AND (policyname LIKE 'printing_lifecycle_%' OR policyname LIKE 'printing_upgrade_%' OR policyname LIKE 'printing_run_projection_%')`);
+    FROM pg_policies WHERE schemaname='public' AND (policyname LIKE 'printing_lifecycle_%' OR policyname LIKE 'printing_upgrade_%' OR policyname LIKE 'printing_run_projection_%' OR policyname LIKE 'manufacturer_batch_history_%')`);
   assert.equal(remainingPrintingPolicies, '', `printing rollback left policies: ${remainingPrintingPolicies}`);
   assert.equal(psql(admin, `SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."PrintItemEvent"','details','SELECT')`), 'f',
     'upgrade-only event privilege must be removed during lifecycle rollback');
-  assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='app_rls' AND p.proname LIKE 'printing_%'`)), 0);
+  assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='app_rls' AND (p.proname LIKE 'printing_%' OR p.proname='manufacturer_batch_history')`)), 0);
   assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE
     (n.nspname='app_auth' AND p.proname='require_authenticated_session')
     OR (n.nspname='app_rls' AND p.proname IN ('read_licensee_directory','session_c_admin_command','qr_allocate_range'))`)), 4);

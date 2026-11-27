@@ -345,9 +345,12 @@ const qrSystemAppSignatures = qrSystemContracts.filter((contract) => contract.se
 const qrSystemWorkerSignatures = qrSystemContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const qrSystemOwnerPrivileges = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const qrSystemOwnerPolicies = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
-const printingLifecycleBaseContracts = printingLifecycleContracts.filter((contract) => contract.definitionLocation.endsWith("/printingLifecycle.sql"));
+const printingLifecycleBaseContracts = printingLifecycleContracts.filter((contract) => /\/(?:printingLifecycle|printingRetirement)\.sql$/.test(contract.definitionLocation));
 const printingLifecycleUpgradeContracts = printingLifecycleContracts.filter((contract) => contract.definitionLocation.endsWith("/printingUpgradeNoReplayDefinitions.sql"));
 const printingRunContracts = printingLifecycleContracts.filter((contract) => contract.definitionLocation.endsWith("/printingRunProjection.sql"));
+const scopedPrintingPolicies = printingRunContracts.flatMap((contract) => contract.security.ownerPolicies.map(
+  ([table, command, predicate]) => ({ contract, table, command, predicate })
+));
 const printingLifecycleFunctionSource = readContractSources([...printingLifecycleBaseContracts,...printingRunContracts], [
   ["{{APP_ROLE}}", lit(roleNames.app)], ["{{WORKER_ROLE}}", lit(roleNames.worker)],
 ]);
@@ -2167,11 +2170,11 @@ for (const [table, command, rawPredicate] of printingLifecycleOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "release-fix-5-printing-lifecycle", ownerIdentity: "identity-auth-function-owner", scope: "verified session or exact connector/worker operation plus row-local printing selector" }))};`);
 }
-for (const [table, command, rawPredicate] of printingRunContracts.flatMap((contract) => contract.security.ownerPolicies)) {
+for (const { contract, table, command, predicate: rawPredicate } of scopedPrintingPolicies) {
   const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app));
-  const policyName = shortName("printing_run_projection", table, command);
+  const policyName = shortName(contract.name, table, command);
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} USING (${predicate});`);
-  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "manufacturer-print-run-projection", scope: "bounded current manufacturer print run IDs" }))};`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: contract.id, scope: "current manufacturer print scope" }))};`);
 }
 for (const [table, command, rawPredicate] of printingUpgradeOwnerPolicies) {
   const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app));
@@ -2589,20 +2592,20 @@ const policyInventory = [
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),
-  ...printingRunContracts.flatMap((contract) => contract.security.ownerPolicies).map(([table, command, rawPredicate]) => ({
+  ...scopedPrintingPolicies.map(({ contract, table, command, predicate: rawPredicate }) => ({
     tableId: tables.find((entry) => entry.physicalTable === table)?.id,
     table,
-    policyName: shortName("printing_run_projection", table, command),
+    policyName: shortName(contract.name, table, command),
     command,
     actors: ["manufacturer"],
     assurance: "source-rule-specific",
     purpose: ["printing-readiness"],
-    scopeType: "verified-manufacturer-print-run-ids",
+    scopeType: contract.id === "manufacturer-batch-history" ? "verified-manufacturer-allocations" : "verified-manufacturer-print-run-ids",
     scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)),
     columns: [],
-    sourceCommandRuleIds: contractEvidenceFor(printingRunContracts, table, command),
+    sourceCommandRuleIds: contractEvidenceFor([contract], table, command),
     workflowId: null,
-    route: "Manufacturer print run projection",
+    route: contract.id === "manufacturer-batch-history" ? "Manufacturer batch history" : "Manufacturer print run projection",
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),

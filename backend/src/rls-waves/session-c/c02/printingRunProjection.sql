@@ -89,7 +89,7 @@ BEGIN
           SELECT CASE
             WHEN pi.state IN ('PRINT_CONFIRMED','CLOSED') AND pi."printConfirmedAt" IS NOT NULL THEN 'confirmed'
             WHEN pi."printConfirmedAt" IS NOT NULL OR pi.state IN ('PRINT_CONFIRMED','CLOSED') THEN NULL
-            WHEN j."failureReason"='historical_physical_outcome_unknown_qr_retired' AND q.status='BLOCKED'
+            WHEN pi."failureReason"='historical_physical_outcome_unknown_qr_retired' AND q.status='BLOCKED'
               AND pi.state='CANCELLED' THEN 'cancelled'
             WHEN pi.state='FROZEN' OR pi."pipelineState"='NEEDS_OPERATOR_ACTION'
               OR (pi.state IN ('ISSUED','AGENT_ACKED') AND
@@ -181,3 +181,109 @@ BEGIN
 END
 $fn$;
 REVOKE ALL ON FUNCTION app_rls.printing_run_projection(text,text,text,text,text,jsonb) FROM PUBLIC;
+
+-- Batch history has a distinct read scope from the personal audit feed.
+CREATE OR REPLACE FUNCTION app_rls.manufacturer_batch_history(
+  p_capability text,p_request_id text,p_batch_id text,p_licensee_id text,p_options jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+AS $fn$
+DECLARE
+  actor record;
+  root_id text;
+  batch_ids text[];
+  page_size integer:=least(greatest(coalesce((p_options->>'limit')::integer,50),1),100);
+  before_at timestamp:=nullif(p_options->>'beforeAt','')::timestamptz AT TIME ZONE 'UTC';
+  before_id text:=p_options->>'beforeId';
+  result jsonb;
+BEGIN
+  SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(
+    p_capability,'printing-readiness',p_request_id,p_batch_id
+  );
+  IF actor.role<>'MANUFACTURER_ADMIN' OR p_batch_id IS NULL
+     OR p_licensee_id IS NULL OR p_licensee_id IS DISTINCT FROM actor."batchLicenseeId" THEN
+    RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  SELECT coalesce(b."rootBatchId",b."parentBatchId",b.id) INTO STRICT root_id
+    FROM public."Batch" b WHERE b.id=p_batch_id AND b."manufacturerId"=actor."userId";
+  SELECT array_agg(b.id) INTO batch_ids FROM public."Batch" b
+    WHERE b."licenseeId"=p_licensee_id AND b."manufacturerId"=actor."userId"
+      AND (b.id=root_id OR b."rootBatchId"=root_id OR (b."rootBatchId" IS NULL AND b."parentBatchId"=root_id));
+  PERFORM set_config('app.printing_history_batches',coalesce(to_jsonb(batch_ids)::text,'[]'),true),
+    set_config('app.printing_operation','printing-manufacturer-batch-history',true);
+
+  WITH audit_rows AS (
+    SELECT 'a:'||a.id AS id,a."createdAt",a.action,
+      CASE WHEN a."userId"=actor."userId" THEN 'You'
+        WHEN a.action='ALLOCATED' THEN 'Licensee'
+        ELSE 'Administrator' END AS "actorLabel",
+      CASE WHEN a.action='ALLOCATED' AND jsonb_typeof(a.details->'quantity')='number'
+        THEN jsonb_build_object('quantity',a.details->'quantity') ELSE '{}'::jsonb END AS details
+    FROM public."AuditLog" a
+    WHERE a."licenseeId"=p_licensee_id
+      AND (
+        (a."entityType"='Batch' AND a."entityId"=ANY(batch_ids)
+          AND a.action IN ('ALLOCATED','BATCH_RELEASE_REQUESTED','BATCH_RELEASE_APPROVE','BATCH_RELEASE_REJECT'))
+        OR (a."entityType"='PrintJob'
+          AND a.action IN ('PRINT_JOB_CREATED','PRINT_JOB_PAUSE','PRINT_JOB_RESUME','PRINT_JOB_STOP',
+            'PRINT_JOB_ABANDON','PRINT_JOB_RETIRE_UNCERTAIN','PRINT_QR_RETIREMENT_REQUEST',
+            'PRINT_QR_RETIREMENT_APPROVE','PRINT_QR_RETIREMENT_REJECT')
+          AND EXISTS (SELECT 1 FROM public."PrintJob" j
+            WHERE j.id=a."entityId" AND j."batchId"=ANY(batch_ids) AND j."manufacturerId"=actor."userId"))
+        OR (a."entityType"='PrintReissueRequest'
+          AND a.action IN ('PRINT_REISSUE_CREATE','PRINT_REISSUE_REQUEST','PRINT_REISSUE_FORWARD',
+            'PRINT_REISSUE_APPROVE','PRINT_REISSUE_REJECT','PRINT_REISSUE_CANCEL','PRINT_REISSUE_EXECUTE')
+          AND EXISTS (SELECT 1 FROM public."PrintReissueRequest" r JOIN public."PrintJob" j ON j.id=r."originalPrintJobId"
+            WHERE r.id=a."entityId" AND j."batchId"=ANY(batch_ids) AND j."manufacturerId"=actor."userId"))
+      )
+      AND (before_at IS NULL OR (a."createdAt",'a:'||a.id)<(before_at,before_id))
+    ORDER BY a."createdAt" DESC,a.id DESC LIMIT (page_size+1)
+  ), print_rows AS (
+    SELECT 'p:'||e.id AS id,e."createdAt",e."eventType" AS action,
+      CASE WHEN e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified')
+        AND e."actorId"=actor."userId" THEN 'You' ELSE 'System' END AS "actorLabel",
+      jsonb_build_object('jobNumber',j."jobNumber") AS details
+    FROM public."PrintAuditEvent" e
+    JOIN public."PrintJob" j ON j.id=e."printJobId" AND j."batchId"=e."batchId"
+    WHERE e."batchId"=ANY(batch_ids) AND j."manufacturerId"=actor."userId"
+      AND e."eventType" IN ('CONNECTOR_ACK','CONNECTOR_CONFIRM','CONNECTOR_FAIL','CONNECTOR_ABORT',
+        'GATEWAY_ACK','GATEWAY_CONFIRM','GATEWAY_FAIL','WORKER_NETWORK_CONFIRM','WORKER_NETWORK_FAIL',
+        'WORKER_RECOVER_UNSUBMITTED','WORKER_DISPATCH_OUTCOME_UNCERTAIN','SAMPLE_SCAN_PASSED','sample_scan_verified')
+      AND (before_at IS NULL OR (e."createdAt",'p:'||e.id)<(before_at,before_id))
+    ORDER BY e."createdAt" DESC,e.id DESC LIMIT (page_size+1)
+  ), trace_rows AS (
+    SELECT 't:'||t.id AS id,t."createdAt",'ALLOCATED'::text AS action,
+      'Licensee'::text AS "actorLabel",
+      CASE WHEN jsonb_typeof(t.details->'quantity')='number'
+        THEN jsonb_build_object('quantity',t.details->'quantity') ELSE '{}'::jsonb END AS details
+    FROM public."TraceEvent" t
+    WHERE t."batchId"=ANY(batch_ids) AND t."licenseeId"=p_licensee_id
+      AND t."qrCodeId" IS NULL AND t."eventType"='ASSIGNED'
+      AND (before_at IS NULL OR (t."createdAt",'t:'||t.id)<(before_at,before_id))
+      AND NOT EXISTS (
+        SELECT 1 FROM public."AuditLog" a
+        WHERE a."licenseeId"=p_licensee_id AND a."entityType"='Batch'
+          AND a."entityId"=t."batchId" AND a.action='ALLOCATED'
+      )
+    ORDER BY t."createdAt" DESC,t.id DESC LIMIT (page_size+1)
+  ), page AS (
+    SELECT * FROM (
+      SELECT * FROM audit_rows UNION ALL SELECT * FROM print_rows UNION ALL SELECT * FROM trace_rows
+    ) events ORDER BY "createdAt" DESC,id DESC LIMIT (page_size+1)
+  )
+  SELECT jsonb_build_object('events',coalesce(jsonb_agg(
+      jsonb_build_object('id',id,'createdAt',"createdAt" AT TIME ZONE 'UTC','action',action,
+        'actorLabel',"actorLabel",'details',details) ORDER BY "createdAt" DESC,id DESC),'[]'::jsonb),
+    'incomplete',EXISTS (
+      SELECT 1 FROM unnest(batch_ids) child(id) WHERE NOT EXISTS (
+        SELECT 1 FROM public."AuditLog" a WHERE a."licenseeId"=p_licensee_id
+          AND a."entityType"='Batch' AND a."entityId"=child.id AND a.action='ALLOCATED'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM public."TraceEvent" t WHERE t."licenseeId"=p_licensee_id AND t."batchId"=child.id
+          AND t."qrCodeId" IS NULL AND t."eventType"='ASSIGNED'
+      )
+    )) INTO result FROM page;
+  RETURN result;
+END
+$fn$;
