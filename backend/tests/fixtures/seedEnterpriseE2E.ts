@@ -65,7 +65,7 @@ const BATCH_NAMES = {
 };
 
 const MANUFACTURER_NAME = String(process.env.E2E_ASSIGN_MANUFACTURER_NAME || "E2E Manufacturer").trim() || "E2E Manufacturer";
-const PRINTER_NAME = String(process.env.E2E_PRINTER_PROFILE_NAME || "E2E Local Agent Printer").trim() || "E2E Local Agent Printer";
+const PRINTER_NAME = "E2E Previous Connector Profile";
 const VERIFY_CODE = String(process.env.E2E_VERIFY_CODE || "E2E0000000999").trim().toUpperCase();
 const NATIVE_PRINTER_ID = "e2e-local-printer";
 
@@ -96,7 +96,7 @@ const e2ePrinterTestLabelMetadata = (confirmedAt: Date) => ({
     host: null,
     port: null,
     printerUri: null,
-    commandLanguage: PrinterCommandLanguage.ZPL,
+    commandLanguage: PrinterCommandLanguage.AUTO,
   },
 });
 
@@ -317,8 +317,7 @@ const seedPrinter = async () => {
       vendor: "MSCQR",
       model: "E2E Driver Queue",
       connectionType: PrinterConnectionType.LOCAL_AGENT,
-      commandLanguage: PrinterCommandLanguage.ZPL,
-      capabilitySummary: { languages: ["ZPL"], dpi: 300 },
+      commandLanguage: PrinterCommandLanguage.AUTO,
       nativePrinterId: NATIVE_PRINTER_ID,
       agentId: "e2e-agent",
       deviceFingerprint: "e2e-device-fingerprint",
@@ -338,8 +337,7 @@ const seedPrinter = async () => {
     update: {
       name: PRINTER_NAME,
       connectionType: PrinterConnectionType.LOCAL_AGENT,
-      commandLanguage: PrinterCommandLanguage.ZPL,
-      capabilitySummary: { languages: ["ZPL"], dpi: 300 },
+      commandLanguage: PrinterCommandLanguage.AUTO,
       nativePrinterId: NATIVE_PRINTER_ID,
       agentId: "e2e-agent",
       deviceFingerprint: "e2e-device-fingerprint",
