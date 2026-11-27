@@ -19,6 +19,8 @@ const ids = {
   superAdminA: "00000000-0000-4000-8000-000000000309",
   batchA: "00000000-0000-4000-8000-000000000401",
   batchB: "00000000-0000-4000-8000-000000000402",
+  qrA: "00000000-0000-4000-8000-000000000501",
+  qrB: "00000000-0000-4000-8000-000000000502",
 };
 
 const safeUrl = (raw, expectedUser) => {
@@ -123,6 +125,7 @@ const main = async () => {
   const { getDashboardStats } = require("../dist/controllers/dashboardController");
   const { dashboardEvents } = require("../dist/controllers/eventsController");
   const { canDeliverDashboardAuditDelta, getDashboardSnapshot } = require("../dist/services/dashboardSnapshotService");
+  const { bumpCacheNamespaceVersion } = require("../dist/services/versionedCacheService");
   const successfulRequestIds = [];
   const success = (id) => { successfulRequestIds.push(id); return id; };
 
@@ -292,10 +295,12 @@ const main = async () => {
     assert.equal((await invoke(getDashboardStats, request(platformClaims({ authAssurance: "PASSWORD", mfaVerifiedAt: null }), "dashboard-pg-weak-platform"))).status, 404);
     expectStats(await invoke(getDashboardStats, request(manufacturerClaims(), success("dashboard-pg-password-manufacturer"))), {
       totalQRCodes: 2, activeLicensees: 2, manufacturers: 1, totalBatches: 2,
+      qrStats: { total: 2, byStatus: { ACTIVE: 2 }, dormant: 2, allocated: 0, printed: 0, redeemed: 0, blocked: 0, scansToday: undefined },
     }, "manufacturer password assurance retains its existing scoped dashboard");
     await bootstrap.user.update({ where: { id: ids.manufacturerA }, data: { role: "MANUFACTURER_ADMIN" } });
     expectStats(await invoke(getDashboardStats, request(manufacturerClaims({ role: "MANUFACTURER_ADMIN" }), success("dashboard-pg-manufacturer-admin"))), {
       totalQRCodes: 2, activeLicensees: 2, manufacturers: 1, totalBatches: 2,
+      qrStats: { total: 2, byStatus: { ACTIVE: 2 }, dormant: 2, allocated: 0, printed: 0, redeemed: 0, blocked: 0, scansToday: undefined },
     }, "manufacturer administrator retains password-based scoped access");
     const priorSecrets = { jwt: process.env.JWT_SECRET_CURRENT, tokenHash: process.env.TOKEN_HASH_SECRET_CURRENT };
     process.env.JWT_SECRET_CURRENT = randomBytes(32).toString("base64url");
@@ -322,9 +327,76 @@ const main = async () => {
         const listener = createBackendApp().listen(0, "127.0.0.1", () => resolve(listener));
       });
       const origin = `http://127.0.0.1:${server.address().port}`;
-      const stats = await fetch(`${origin}/api/dashboard/stats`, { headers, signal: AbortSignal.timeout(15000) });
-      assert.equal(stats.status, 200, "real authenticated dashboard HTTP request succeeds");
-      assert.equal((await stats.json()).data.totalQRCodes, 2);
+      const read = (path) => fetch(`${origin}${path}`, { headers, signal: AbortSignal.timeout(15000) });
+      const foreignBatch = randomUUID();
+      const extraQrIds = [randomUUID(), randomUUID()];
+      const now = Date.now();
+      const repeatedEventIds = [randomUUID(), randomUUID()];
+      const printedCode = await bootstrap.qRCode.findUniqueOrThrow({ where: { id: ids.qrB }, select: { code: true } });
+      const activityFixtures = [
+        ["CREATE_BATCH", ids.manufacturerA, now - 1000],
+        ["CONFIRM_PRINT", ids.manufacturerA, now - 2000],
+        ["UPDATE_BATCH", ids.manufacturerA, now - 49 * 60 * 60_000],
+        ["CREATE_PRINT_JOB", ids.manufacturerA, now + 60_000],
+        ["CREATE_BATCH", ids.adminA, now - 500],
+        ["AUDIT_LOGS_READ", ids.manufacturerA, now - 500],
+      ].map(([action, userId, at]) => ({
+        id: randomUUID(), userId, action, entityType: "Batch", entityId: ids.batchA,
+        licenseeId: ids.licenseeA, orgId: ids.orgA, createdAt: new Date(at),
+      }));
+      await bootstrap.$transaction([
+        bootstrap.batch.create({ data: {
+          id: foreignBatch, licenseeId: ids.licenseeA, manufacturerId: ids.manufacturerB,
+          name: "Same brand, different manufacturer", startCode: "dashboard-other", endCode: "dashboard-other", totalCodes: 1,
+        } }),
+        bootstrap.qRCode.createMany({ data: [
+          { id: extraQrIds[0], code: "dashboard-other", licenseeId: ids.licenseeA, batchId: foreignBatch, status: "ALLOCATED" },
+          { id: extraQrIds[1], code: "dashboard-unallocated", licenseeId: ids.licenseeA, status: "DORMANT" },
+        ] }),
+        bootstrap.qRCode.update({ where: { id: ids.qrA }, data: { status: "ALLOCATED" } }),
+        bootstrap.qRCode.update({ where: { id: ids.qrB }, data: { status: "PRINTED" } }),
+        bootstrap.auditLog.createMany({ data: activityFixtures }),
+        bootstrap.qrScanLog.createMany({ data: repeatedEventIds.map((id) => ({
+          id, qrCodeId: ids.qrB, code: printedCode.code, batchId: ids.batchB, licenseeId: ids.licenseeB, status: "PRINTED",
+        })) }),
+        bootstrap.printAuditEvent.createMany({ data: repeatedEventIds.map((id) => ({
+          id, qrCodeId: ids.qrB, batchId: ids.batchB, eventType: "REPRINT_REQUESTED",
+        })) }),
+      ]);
+      await bumpCacheNamespaceVersion("dashboard-snapshot");
+      try {
+        const reads = await Promise.all([read("/api/dashboard/stats"), read("/api/dashboard/stats")]);
+        const snapshots = await Promise.all(reads.map(async (response) => {
+          const payload = await response.json();
+          assert.equal(response.status, 200, JSON.stringify(payload));
+          assert.equal(payload.data.totalQRCodes, 2);
+          assert.equal(payload.data.qrStats.total, 2);
+          assert.deepEqual(payload.data.qrStats.byStatus, { ALLOCATED: 1, PRINTED: 1 });
+          assert(payload.data.qrStats.scansToday >= 2, "repeat scans count as scan events, not as additional QR identities");
+          return payload.data.qrStats;
+        }));
+        assert.deepEqual(snapshots[0], snapshots[1]);
+        const qrStats = await read("/api/qr/stats");
+        assert.equal(qrStats.status, 403, "the brand inventory route is unavailable to manufacturers");
+        const activity = await read(`/api/audit/logs?licenseeId=${ids.licenseeA}&limit=5&purpose=dashboard-personal-activity`);
+        const activityBody = await activity.json();
+        assert.equal(activity.status, 200, JSON.stringify(activityBody));
+        const fixtureIds = new Set(activityFixtures.map((row) => row.id));
+        assert.deepEqual(activityBody.data.logs.map((log) => log.id).filter((id) => fixtureIds.has(id)),
+          activityFixtures.slice(0, 2).map((log) => log.id));
+        const otherActor = await read(`/api/audit/logs?licenseeId=${ids.licenseeA}&userId=${ids.adminA}&purpose=dashboard-personal-activity`);
+        assert.equal(otherActor.status, 403);
+      } finally {
+        await bootstrap.$transaction([
+          bootstrap.auditLog.deleteMany({ where: { id: { in: activityFixtures.map((row) => row.id) } } }),
+          bootstrap.qrScanLog.deleteMany({ where: { id: { in: repeatedEventIds } } }),
+          bootstrap.printAuditEvent.deleteMany({ where: { id: { in: repeatedEventIds } } }),
+          bootstrap.qRCode.deleteMany({ where: { id: { in: extraQrIds } } }),
+          bootstrap.batch.delete({ where: { id: foreignBatch } }),
+          bootstrap.qRCode.updateMany({ where: { id: { in: [ids.qrA, ids.qrB] } }, data: { status: "ACTIVE" } }),
+        ]);
+        await bumpCacheNamespaceVersion("dashboard-snapshot");
+      }
       const abort = new AbortController();
       const events = await fetch(`${origin}/api/events/dashboard`, { headers,
         signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]) });
@@ -346,6 +418,10 @@ const main = async () => {
         if (value === undefined) delete process.env[key]; else process.env[key] = value;
       }
     }
+    await bootstrap.user.update({ where: { id: ids.manufacturerA }, data: { role: "MANUFACTURER_USER" } });
+    const manufacturerUser = await invoke(getDashboardStats, request(manufacturerClaims({ role: "MANUFACTURER_USER" }), success("dashboard-pg-manufacturer-user")));
+    assert.equal(manufacturerUser.status, 200);
+    assert.equal(manufacturerUser.body.data.qrStats.total, 2);
     await bootstrap.user.update({ where: { id: ids.manufacturerA }, data: { role: "MANUFACTURER" } });
     await bootstrap.refreshToken.updateMany({ where: { userId: ids.manufacturerA }, data: { sessionCapabilityExpiresAt: new Date(0) } });
     assert.equal((await invoke(getDashboardStats, request(manufacturerClaims(), "dashboard-pg-expired-capability"))).status, 404);
@@ -425,33 +501,18 @@ const main = async () => {
     ]) assert(!auditRows.some((row) => row.details?.requestId === requestId), `${requestId} denial must not commit attribution`);
     assert(auditRows.filter((row) => row.details?.requestId === "dashboard-pg-manufacturer-selected").every((row) => row.orgId === ids.orgB && row.licenseeId === ids.licenseeB));
 
-    const stressRows = Number(process.env.MSCQR_PERF_ROWS || 200000);
-    assert(Number.isInteger(stressRows) && stressRows >= 1 && stressRows <= 200000);
-    await bootstrap.$executeRawUnsafe(`
-      INSERT INTO public."QRCode" (id, code, "licenseeId", "batchId", status, "updatedAt")
-      SELECT gen_random_uuid()::text, 'dashboard-stress-' || n, $1, $2, 'ACTIVE', now()
-      FROM generate_series(1, $3::integer) AS n
-    `, ids.licenseeB, ids.batchB, stressRows);
-    await bootstrap.$executeRawUnsafe('ANALYZE public."QRCode"');
-    const { bumpCacheNamespaceVersion } = require("../dist/services/versionedCacheService");
-    await bumpCacheNamespaceVersion("dashboard-snapshot");
-    const stressStart = performance.now();
-    expectStats(await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-large-tenant")), {
-      totalQRCodes: 1, activeLicensees: 1, manufacturers: 2, totalBatches: 1,
-    }, "large tenant isolation");
-    const platformStart = performance.now();
-    expectStats(await invoke(getDashboardStats, request(platformClaims(), "dashboard-pg-large-platform")), {
-      totalQRCodes: stressRows + 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
-    }, "large platform fallback");
-    assert(performance.now() - platformStart < 5000, "large platform dashboard stays within its transaction budget");
-    if (stressRows === 200000) {
-      const expiryRequestId = "dashboard-pg-mid-snapshot-expiry";
-      const auditId = randomUUID();
+    const expiryRequestId = "dashboard-pg-mid-snapshot-expiry";
+    const auditId = randomUUID();
+    let snapshotResult;
+    await bootstrap.$transaction(async (blocker) => {
+      // Let scope authorization finish, then hold the QR aggregate past the session deadline.
+      await blocker.$executeRawUnsafe('LOCK TABLE public."QRCode" IN ACCESS EXCLUSIVE MODE');
+      const expiresAt = new Date(Date.now() + 2000);
       await bootstrap.refreshToken.updateMany({
         where: { userId: ids.platformA },
-        data: { sessionCapabilityExpiresAt: new Date(Date.now() + 400) },
+        data: { sessionCapabilityExpiresAt: expiresAt },
       });
-      await assert.rejects(prisma.$transaction(async (tx) => {
+      snapshotResult = prisma.$transaction(async (tx) => {
         const [scope] = await tx.$queryRaw`
           SELECT scope_fingerprint FROM app_rls.dashboard_snapshot_scope(
             ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
@@ -464,10 +525,49 @@ const main = async () => {
             ${auditId}, NULL, 'GET /api/dashboard/stats', ${scope.scope_fingerprint}
           )
         `;
-      }), /dashboard access denied: session expired during snapshot/);
-      assert.equal(await bootstrap.auditLog.count({ where: { id: auditId } }), 0,
-        "expired partial snapshot rolls back its success audit");
-    }
+      }).then(() => null, (error) => error);
+
+      while (Date.now() < expiresAt.getTime()) {
+        const [{ waiting }] = await blocker.$queryRaw`
+          SELECT EXISTS (
+            SELECT 1 FROM pg_locks
+            WHERE locktype = 'relation' AND relation = 'public."QRCode"'::regclass AND NOT granted
+          ) AS waiting
+        `;
+        if (waiting) {
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, expiresAt.getTime() - Date.now()) + 20));
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.fail("The snapshot did not reach the QR aggregate before the capability deadline");
+    });
+    assert.match(String((await snapshotResult)?.message), /dashboard access denied: session expired during snapshot/);
+    assert.equal(await bootstrap.auditLog.count({ where: { id: auditId } }), 0,
+      "expired partial snapshot rolls back its success audit");
+    await bootstrap.refreshToken.updateMany({
+      where: { userId: ids.platformA },
+      data: { sessionCapabilityExpiresAt: sessionExpiry },
+    });
+
+    const stressRows = Number(process.env.MSCQR_PERF_ROWS || 200000);
+    assert(Number.isInteger(stressRows) && stressRows >= 1 && stressRows <= 200000);
+    await bootstrap.$executeRawUnsafe(`
+      INSERT INTO public."QRCode" (id, code, "licenseeId", "batchId", status, "updatedAt")
+      SELECT gen_random_uuid()::text, 'dashboard-stress-' || n, $1, $2, 'ACTIVE', now()
+      FROM generate_series(1, $3::integer) AS n
+    `, ids.licenseeB, ids.batchB, stressRows);
+    await bootstrap.$executeRawUnsafe('ANALYZE public."QRCode"');
+    await bumpCacheNamespaceVersion("dashboard-snapshot");
+    const stressStart = performance.now();
+    expectStats(await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-large-tenant")), {
+      totalQRCodes: 1, activeLicensees: 1, manufacturers: 2, totalBatches: 1,
+    }, "large tenant isolation");
+    const platformStart = performance.now();
+    expectStats(await invoke(getDashboardStats, request(platformClaims(), "dashboard-pg-large-platform")), {
+      totalQRCodes: stressRows + 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
+    }, "large platform fallback");
+    assert(performance.now() - platformStart < 5000, "large platform dashboard stays within its transaction budget");
     console.log(`${stressRows} dashboard application paths ${Math.round(performance.now() - stressStart)}ms`);
 
     console.log("dashboard snapshot PostgreSQL 18 application-path proof passed");

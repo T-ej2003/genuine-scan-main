@@ -1,6 +1,7 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 
 import Dashboard from "@/pages/Dashboard";
@@ -9,6 +10,7 @@ import { renderWithQueryClient } from "@/test/render-with-query-client";
 import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 const mockNavigate = vi.fn();
+let selectedLicenseeId: string | undefined;
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -23,7 +25,8 @@ vi.mock("@/contexts/AuthContext", () => ({
     user: {
       id: "manufacturer-1",
       role: "manufacturer",
-      licenseeId: "lic-1",
+      rawRole: "MANUFACTURER_ADMIN",
+      licenseeId: selectedLicenseeId,
       name: "Factory User",
       email: "factory@example.com",
       linkedLicensees: [
@@ -36,10 +39,6 @@ vi.mock("@/contexts/AuthContext", () => ({
 
 vi.mock("@/components/layout/DashboardLayout", () => ({
   DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
-
-vi.mock("@/components/dashboard/RecentActivityCard", () => ({
-  RecentActivityCard: ({ logs }: { logs: Array<{ id: string }> }) => <div data-testid="recent-log-ids">{logs.map(log => log.id).join(",")}</div>,
 }));
 
 vi.mock("@/lib/mutation-events", () => ({
@@ -71,6 +70,7 @@ class MockEventSource {
 describe("Dashboard manufacturer multi-licensee scope", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    selectedLicenseeId = "lic-1";
     mockNavigate.mockReset();
 
     Object.defineProperty(globalThis, "EventSource", {
@@ -82,28 +82,17 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     vi.mocked(apiClient.getDashboardStats).mockResolvedValue({
       success: true,
       data: {
-        totalQRCodes: 2400,
+        totalQRCodes: 80,
         activeLicensees: 2,
         manufacturers: 1,
         totalBatches: 12,
+        qrStats: {
+          total: 80,
+          byStatus: { ALLOCATED: 73, PRINTED: 6, BLOCKED: 1 },
+          scansToday: 3,
+        },
       },
     } as Awaited<ReturnType<typeof apiClient.getDashboardStats>>);
-
-    vi.mocked(apiClient.getQRStats).mockResolvedValue({
-      success: true,
-      data: {
-        byStatus: {
-          DORMANT: 20,
-          ACTIVE: 100,
-          ALLOCATED: 700,
-          ACTIVATED: 200,
-          PRINTED: 600,
-          REDEEMED: 80,
-          BLOCKED: 4,
-        },
-        scansToday: 3,
-      },
-    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
 
     vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
       success: true,
@@ -120,15 +109,25 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.getDashboardStats)).toHaveBeenCalledWith(undefined);
-      expect(vi.mocked(apiClient.getQRStats)).toHaveBeenCalledWith(undefined);
+      expect(vi.mocked(apiClient.getQRStats)).not.toHaveBeenCalled();
     });
 
-    expect(vi.mocked(apiClient.getAuditLogs)).not.toHaveBeenCalled();
+    await waitFor(() => expect(vi.mocked(apiClient.getAuditLogs)).toHaveBeenCalledWith({
+      limit: 5, licenseeId: "lic-1", purpose: "dashboard-personal-activity",
+    }));
+    expect(apiClient.getAuditLogs).toHaveBeenCalledTimes(1);
     expect(await screen.findByText("Linked brands")).toBeInTheDocument();
     expect(vi.mocked(apiClient.getDashboardStats)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(apiClient.getQRStats)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(apiClient.getQRStats)).not.toHaveBeenCalled();
     expect(screen.getByText("Brand workspaces you can print for")).toBeInTheDocument();
-    expect(screen.getByText("900 assigned to manufacturers")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Allocated QR labels/ })).toHaveTextContent("80");
+    expect(screen.getByRole("button", { name: "All (80)" })).toBeInTheDocument();
+    expect(screen.queryByText("Unassigned QR labels")).not.toBeInTheDocument();
+    expect(screen.queryByText(/waiting for allocation/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Allocated QR labels/ }));
+    expect(mockNavigate).toHaveBeenCalledWith("/batches");
+    fireEvent.click(screen.getByRole("button", { name: /Labels printed.*View print history/ }));
+    expect(mockNavigate).toHaveBeenCalledWith("/audit-history");
     const scansCard = screen.getByText("Scans today").closest('[data-testid="dashboard-kpi-card"]');
     expect(scansCard).toHaveTextContent("3");
     expect(scansCard).toHaveTextContent("Customer scans recorded today");
@@ -138,6 +137,19 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     expect(await screen.findByText("Manufacturer workspace details")).toBeInTheDocument();
     expect(screen.getByText("Acme Brands")).toBeInTheDocument();
     expect(screen.getByText("Bravo Health")).toBeInTheDocument();
+  });
+
+  it("waits for the initial overview before opening the live stream or loading activity", async () => {
+    type StatsResponse = Awaited<ReturnType<typeof apiClient.getDashboardStats>>;
+    let resolveStats!: (value: StatsResponse) => void;
+    vi.mocked(apiClient.getDashboardStats).mockReturnValueOnce(new Promise((resolve) => { resolveStats = resolve; }));
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(apiClient.getDashboardStats).toHaveBeenCalled());
+    expect(apiClient.streamDashboardEvents).not.toHaveBeenCalled();
+    expect(apiClient.getAuditLogs).not.toHaveBeenCalled();
+    resolveStats({ success: true, data: { totalQRCodes: 0, qrStats: { total: 0 } } });
+    await waitFor(() => expect(apiClient.streamDashboardEvents).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiClient.getAuditLogs).toHaveBeenCalledTimes(1));
   });
 
   it("reconnects dashboard events after the authenticated request scope changes", async () => {
@@ -152,23 +164,126 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     act(() => setRequestCoordinatorScope(null));
   });
 
-  it("does not merge previous-scope audit rows into the first new-scope delta", async () => {
-    const callbacks: Array<(envelope: unknown) => void> = [];
-    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((onEvent) => {
-      callbacks.push(onEvent as (envelope: unknown) => void);
+  it("uses the same allocation total on live snapshots and manual refresh, including zero", async () => {
+    let onEvent: Parameters<typeof apiClient.streamDashboardEvents>[0] | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback;
       return () => undefined;
     });
-    setRequestCoordinatorScope({ id: "manufacturer-a" });
     renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
-    await waitFor(() => expect(callbacks).toHaveLength(1));
-    act(() => callbacks[0]({ type: "audit.delta", payload: { log: { id: "old-tenant-row" } } }));
-    expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("old-tenant-row");
+    const card = () => screen.getByRole("button", { name: /Allocated QR labels/ });
+    await waitFor(() => expect(card()).toHaveTextContent("80"));
+    act(() => onEvent?.({ type: "snapshot", payload: {
+      summary: { totalQRCodes: 79 },
+      qrStats: { total: 79, allocated: 73, printed: 6 },
+    } }));
+    await waitFor(() => expect(card()).toHaveTextContent("79"));
+    expect(screen.getByRole("button", { name: "All (79)" })).toBeInTheDocument();
 
-    act(() => setRequestCoordinatorScope({ id: "manufacturer-b" }));
-    await waitFor(() => expect(callbacks).toHaveLength(2));
-    act(() => callbacks[1]({ type: "audit.delta", payload: { log: { id: "new-tenant-row" } } }));
-    expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("new-tenant-row");
-    expect(screen.getByTestId("recent-log-ids")).not.toHaveTextContent("old-tenant-row");
-    act(() => setRequestCoordinatorScope(null));
+    vi.mocked(apiClient.getDashboardStats).mockResolvedValue({
+      success: true, data: { totalQRCodes: 0, qrStats: { total: 0 } },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByRole("button", { name: "All (0)" })).toBeInTheDocument();
+    expect(card()).toHaveTextContent("0");
+    expect(card()).not.toHaveTextContent("Unavailable");
+  });
+
+  it("distinguishes a failed activity read from an empty feed", async () => {
+    vi.mocked(apiClient.getAuditLogs).mockImplementation(async ({ licenseeId } = {}) => {
+      if (licenseeId === "lic-1") throw new Error("Audit read unavailable");
+      return { success: true, data: { logs: [] } };
+    });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText("Recent activity is temporarily unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText(/No recent activity yet/)).not.toBeInTheDocument();
+  });
+
+  it("shows a failure when the request controller returns a cached empty feed after a 503", async () => {
+    vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
+      success: true, degraded: true, data: { logs: [] },
+    });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText("Recent activity is temporarily unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText(/No recent activity yet/)).not.toBeInTheDocument();
+  });
+
+  it("coalesces print-job signals into one selected-brand activity read and keeps related refreshes", async () => {
+    let onEvent: Parameters<typeof apiClient.streamDashboardEvents>[0] | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback;
+      return () => undefined;
+    });
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    try {
+      renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await screen.findByText(/No recent activity yet/);
+      vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
+        success: true,
+        data: { logs: [{ id: "created", action: "PRINT_JOB_CREATED", createdAt: new Date().toISOString() }] },
+      });
+
+      vi.useFakeTimers();
+      act(() => onEvent?.({ type: "summary.refresh", payload: { reason: "audit", entityType: "User" } }));
+      await act(() => vi.advanceTimersByTimeAsync(250));
+      expect(apiClient.getAuditLogs).toHaveBeenCalledTimes(1);
+      expect(invalidate).not.toHaveBeenCalled();
+
+      act(() => {
+        onEvent?.({ type: "summary.refresh", payload: { reason: "print_job", type: "print_job.created" } });
+        onEvent?.({ type: "summary.refresh", payload: { reason: "print_job", type: "label_confirmed" } });
+      });
+      await act(() => vi.advanceTimersByTimeAsync(249));
+      expect(apiClient.getAuditLogs).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(1));
+
+      expect(apiClient.getAuditLogs).toHaveBeenCalledTimes(2);
+      expect(apiClient.getAuditLogs).toHaveBeenLastCalledWith({
+        limit: 5, licenseeId: "lic-1", purpose: "dashboard-personal-activity",
+      });
+      for (const key of ["batches", "printing"]) {
+        expect(invalidate.mock.calls.filter(([filters]) => filters?.queryKey?.[0] === key)).toHaveLength(1);
+      }
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(screen.getByText(/print job created/i)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      invalidate.mockRestore();
+    }
+  });
+
+  it("refreshes stats without retrieving activity when the actor has no selected brand", async () => {
+    selectedLicenseeId = undefined;
+    let onEvent: Parameters<typeof apiClient.streamDashboardEvents>[0] | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback;
+      return () => undefined;
+    });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(onEvent).toBeDefined());
+    act(() => onEvent?.({ type: "summary.refresh", payload: { reason: "print_job" } }));
+    await waitFor(() => expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(2));
+    expect(apiClient.getAuditLogs).not.toHaveBeenCalled();
+  });
+
+  it("re-reads personal activity on a live activity signal", async () => {
+    let onEvent: Parameters<typeof apiClient.streamDashboardEvents>[0] | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback;
+      return () => undefined;
+    });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText(/No recent activity yet/)).toBeInTheDocument();
+    act(() => onEvent?.({ type: "audit.delta", payload: {
+      log: { id: "cross-actor", action: "CREATE_BATCH", createdAt: new Date().toISOString() },
+    } }));
+    expect(screen.queryByText("Batch created")).not.toBeInTheDocument();
+    vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
+      success: true,
+      data: { logs: [{ id: "print", action: "CONFIRM_PRINT", createdAt: new Date().toISOString() }] },
+    });
+    act(() => onEvent?.({ type: "summary.refresh", payload: { reason: "personal_activity" } }));
+    expect(await screen.findByText("Print confirmed")).toBeInTheDocument();
+    expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(1);
   });
 });

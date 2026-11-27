@@ -114,14 +114,7 @@ export const visitQrCodePages = async <T>(
   return total;
 };
 
-export const readStats = async <T>(input: { capability: string; requestId: string; licenseeId?: string | null; includeUnscopedManufacturerDaily?: boolean }) => {
-  const rows = await client().$queryRaw<Array<{ result: Prisma.JsonValue }>>`
-    SELECT app_rls.qr_stats(
-      ${required(input.capability,"a capability")},${"qr-code-stats"},${required(input.requestId,"a request ID")},
-      ${input.licenseeId || null}
-    ) AS result`;
-  if (rows.length !== 1 || !rows[0].result || typeof rows[0].result !== "object") throw new Error("Invalid QR stats result");
-  if (!input.licenseeId && !input.includeUnscopedManufacturerDaily) return rows[0].result as T;
+export const readDailyScanCount = async (input: { capability: string; requestId: string; licenseeId?: string | null }) => {
   const daily = await readScanAnalytics({
     capability: input.capability, requestId: input.requestId, licenseeId: input.licenseeId,
     filters: { dailyCount: true },
@@ -129,7 +122,18 @@ export const readStats = async <T>(input: { capability: string; requestId: strin
   if (typeof daily.scansToday !== "number" || !Number.isSafeInteger(daily.scansToday) || daily.scansToday < 0) {
     throw new Error("Invalid daily scan count");
   }
-  return { ...rows[0].result, scansToday: daily.scansToday } as T;
+  return daily.scansToday;
+};
+
+export const readStats = async <T>(input: { capability: string; requestId: string; licenseeId?: string | null }) => {
+  const rows = await client().$queryRaw<Array<{ result: Prisma.JsonValue }>>`
+    SELECT app_rls.qr_stats(
+      ${required(input.capability,"a capability")},${"qr-code-stats"},${required(input.requestId,"a request ID")},
+      ${input.licenseeId || null}
+    ) AS result`;
+  if (rows.length !== 1 || !rows[0].result || typeof rows[0].result !== "object") throw new Error("Invalid QR stats result");
+  if (!input.licenseeId) return rows[0].result as T;
+  return { ...rows[0].result, scansToday: await readDailyScanCount(input) } as T;
 };
 
 export const readInventoryProjection = async <T, A = unknown>(input: {

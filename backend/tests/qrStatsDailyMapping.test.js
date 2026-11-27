@@ -21,7 +21,7 @@ require.cache[runtimePath] = {
   }) },
 };
 
-const { readStats } = require(path.join(distRoot, "rls-waves/session-c/c01/qrSystemRepository.js"));
+const { readStats, readDailyScanCount } = require(path.join(distRoot, "rls-waves/session-c/c01/qrSystemRepository.js"));
 (async () => {
   const input = { capability: "local-capability", requestId: "local-request", licenseeId: "local-tenant" };
   assert.equal((await readStats(input)).scansToday, 0);
@@ -32,7 +32,7 @@ const { readStats } = require(path.join(distRoot, "rls-waves/session-c/c01/qrSys
   assert.equal((await readStats({ ...input, licenseeId: null })).scansToday, undefined);
   assert.equal(calls.length, before + 1);
   dailyCount = 5;
-  assert.equal((await readStats({ ...input, licenseeId: null, includeUnscopedManufacturerDaily: true })).scansToday, 5);
+  assert.equal(await readDailyScanCount({ ...input, licenseeId: null }), 5);
   assert(calls.at(-1).values.includes(null));
   failDaily = true;
   await assert.rejects(readStats(input), /scan analytics unavailable/);
