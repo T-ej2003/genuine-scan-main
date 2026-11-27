@@ -96,7 +96,7 @@ const e2ePrinterTestLabelMetadata = (confirmedAt: Date) => ({
     host: null,
     port: null,
     printerUri: null,
-    commandLanguage: PrinterCommandLanguage.AUTO,
+    commandLanguage: PrinterCommandLanguage.ZPL,
   },
 });
 
@@ -317,7 +317,8 @@ const seedPrinter = async () => {
       vendor: "MSCQR",
       model: "E2E Driver Queue",
       connectionType: PrinterConnectionType.LOCAL_AGENT,
-      commandLanguage: PrinterCommandLanguage.AUTO,
+      commandLanguage: PrinterCommandLanguage.ZPL,
+      capabilitySummary: { languages: ["ZPL"], dpi: 300 },
       nativePrinterId: NATIVE_PRINTER_ID,
       agentId: "e2e-agent",
       deviceFingerprint: "e2e-device-fingerprint",
@@ -337,7 +338,8 @@ const seedPrinter = async () => {
     update: {
       name: PRINTER_NAME,
       connectionType: PrinterConnectionType.LOCAL_AGENT,
-      commandLanguage: PrinterCommandLanguage.AUTO,
+      commandLanguage: PrinterCommandLanguage.ZPL,
+      capabilitySummary: { languages: ["ZPL"], dpi: 300 },
       nativePrinterId: NATIVE_PRINTER_ID,
       agentId: "e2e-agent",
       deviceFingerprint: "e2e-device-fingerprint",
