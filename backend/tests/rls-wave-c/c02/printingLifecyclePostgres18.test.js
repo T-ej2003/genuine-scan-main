@@ -274,13 +274,13 @@ async function main() {
   const retirementJob = randomUUID();
   const retirementSession = randomUUID();
   const retirementSuperAdmin = randomUUID();
-  const retirementItems = Array.from({ length: 2 }, () => ({ item: randomUUID(), qr: randomUUID(), attempt: randomUUID() }));
+  const retirementItems = Array.from({ length: 3 }, () => ({ item: randomUUID(), qr: randomUUID(), attempt: randomUUID() }));
   psql(admin, `INSERT INTO public."User"(id,email,name,role,status,"isActive","updatedAt")
     VALUES('${retirementSuperAdmin}','retirement-super@example.invalid','Retirement observer','SUPER_ADMIN','ACTIVE',true,now());
     INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"pipelineState","printMode",quantity,"updatedAt")
-    VALUES('${retirementJob}','${ids.batch}','${ids.maker}','${ids.printer}','STOPPED','NEEDS_OPERATOR_ACTION','LOCAL_AGENT',2,now());
+    VALUES('${retirementJob}','${ids.batch}','${ids.maker}','${ids.discoveredPrinter}','STOPPED','NEEDS_OPERATOR_ACTION','LOCAL_AGENT',3,now());
     INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerId","printerRegistrationId",status,"totalItems","updatedAt")
-    VALUES('${retirementSession}','${retirementJob}','${ids.batch}','${ids.maker}','${ids.printer}','${ids.registration}','STOPPED',2,now());
+    VALUES('${retirementSession}','${retirementJob}','${ids.batch}','${ids.maker}','${ids.discoveredPrinter}','${ids.registration}','STOPPED',3,now());
     ${retirementItems.map(({ item, qr, attempt }, index) => `INSERT INTO public."QRCode"(id,code,"displayCode","batchId","licenseeId","printJobId",status,"updatedAt")
       VALUES('${qr}','synthetic-retirement-${qr}','RET-${index}','${ids.batch}','${ids.licenseeA}','${retirementJob}','ACTIVATED',now());
       INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","issuedAt","dispatchedAt","dispatchMetadata","updatedAt")
@@ -288,7 +288,7 @@ async function main() {
         jsonb_build_object('attemptId','${attempt}','payloadHash','${hash(qr)}','dispatchEvidenceVersion',1),now());`).join("\n")}`);
   const mutateRetirement = (cap, op, item = null) => `SELECT app_rls.printing_retirement('${cap}','${requestId()}','${op}',
     '${retirementJob}',${item ? "'"+item+"'" : "NULL"},'Verify the original label retirement')`;
-  assert.equal(json(app, mutateRetirement(caps.maker, "LIST")).filter(row => row.canRequest).length, 2);
+  assert.equal(json(app, mutateRetirement(caps.maker, "LIST")).filter(row => row.canRequest).length, 3);
   assert.deepEqual(json(app, mutateRetirement(caps.checker, "LIST")), []);
   boundaryDenied(app, mutateRetirement(caps.outsider, "LIST"));
   boundaryDenied(app, mutateRetirement(caps.checker, "REQUEST", retirementItems[0].item));
@@ -310,7 +310,28 @@ async function main() {
   json(app, mutateRetirement(caps.maker, "REQUEST", retirementItems[1].item));
   assert.equal(json(app, mutateRetirement(caps.checker, "REJECT", retirementItems[1].item)).status, "REJECTED");
   assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${retirementItems[1].qr}'`), "ACTIVATED");
-  psql(admin, `DELETE FROM public."AuditLog" WHERE "entityId"='${retirementJob}';
+  const competing = retirementItems[2];
+  psql(admin, `UPDATE public."PrintItem" SET state='AGENT_ACKED',"agentAckedAt"=now() WHERE id='${competing.item}'`);
+  const competingRequest = json(app, mutateRetirement(caps.maker, "REQUEST", competing.item));
+  const confirmOriginal = `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','retirement_race_${requestId()}',now()::timestamp,
+    '${requestId()}','CONFIRM','${retirementJob}','${competing.item}','${ids.discoveredPrinter}','${hash(competing.qr)}',
+    'retirement-race-spool','{"attemptId":"${competing.attempt}"}'::jsonb)`;
+  const [confirmedFirst, retiredFirst] = await Promise.all([
+    psqlAsync(app, confirmOriginal),
+    psqlAsync(app, mutateRetirement(caps.checker, "APPROVE", competing.item)),
+  ]);
+  assert.equal(Number(confirmedFirst.status === 0) + Number(retiredFirst.status === 0), 1,
+    JSON.stringify([confirmedFirst, retiredFirst]));
+  if (confirmedFirst.status === 0) assert.match(retiredFirst.output, /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  else assert.match(confirmedFirst.output, /PRINT_ACK_REQUIRED/);
+  assert.equal(psql(admin, `SELECT q.status||':'||a.status||':'||(pi."printConfirmedAt" IS NOT NULL)
+    FROM public."QRCode" q JOIN public."PrintItem" pi ON pi."qrCodeId"=q.id
+    JOIN public."SensitiveActionApproval" a ON a."entityId"=pi.id
+    WHERE q.id='${competing.qr}' AND a.id='${competingRequest.id}'`),
+  confirmedFirst.status === 0 ? "PRINTED:PENDING:true" : "BLOCKED:EXECUTED:false");
+  psql(admin, `DELETE FROM public."PrintAuditEvent" WHERE "printJobId"='${retirementJob}';
+    DELETE FROM public."AuditLog" WHERE "entityId"='${retirementJob}';
     DELETE FROM public."Notification" WHERE "userId"='${retirementSuperAdmin}';
     DELETE FROM public."SensitiveActionApproval" WHERE "actionKey"='PRINT_QR_RETIREMENT';
     DELETE FROM public."PrintItem" WHERE "printSessionId"='${retirementSession}';
