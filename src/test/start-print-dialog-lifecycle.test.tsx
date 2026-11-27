@@ -327,6 +327,7 @@ describe("Start print run dialogue lifecycle", () => {
     await waitFor(() => expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledTimes(3));
     expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe("profile-2");
     expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(false);
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterNotice.title).toBe("Check the selected printer"));
     expect(apiClient.createPrintJob).not.toHaveBeenCalled();
     view.unmount();
   });

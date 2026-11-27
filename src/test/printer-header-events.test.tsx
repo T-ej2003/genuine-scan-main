@@ -177,6 +177,27 @@ describe("shared manufacturer printer readiness", () => {
     expect(view.result.current.header.effectivePrinterReady).toBe(true);
   });
 
+  it("preserves saved profiles on transient roster failure and clears them on authorization denial", async () => {
+    const view = mount();
+    await flush();
+    const profiles = view.result.current.runtime.snapshot.registeredPrinters;
+    expect(profiles).toHaveLength(1);
+
+    vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValueOnce({ success: false, status: 503 });
+    await act(async () => { await view.result.current.runtime.refresh({ force: true }); });
+    expect(view.result.current.runtime.snapshot.registeredPrinters).toEqual(profiles);
+    expect(view.result.current.runtime.snapshot.rosterUnavailable).toBe(true);
+    expect(view.result.current.header.effectivePrinterReady).toBe(false);
+
+    await act(async () => { await view.result.current.runtime.refresh({ force: true }); });
+    expect(view.result.current.header.effectivePrinterReady).toBe(true);
+
+    vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValueOnce({ success: false, status: 403 });
+    await act(async () => { await view.result.current.runtime.refresh({ force: true }); });
+    expect(view.result.current.runtime.snapshot.registeredPrinters).toEqual([]);
+    expect(view.result.current.header.effectivePrinterReady).toBe(false);
+  });
+
   it.each([403, 429, 503])("blocks a failed HTTP %i refresh and permits a later fresh result", async status => {
     const view = mount();
     await flush();

@@ -167,7 +167,7 @@ export function useBatchPrintWorkflow({
   );
   const selectedPrinterCanPrint = Boolean(
     selectedPrinterProfile &&
-      !runtime?.checking && !runtime?.suppressed &&
+      !runtime?.checking && !runtime?.suppressed && !runtime?.snapshot.rosterUnavailable &&
       selectedPrinterProfile.isActive &&
       (selectedPrinterProfile.connectionType !== "LOCAL_AGENT"
         ? selectedPrinterProfile.registryStatus?.state === "READY"
@@ -178,9 +178,19 @@ export function useBatchPrintWorkflow({
       title: "Print run in progress", summary: "Printing is already in progress.",
       detail: "Finish or stop the current run before starting another one.", tone: "warning",
     };
+    if (runtime?.snapshot.rosterUnavailable) return {
+      title: "Printer verification unavailable", summary: "Saved printers could not be verified.",
+      detail: "Refresh printer status before starting this print run.", tone: "warning",
+    };
     if (selectedPrinterProfile?.connectionType !== "LOCAL_AGENT") {
       return buildManagedNetworkPrinterNotice(selectedPrinterProfile);
     }
+    if (printerReady && !selectedLocalProfileMatchesAgent) return {
+      title: "Check the selected printer",
+      summary: "This printer is awaiting verification.",
+      detail: "Apply the printer selection on this computer and retry verification.",
+      tone: "warning",
+    };
 
     return {
       title: printerDiagnostics.title,
@@ -198,6 +208,7 @@ export function useBatchPrintWorkflow({
     };
   }, [
     runtime?.suppressed,
+    runtime?.snapshot.rosterUnavailable,
     printerDiagnostics.detail,
     printerDiagnostics.summary,
     printerDiagnostics.title,
@@ -210,6 +221,7 @@ export function useBatchPrintWorkflow({
     securePrintReadiness.tone,
     selectedDetectedPrinter?.printerName,
     selectedLocalProfileRegistrationStale,
+    selectedLocalProfileMatchesAgent,
     selectedPrinterProfile,
   ]);
   const selectedPrinterReadinessDisplay = useMemo(

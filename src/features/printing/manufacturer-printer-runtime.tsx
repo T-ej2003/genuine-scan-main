@@ -55,6 +55,9 @@ function reconcile(snapshot: ManufacturerPrinterRuntime, expectedPrinter: string
   if (!Number.isFinite(deadline) || deadline <= Date.now()) {
     return { ...unverified, remoteStatus: blocked(status, expired) };
   }
+  if (snapshot.rosterUnavailable) {
+    return { ...snapshot, deviceVerified: true, remoteStatus: blocked(status, "Printer verification is unavailable. Refresh saved printer status.") };
+  }
   const savedBindingMatches = registeredPrinters.some((row) => row.isActive && row.connectionType === "LOCAL_AGENT" &&
     row.printerRegistrationId === status.registrationId && (row.nativePrinterId || row.id) === selected);
   return { ...snapshot, deviceVerified: true, remoteStatus: savedBindingMatches

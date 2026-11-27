@@ -26,6 +26,7 @@ export type ManufacturerPrinterRuntime = {
   localBinding: { printerId: string | null; agentId: string | null; deviceFingerprint: string | null } | null;
   authorizationRejected?: boolean;
   deviceVerified?: boolean;
+  rosterUnavailable?: boolean;
   localResult?: Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>;
 };
 
@@ -143,6 +144,8 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
     ? printerConnectionStatusSchema.safeParse(remoteResponse.data)
     : null;
   const authorizationRejected = [remoteResponse, registeredPrinterResponse].some((response) => [401, 403].includes(Number(response.status || 0)));
+  const roster = registeredPrinterResponse.success
+    ? registeredPrinterArraySchema.safeParse(registeredPrinterResponse.data) : null;
   const previous = authorizationRejected ? undefined : options.previous;
   const remoteStatus =
     parsedRemoteStatus?.success && !authorizationRejected
@@ -178,9 +181,8 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
     },
     remoteStatus,
     detectedPrinters: authorizationRejected ? [] : detectedPrinters,
-    registeredPrinters: authorizationRejected ? [] : registeredPrinterResponse.success
-      ? registeredPrinterArraySchema.safeParse(registeredPrinterResponse.data).data || []
-      : [],
+    registeredPrinters: authorizationRejected ? [] : roster?.success ? roster.data : previous?.registeredPrinters || [],
+    rosterUnavailable: !roster?.success || authorizationRejected,
     preferredPrinterId: authorizationRejected ? null : preferredPrinterId,
     localInventory: authorizationRejected ? [] : localInventory,
     localBinding: !authorizationRejected && local ? {
