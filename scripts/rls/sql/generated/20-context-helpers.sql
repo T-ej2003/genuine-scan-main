@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='8ae44188a7ffb52b79ef2119f8267c3a79b8443c7cfae10eb7ed91461caa467c'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:8ae44188a7ffb52b79ef2119f8267c3a79b8443c7cfae10eb7ed91461caa467c'
+    AND source_contract_sha256='85aa849395c3a5845a913d1f3685d82155ad21320757382dbbcca2334caa77b5'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:85aa849395c3a5845a913d1f3685d82155ad21320757382dbbcca2334caa77b5'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:8ae44188a7ffb52b79ef2119f8267c3a79b8443c7cfae10eb7ed91461caa467c')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:85aa849395c3a5845a913d1f3685d82155ad21320757382dbbcca2334caa77b5')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11611,6 +11611,12 @@ BEGIN
           AND ((pi."attemptCount"=0 AND coalesce(pi."dispatchMetadata",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb))
             OR (pi.state='RESERVED' AND pi."dispatchMetadata" ? 'lastUnsubmittedAttemptId'
               AND NOT (pi."dispatchMetadata" ?| ARRAY['attemptId','intentAt','upgradeNoReplay'])))
+          AND NOT EXISTS (SELECT 1 FROM public."PrintItemEvent" e
+            WHERE e."printItemId"=pi.id AND e."eventType" IN ('AGENT_ACKED','PRINT_CONFIRMED','CLOSED','FROZEN','INCIDENT_RAISED'))
+          AND NOT EXISTS (SELECT 1 FROM public."PrintAuditEvent" e
+            WHERE e."batchId"=job_row."batchId" AND e."qrCodeId"=q.id
+              AND e."eventType" IN ('CONNECTOR_INTENT','CONNECTOR_ACK','CONNECTOR_CONFIRM','CONNECTOR_FAIL',
+                'GATEWAY_ACK','GATEWAY_CONFIRM','GATEWAY_FAIL','AUTOMATIC_ACTIVATION','WORKER_DISPATCH_OUTCOME_UNCERTAIN'))
           AND q."batchId"=job_row."batchId" AND q."licenseeId"=actor."batchLicenseeId"
           AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND q.code=pi.code
           AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
