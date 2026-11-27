@@ -34,7 +34,8 @@ export const readPrintingProjection = (input: {
   client?: SqlClient;
 }) =>
   oneJson(input.client || prisma, Prisma.sql`
-    SELECT app_rls.printing_readiness(
+    SELECT ${input.operation === "JOB" || input.operation === "JOB_LIST"
+      ? Prisma.sql`app_rls.printing_run_projection` : Prisma.sql`app_rls.printing_readiness`}(
       ${input.capability}::text,'printing-readiness'::text,${input.requestId}::text,
       ${input.operation}::text,${input.subjectId}::text,${input.options || {}}::jsonb
     ) AS result

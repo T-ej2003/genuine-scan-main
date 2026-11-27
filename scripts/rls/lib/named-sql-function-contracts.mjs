@@ -89,6 +89,7 @@ const qrSystemSource = "backend/src/rls-waves/session-c/c01/qrSystem.sql";
 const qrSystemRollback = "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql";
 const printingLifecycleSource = "backend/src/rls-waves/session-c/c02/printingLifecycle.sql";
 const printingUpgradeNoReplaySource = "backend/src/rls-waves/session-c/c02/printingUpgradeNoReplayDefinitions.sql";
+const printingRunProjectionSource = "backend/src/rls-waves/session-c/c02/printingRunProjection.sql";
 const printingLifecycleRollback = "backend/src/rls-waves/session-c/c02/printingLifecycleRollback.sql";
 const publicVerificationSource = "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql";
 const publicVerificationRollback = "backend/src/rls-waves/session-b/b02/publicVerificationRollback.sql";
@@ -896,6 +897,9 @@ const printingSession = `current_user={{AUTH_OWNER}} AND session_user={{APP_ROLE
 const printingBatchId = `current_setting('app.printing_batch_id',true)`;
 const printingJobId = `current_setting('app.printing_job_id',true)`;
 const printingSessionRowId = `current_setting('app.printing_session_row_id',true)`;
+const printingRunJobs = `SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))`;
+const printingRunBatches = `SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_batch_ids',true),'')::jsonb,'[]'::jsonb))`;
+const printingRunRead = `${printingSession} AND ${printingOperation}='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN'`;
 const printingItemId = `current_setting('app.printing_item_id',true)`;
 const printingPrinterId = `current_setting('app.printing_printer_id',true)`;
 const printingRegistrationId = `current_setting('app.printing_registration_id',true)`;
@@ -1008,6 +1012,17 @@ const printingOwnerPolicies = [
   ["ActionIdempotencyKey","SELECT",`${printingSession} AND ${printingOperation} LIKE 'printing-idempotency-%' AND "keyHash"=${printingIdempotencyKeyHash}`],
   ["ActionIdempotencyKey","INSERT",`${printingSession} AND ${printingOperation}='printing-idempotency-begin' AND "keyHash"=${printingIdempotencyKeyHash}`],
   ["ActionIdempotencyKey","UPDATE",`${printingSession} AND ${printingOperation} IN ('printing-idempotency-begin','printing-idempotency-complete','printing-idempotency-abort') AND "keyHash"=${printingIdempotencyKeyHash}`],
+];
+const printingRunOwnerPolicies = [
+  ["Batch","SELECT",`${printingRunRead} AND id IN (${printingRunBatches})`],
+  ["PrintJob","SELECT",`${printingRunRead} AND "manufacturerId"=current_setting('app.printing_user_id',true) AND "batchId" IN (${printingRunBatches})`],
+  ["PrintItem","SELECT",`${printingRunRead} AND "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printJobId" IN (${printingRunJobs}))`],
+  ["PrintReissueRequest","SELECT",`${printingRunRead} AND "originalPrintJobId" IN (${printingRunJobs})`],
+  ["QRCode","SELECT",`${printingRunRead} AND "printJobId" IN (${printingRunJobs})`],
+  ["PrintSession","SELECT",`${printingRunRead} AND "manufacturerId"=current_setting('app.printing_user_id',true) AND ("printJobId" IN (${printingRunJobs}) OR ("batchId" IN (${printingRunBatches}) AND status IN ('ACTIVE','PAUSED','RESUME_PENDING')))`],
+  ["PrintItemEvent","SELECT",`${printingRunRead} AND "printItemId" IN (SELECT pi.id FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" WHERE ps."printJobId" IN (${printingRunJobs}))`],
+  ["PrintJobChunk","SELECT",`${printingRunRead} AND ("printJobId" IN (${printingRunJobs}) OR "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printJobId" IN (${printingRunJobs})))`],
+  ["PrintAuditEvent","SELECT",`${printingRunRead} AND "printJobId" IN (${printingRunJobs})`],
 ];
 const printingLifecycleSecurity = Object.freeze({
   mode:"SECURITY DEFINER",ownerIdentity:"identity-auth-function-owner",ownerRole:"authOwner",
@@ -1291,7 +1306,7 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
   operationalContract({id:"batch-inventory-rollups",name:"batch_inventory_rollups",signature:"text,text,text,text,text,text,text,text,text[]",returnType:"TABLE(batch_id text, dormant integer, active integer, activated integer, allocated integer, printed integer, redeemed integer, blocked integer, scanned integer)",identityArguments:"p_capability text, p_purpose text, p_request_id text, audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]",tableCommands:[...operationalCommonCommands,["Batch","SELECT"],["InventoryStatusRollup","SELECT"]],canonicalWorkflowIds:[batchWorkflows.rollups],repositoryCallers:["backend/src/services/batchAllocationService.ts:readRollups"],outputColumns:["batch_id","dormant","active","activated","allocated","printed","redeemed","blocked","scanned"]}),
   operationalContract({id:"batch-unassigned-ranges",name:"batch_unassigned_ranges",signature:"text,text,text,text,text,text,text,text,text[]",returnType:"TABLE(batch_id text, item_count bigint, start_code text, end_code text)",identityArguments:"p_capability text, p_purpose text, p_request_id text, audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]",tableCommands:[...operationalCommonCommands,["Batch","SELECT"],["QRCode","SELECT"]],canonicalWorkflowIds:[batchWorkflows.ranges],repositoryCallers:["backend/src/services/batchAllocationService.ts:readUnassignedRanges"],outputColumns:["batch_id","item_count","start_code","end_code"]}),
   operationalContract({id:"batch-status-fallback",name:"batch_status_fallback",signature:"text,text,text,text,text,text,text,text,text[]",returnType:"TABLE(batch_id text, status text, item_count bigint)",identityArguments:"p_capability text, p_purpose text, p_request_id text, audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]",tableCommands:[...operationalCommonCommands,["Batch","SELECT"],["QRCode","SELECT"]],canonicalWorkflowIds:[batchWorkflows.fallback],repositoryCallers:["backend/src/services/batchAllocationService.ts:buildCountMaps"],outputColumns:["batch_id","status","item_count"]}),
-  operationalContract({id:"batch-reservable-qr-summaries",name:"batch_reservable_qr_summaries",signature:"text,text,text,text,text,text,text,text,text[]",returnType:"TABLE(batch_id text, item_count bigint, start_code text, end_code text)",identityArguments:"p_capability text, p_purpose text, p_request_id text, audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]",tableCommands:[...operationalCommonCommands,["Batch","SELECT"],["QRCode","SELECT"],["PrintItem","SELECT"],["PrintSession","SELECT"],["PrintJob","SELECT"]],canonicalWorkflowIds:[batchWorkflows.reservable],repositoryCallers:["backend/src/services/printReservationService.ts:listReservableQrCodeSummaries"],outputColumns:["batch_id","item_count","start_code","end_code"]}),
+  operationalContract({id:"batch-reservable-qr-summaries",name:"batch_reservable_qr_summaries",signature:"text,text,text,text,text,text,text,text,text[]",returnType:"TABLE(batch_id text, item_count bigint, start_code text, end_code text, accounting jsonb)",identityArguments:"p_capability text, p_purpose text, p_request_id text, audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, batch_ids text[]",tableCommands:[...operationalCommonCommands,["Batch","SELECT"],["QRCode","SELECT"],["PrintItem","SELECT"],["PrintSession","SELECT"],["PrintJob","SELECT"]],canonicalWorkflowIds:[batchWorkflows.reservable],repositoryCallers:["backend/src/services/printReservationService.ts:listReservableQrCodeSummaries"],outputColumns:["batch_id","item_count","start_code","end_code","accounting"]}),
   {
     id:"tenant-directory-licensees",schema:"app_rls",name:"read_licensee_directory",signature:"text,text,text,text,boolean",returnType:"TABLE(payload jsonb)",
     identityArguments:"p_capability text, p_purpose text, p_request_id text, p_requested_licensee_id text, p_detail boolean",definitionLocation:operationalReadSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",security:tenantDirectorySecurity,
@@ -1457,6 +1472,22 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
     inputAuthority:"database-verified session or reviewed connector evidence; record identifiers are selectors only",
     outputColumns:["result"],disposableProbes:["printing-lifecycle-postgres18"],
   })),
+  {
+    id:"manufacturer-print-run-projection",schema:"app_rls",name:"printing_run_projection",
+    signature:"text,text,text,text,text,jsonb",returnType:"jsonb",
+    identityArguments:"p_capability text, p_purpose text, p_request_id text, p_operation text, p_subject_id text, p_options jsonb",
+    definitionLocation:printingRunProjectionSource,definitionKind:"checked-in-production-package",definitionStatus:"production-reviewed",
+    security:{...printingLifecycleSecurity,functionSource:printingRunProjectionSource,
+      ownerPolicies:printingRunOwnerPolicies,ownerPrivileges:[]},
+    tableCommands:[["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],
+      ["Batch","SELECT"],["QRCode","SELECT"],["Printer","SELECT"],["PrintJob","SELECT"],["PrintSession","SELECT"],
+      ["PrintItem","SELECT"],["PrintItemEvent","SELECT"],["PrintJobChunk","SELECT"],["PrintAuditEvent","SELECT"],["PrintReissueRequest","SELECT"]],
+    context:"Uses the existing printing readiness boundary and limits additional reads to its bounded manufacturer job set.",
+    canonicalWorkflowIds:["workflow-release-fix-5-readiness"],
+    repositoryCallers:["backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts:readPrintingProjection"],
+    inputAuthority:"database-verified session and current manufacturer assignments",
+    outputColumns:["result"],disposableProbes:["printing-lifecycle-postgres18"],
+  },
   {
     id:"release-fix-5-maintenance-gate",schema:"app_rls",name:"printing_maintenance_gate",
     internalOnly:true,

@@ -1,5 +1,5 @@
 import React from "react";
-import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,11 +8,11 @@ import { useBatchPrintWorkflow } from "@/features/batches/useBatchPrintWorkflow"
 import { defaultPrinterStatus } from "@/features/batches/print-workflow-utils";
 import { BatchPrintJobDialog } from "@/features/batches/components/BatchDialogs";
 import { queryClient } from "@/lib/query-client";
-import type { BatchRow } from "@/features/batches/types";
+import type { BatchRow, PrintJobRow } from "@/features/batches/types";
 
 vi.mock("@/lib/api-client", () => ({ default: new Proxy({
   getPrinterConnectionStatus: vi.fn(), getLocalPrintAgentStatus: vi.fn(),
-  listRegisteredPrinters: vi.fn(), listPrintJobs: vi.fn(), createPrintJob: vi.fn(),
+  listRegisteredPrinters: vi.fn(), listPrintJobs: vi.fn(), getPrintJobStatus: vi.fn(), createPrintJob: vi.fn(),
 }, { get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn() }) }));
 
 type RemoteStatus = NonNullable<Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>["data"]>;
@@ -68,6 +68,39 @@ describe("Start print run dialogue lifecycle", () => {
     vi.mocked(apiClient.listPrintJobs).mockResolvedValue({ success: true, data: [] });
   });
   afterEach(() => vi.clearAllMocks());
+
+  it("renders reconciled run facts and only server-permitted controls from the list", async () => {
+    const run = (id: string, status: PrintJobRow["status"], actions: NonNullable<PrintJobRow["runSummary"]>["allowedActions"], complete = true): PrintJobRow => ({
+      id, jobNumber: id, status, quantity: 2, printMode: "LOCAL_AGENT", createdAt: batch.createdAt,
+      runSummary: {
+        jobId: id, jobNumber: id, batchId: batch.id, requestedCount: 2,
+        confirmedCount: complete ? 1 : null, pendingCount: complete ? 0 : null,
+        failedCount: complete ? 0 : null, uncertainCount: complete ? 1 : null,
+        cancelledOrRetiredCount: complete ? 0 : null,
+        serialRange: { startCode: "A", endCode: "B" }, printer: null, operator: null,
+        operationalStatus: id === "Fenced run" ? "NEEDS_OPERATOR_ACTION" : status,
+        recoveryReason: null, allowedActions: actions, complete,
+      },
+    });
+    vi.mocked(apiClient.listPrintJobs).mockResolvedValue({ success: true, data: [
+      run("Completed legacy run", "CONFIRMED", [], false),
+      run("Fenced run", "PAUSED", ["stop"]),
+      run("Safely paused run", "PAUSED", ["resume", "stop"]),
+    ] });
+    render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Open print run" }));
+    const row = async (name: string) => within((await screen.findByText(name)).parentElement!.parentElement!);
+    const completed = await row("Completed legacy run");
+    expect(completed.getByText("Confirmed Unknown")).toBeInTheDocument();
+    expect(completed.queryByRole("button", { name: /pause printing|stop printing|request reissue/i })).toBeNull();
+    const fenced = await row("Fenced run");
+    expect(fenced.getByText("Uncertain 1")).toBeInTheDocument();
+    expect(fenced.getByText("Needs operator review")).toBeInTheDocument();
+    expect(fenced.queryByRole("button", { name: /resume printing|abandon/i })).toBeNull();
+    expect((await row("Safely paused run")).getByRole("button", { name: "Resume printing" })).toBeInTheDocument();
+    expect(apiClient.listPrintJobs).toHaveBeenCalledTimes(1);
+    expect(apiClient.getPrintJobStatus).not.toHaveBeenCalled();
+  });
 
   it("opens without submitting and performs one forced status verification", async () => {
     const view = mount();

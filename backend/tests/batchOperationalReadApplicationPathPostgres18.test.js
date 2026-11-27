@@ -248,6 +248,11 @@ const main = async () => {
     }), "manufacturer selected");
     assert.deepEqual(manufacturerSelected.data.map((row) => row.id), [ids.childA]);
     assert.equal(manufacturerSelected.meta.total, 1);
+    assert.deepEqual(manufacturerSelected.data[0].printAccounting, {
+      totalAllocated: 2, available: 2, reservedInProgress: 0, confirmedPrinted: 0,
+      awaitingRecovery: 0, retiredBlocked: 0, needsReconciliation: 0,
+      scanned: 0, redeemed: 0, activePrintRun: false, complete: true,
+    });
 
     const platformSelected = expectSuccess(await invoke(getBatches, {
       user: platformClaims(), requestId: success("batch-pg-platform-selected"), query: { licenseeId: ids.licenseeA },
@@ -380,6 +385,40 @@ const main = async () => {
     assert(auditRows.filter((row) => row.details?.requestId === "batch-pg-manufacturer-selected")
       .every((row) => row.orgId === ids.orgA && row.licenseeId === ids.licenseeA));
 
+    // One item is associated with each QR even after multiple dispatch attempts.
+    await bootstrap.$transaction(async (tx) => {
+      const job = await tx.printJob.create({ data: {
+        batchId: ids.childA, manufacturerId: ids.manufacturerA, quantity: 2,
+        status: "PAUSED", pipelineState: "NEEDS_OPERATOR_ACTION",
+      } });
+      const session = await tx.printSession.create({ data: {
+        printJobId: job.id, batchId: ids.childA, manufacturerId: ids.manufacturerA,
+        status: "PAUSED", totalItems: 2,
+      } });
+      const qrRows = await tx.qRCode.findMany({ where: { batchId: ids.childA }, orderBy: { code: "asc" } });
+      const [confirmed, uncertain] = qrRows;
+      await tx.qRCode.update({ where: { id: confirmed.id }, data: { status: "PRINTED", printJobId: job.id } });
+      await tx.qRCode.update({ where: { id: uncertain.id }, data: { status: "ACTIVATED", printJobId: job.id } });
+      await tx.printItem.createMany({ data: [
+        { printSessionId: session.id, qrCodeId: confirmed.id, code: confirmed.code,
+          state: "PRINT_CONFIRMED", printConfirmedAt: new Date(), attemptCount: 3 },
+        { printSessionId: session.id, qrCodeId: uncertain.id, code: uncertain.code,
+          state: "AGENT_ACKED", pipelineState: "NEEDS_OPERATOR_ACTION", agentAckedAt: new Date(), attemptCount: 2 },
+      ] });
+    });
+    const partial = expectSuccess(await invoke(getBatches, {
+      user: manufacturerClaims(), requestId: "batch-pg-partial-accounting", query: { licenseeId: ids.licenseeA },
+      originalUrl: "/api/qr/batches",
+    }), "manufacturer partial").data[0];
+    assert.deepEqual(partial.printAccounting, {
+      totalAllocated: 2, available: 0, reservedInProgress: 0, confirmedPrinted: 1,
+      awaitingRecovery: 1, retiredBlocked: 0, needsReconciliation: 0, scanned: 0, redeemed: 0,
+      activePrintRun: true, complete: true,
+    });
+    assert.equal(partial.printReadiness.printable, false);
+    assert.equal(tenantPage.data[0].printAccounting.needsReconciliation, 2,
+      "legacy printed and redeemed states without item evidence remain explicit");
+
     const stressRows = Number(process.env.MSCQR_PERF_ROWS || 100000);
     assert(Number.isInteger(stressRows) && stressRows >= 1 && stressRows <= 200000);
     await bootstrap.$executeRawUnsafe(`
@@ -396,6 +435,32 @@ const main = async () => {
     assert.equal(stressPage.meta.total, 3, "foreign inventory cannot change the tenant total");
     assert.equal(stressPage.data[0]._count.qrCodes, 2);
     console.log(`${stressRows} batch application path ${Math.round(performance.now() - stressStart)}ms`);
+
+    let previousTotal = 2; // Use the already-authorized partial-print batch.
+    for (const total of [100000, 200000]) {
+      await bootstrap.$executeRawUnsafe(`
+        INSERT INTO public."QRCode" (id, code, "licenseeId", "batchId", status, "updatedAt")
+        SELECT gen_random_uuid()::text, 'batch-owned-stress-' || n, $1, $2,
+          (CASE WHEN n % 100 = 0 THEN 'BLOCKED' WHEN n % 100 = 1 THEN 'PRINTED' ELSE 'ALLOCATED' END)::public."QRStatus", now()
+        FROM generate_series($3::integer + 1, $4::integer) AS n
+      `, ids.licenseeA, ids.childA, previousTotal, total);
+      await bootstrap.$executeRawUnsafe('ANALYZE public."QRCode"');
+      const startedAt = performance.now();
+      const owned = expectSuccess(await invoke(getBatches, {
+        user: manufacturerClaims(), requestId: `batch-pg-owned-${total}`, query: { licenseeId: ids.licenseeA },
+        originalUrl: "/api/qr/batches",
+      }), "large manufacturer batch").data.find((row) => row.id === ids.childA).printAccounting;
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      assert.equal(owned.totalAllocated, total);
+      assert.equal(owned.confirmedPrinted, 1);
+      assert.equal(owned.awaitingRecovery, 1);
+      assert.equal(owned.retiredBlocked, total / 100);
+      assert.equal(owned.needsReconciliation, total / 100 - 1);
+      assert.equal(owned.available, total - 2 - owned.retiredBlocked - owned.needsReconciliation);
+      assert.equal(owned.complete, false);
+      console.log(`${total} owned identities via manufacturer batch application path ${elapsedMs}ms`);
+      previousTotal = total;
+    }
 
     console.log("batch operational reads PostgreSQL 18 application-path proof passed");
   } finally {

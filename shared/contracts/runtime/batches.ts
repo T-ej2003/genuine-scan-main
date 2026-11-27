@@ -2,6 +2,21 @@ import { z } from "zod";
 
 import { licenseeSummarySchema, manufacturerSummarySchema, userSummarySchema } from "./common";
 
+export const batchPrintAccountingSchema = z.object({
+  totalAllocated: z.number().int().nonnegative(),
+  available: z.number().int().nonnegative(),
+  reservedInProgress: z.number().int().nonnegative(),
+  confirmedPrinted: z.number().int().nonnegative(),
+  awaitingRecovery: z.number().int().nonnegative(),
+  retiredBlocked: z.number().int().nonnegative(),
+  needsReconciliation: z.number().int().nonnegative(),
+  scanned: z.number().int().nonnegative(),
+  redeemed: z.number().int().nonnegative(),
+  activePrintRun: z.boolean(),
+  complete: z.boolean(),
+});
+export type BatchPrintAccountingDTO = z.infer<typeof batchPrintAccountingSchema>;
+
 export const batchSchema = z
   .object({
     id: z.string(),
@@ -24,6 +39,7 @@ export const batchSchema = z
     unassignedRemainingCodes: z.number().optional(),
     assignedCodes: z.number().optional(),
     printableCodes: z.number().optional(),
+    printAccounting: batchPrintAccountingSchema.optional(),
     printedCodes: z.number().optional(),
     redeemedCodes: z.number().optional(),
     blockedCodes: z.number().optional(),

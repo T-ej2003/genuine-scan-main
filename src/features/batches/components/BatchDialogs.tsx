@@ -1,6 +1,8 @@
 import { RefreshCw } from "lucide-react";
 import { Link } from "react-router";
 
+import { ManufacturerPrintRunFacts } from "@/components/batches/ManufacturerPrintRunFacts";
+import { manufacturerRunStatus } from "@/lib/print-job-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ActionButton } from "@/components/ui/action-button";
@@ -177,6 +179,7 @@ type PrintJobDialogProps = {
   printJobId: string | null;
   printProgressPrinterName: string | null;
   printProgressDispatchMode: string | null;
+  authoritativeProgressJob?: PrintJobRow | null;
   printProgressPhase?: string | null;
   printProgressTotal?: number;
   printProgressPrinted?: number;
@@ -303,6 +306,7 @@ export function BatchPrintJobDialog({
   printJobId,
   printProgressPrinterName,
   printProgressDispatchMode,
+  authoritativeProgressJob,
   printProgressPhase = null,
   printProgressTotal = 0,
   printProgressPrinted = 0,
@@ -348,24 +352,21 @@ export function BatchPrintJobDialog({
     batchPrintReadiness?.userMessage ||
     batchPrintReadiness?.requiredPreviousStep ||
     "Complete the previous batch step first.";
-  const isJobActive = (job: PrintJobRow) =>
-    ["PENDING", "SENT"].includes(job.status) ||
-    ["ACTIVE", "RESUME_PENDING", "RETRY_WAITING"].includes(String(job.session?.status || "").toUpperCase()) ||
-    ["PRINT_CONFIRMED", "PRINTER_ACKNOWLEDGED", "QUEUED"].includes(String(job.pipelineState || "").toUpperCase());
-  const isJobPaused = (job: PrintJobRow) =>
-    job.status === "PAUSED" || String(job.session?.status || "").toUpperCase() === "PAUSED";
-  const canStopJob = (job: PrintJobRow) =>
-    isJobActive(job) || isJobPaused(job);
-  const canRequestReissue = (job: PrintJobRow) =>
-    job.status === "CONFIRMED" || job.status === "STOPPED" || job.pipelineState === "LOCKED" || job.pipelineState === "PRINT_CONFIRMED";
+  const canPauseJob = (job: PrintJobRow) => job.runSummary?.allowedActions.includes("pause");
+  const canResumeJob = (job: PrintJobRow) => job.runSummary?.allowedActions.includes("resume");
+  const canStopJob = (job: PrintJobRow) => job.runSummary?.allowedActions.includes("stop");
+  const canRequestReissue = (job: PrintJobRow) => job.runSummary?.allowedActions.includes("requestReissue");
   const printControlTitle =
     printControlDialog.action === "stop" ? "Stop print run" : "Pause print run";
   const printControlDescription =
     printControlDialog.action === "stop"
       ? "Stopping prevents new label dispatch. Labels already sent may still print; only items proven unissued can be recovered."
       : "Pausing stops new label dispatch while preserving labels already confirmed by MSCQR.";
+  const recentActiveJob = recentPrintJobs.find((job) => job.id === printJobId);
+  const polledActiveJob = authoritativeProgressJob?.id === printJobId ? authoritativeProgressJob : null;
   const activePrintJob =
-    (printJobId ? recentPrintJobs.find((job) => job.id === printJobId) : null) ||
+    (polledActiveJob && (!recentActiveJob || String(polledActiveJob.updatedAt || "") > String(recentActiveJob.updatedAt || ""))
+      ? polledActiveJob : recentActiveJob) ||
     (printJobId
       ? ({
           id: printJobId,
@@ -490,7 +491,7 @@ export function BatchPrintJobDialog({
                     <div className="font-mono break-all">{printBatch.startCode} to {printBatch.endCode}</div>
                   </div>
                   <div>
-                    <div className="font-medium text-foreground">Remaining labels</div>
+                    <div className="font-medium text-foreground">Available to print</div>
                     <div>{readyToPrintCount.toLocaleString()}</div>
                   </div>
                   <div>
@@ -880,40 +881,13 @@ export function BatchPrintJobDialog({
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="font-medium">{job.jobNumber || "Print run"}</div>
                         <Badge variant={job.status === "FAILED" ? "destructive" : "secondary"}>
-                          {getPlainPrintStatusLabel(job.status)}
+                          {manufacturerRunStatus(job)}
                         </Badge>
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {formatDispatchModeLabel(job.printMode)} · {job.printer?.name || "Unknown printer"} ·{" "}
-                        {job.itemCount || job.quantity} labels
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {job.awaitingConfirmation
-                          ? "Sent to printer, awaiting/manual confirmation"
-                          : job.pipelineState === "NEEDS_OPERATOR_ACTION" && job.status !== "FAILED"
-                            ? "Queue confirmation unavailable"
-                            : job.status === "FAILED"
-                              ? "Needs attention"
-                              : `Confirmed ${job.session?.confirmedItems || 0}`}
-                        {!job.awaitingConfirmation &&
-                        job.status !== "FAILED" &&
-                        typeof job.session?.remainingToPrint === "number" &&
-                        job.session.remainingToPrint > 0
-                          ? ` · Remaining ${job.session.remainingToPrint}`
-                          : ""}
-                        {job.failureReason
-                          ? ` · ${sanitizePrinterUiError(job.failureReason, "This print job needs attention.")}`
-                          : ""}
-                      </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground sm:grid-cols-4">
-                        <div>Requested {Number(job.itemCount || job.quantity || 0).toLocaleString()}</div>
-                        <div>Printed {Number(job.session?.confirmedItems || 0).toLocaleString()}</div>
-                        <div>Pending {Number(job.session?.remainingToPrint || 0).toLocaleString()}</div>
-                        <div>Failed {Number(job.session?.failedItems || job.session?.counts?.FAILED || 0).toLocaleString()}</div>
-                      </div>
-                      {isJobActive(job) || isJobPaused(job) ? (
+                      <ManufacturerPrintRunFacts job={job} />
+                      {canPauseJob(job) || canResumeJob(job) || canStopJob(job) ? (
                         <div className="mt-3 flex flex-wrap justify-end gap-2">
-                          {isJobActive(job) ? (
+                          {canPauseJob(job) ? (
                             <ActionButton
                               variant="outline"
                               size="sm"
@@ -928,7 +902,7 @@ export function BatchPrintJobDialog({
                               showReasonBelow={false}
                             />
                           ) : null}
-                          {isJobPaused(job) || String(job.session?.status || "") === "RETRY_WAITING" ? (
+                          {canResumeJob(job) ? (
                             <ActionButton
                               variant="outline"
                               size="sm"
@@ -979,7 +953,7 @@ export function BatchPrintJobDialog({
                           />
                         </div>
                       ) : null}
-                      {job.status === "FAILED" && (job.session?.confirmedItems || 0) === 0 ? (
+                      {job.runSummary?.allowedActions.includes("abandon") ? (
                         <div className="mt-2 flex justify-end">
                           <ActionButton
                             variant="outline"
@@ -990,7 +964,7 @@ export function BatchPrintJobDialog({
                                 ? createUiActionState("pending", "Closing the print run.")
                                 : createUiActionState("enabled")
                             }
-                            idleLabel="Close and release labels"
+                            idleLabel="Abandon unused run"
                             pendingLabel="Closing..."
                             showReasonBelow={false}
                           />

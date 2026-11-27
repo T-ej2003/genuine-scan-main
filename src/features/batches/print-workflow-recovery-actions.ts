@@ -1,9 +1,36 @@
+import type { Dispatch, SetStateAction } from "react";
+
 import apiClient from "@/lib/api-client";
+import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
+import { queryClient } from "@/lib/query-client";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
-import type { RegisteredPrinterRow } from "./types";
+import type { PrintJobRow, RegisteredPrinterRow } from "./types";
 
 type ToastLike = (options: { title?: string; description?: string; variant?: "default" | "destructive" }) => unknown;
+
+export const updateRecentPrintJob = (nextJob: PrintJobRow, setRecentPrintJobs: Dispatch<SetStateAction<PrintJobRow[]>>) => {
+  setRecentPrintJobs((previous) => {
+    const found = previous.some((row) => row.id === nextJob.id);
+    return found ? previous.map((row) => (row.id === nextJob.id ? nextJob : row)) : [nextJob, ...previous].slice(0, 8);
+  });
+  if (nextJob.runSummary) {
+    queryClient.setQueriesData<PrintJobRow[]>({ queryKey: ["printing", "jobs"] }, (jobs) =>
+      jobs?.map((job) => job.id === nextJob.id ? { ...job, ...nextJob } : job));
+  }
+};
+
+export const refreshPrintRunConflict = async (
+  jobId: string,
+  setRecentPrintJobs: Dispatch<SetStateAction<PrintJobRow[]>>,
+  refresh: () => Promise<unknown>,
+) => {
+  clearRequestCoordinator(["manufacturer-print-jobs:", "manufacturer-print-job-status:"]);
+  setRecentPrintJobs((jobs) => jobs.map((job) => job.id === jobId && job.runSummary
+    ? { ...job, runSummary: { ...job.runSummary, allowedActions: [] } }
+    : job));
+  await refresh();
+};
 
 export const relinkSelectedPrinterAction = async (params: {
   selectedPrinterProfile: RegisteredPrinterRow | null;

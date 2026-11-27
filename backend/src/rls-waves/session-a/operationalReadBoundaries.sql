@@ -228,7 +228,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION app_rls.batch_reservable_qr_summaries(
   p_capability text,p_purpose text,p_request_id text,
   audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[]
-) RETURNS TABLE(batch_id text,item_count bigint,start_code text,end_code text)
+) RETURNS TABLE(batch_id text,item_count bigint,start_code text,end_code text,accounting jsonb)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 BEGIN
   PERFORM app_rls.operational_read_bind_actor(p_capability,p_purpose,p_request_id,requested_licensee_id);

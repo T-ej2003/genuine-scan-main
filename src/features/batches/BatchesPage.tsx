@@ -21,6 +21,8 @@ import { useToast } from "@/hooks/use-toast";
 import { APP_PATHS } from "@/app/route-metadata";
 import { usePrintJobs } from "@/features/printing/hooks";
 import apiClient from "@/lib/api-client";
+import { queryClient } from "@/lib/query-client";
+import { queryKeys } from "@/lib/query-keys";
 import type { PrintJobRow } from "@/features/batches/types";
 import { licenseeSummarySchema } from "../../../shared/contracts/runtime/common";
 
@@ -94,15 +96,6 @@ export default function BatchesPage() {
     onWorkspaceDraftReset: operations.resetAssignDraft,
   });
 
-  const printWorkflow = useBatchPrintWorkflow({
-    isManufacturer,
-    userId: user?.id,
-    toast,
-    getAvailableInventory: operations.getAvailableInventory,
-    onBatchesChanged: operations.fetchBatches,
-  });
-  const securePrinterReady = Boolean(printWorkflow.dialogProps.securePrintReadiness?.ready);
-
   const workspacePrintJobsBatchId = isManufacturer
     ? workspace.workspaceBatch?.focusBatchId || workspace.workspaceBatch?.allocations[0]?.batchId
     : workspace.workspaceBatch?.sourceBatchRow?.id;
@@ -111,6 +104,23 @@ export default function BatchesPage() {
     12,
     workspace.workspaceOpen && canRequestReissue
   );
+
+  const printWorkflow = useBatchPrintWorkflow({
+    isManufacturer,
+    userId: user?.id,
+    toast,
+    getAvailableInventory: operations.getAvailableInventory,
+    onBatchesChanged: operations.fetchBatches,
+    onPrintRunConflict: (jobId) => {
+      if (!workspace.workspaceOpen || !canRequestReissue) return;
+      queryClient.setQueryData<PrintJobRow[]>(queryKeys.printing.jobs(workspacePrintJobsBatchId, 12), (jobs) =>
+        jobs?.map((job) => job.id === jobId && job.runSummary
+          ? { ...job, runSummary: { ...job.runSummary, allowedActions: [] } }
+          : job));
+      return workspacePrintJobsQuery.refetch();
+    },
+  });
+  const securePrinterReady = Boolean(printWorkflow.dialogProps.securePrintReadiness?.ready);
 
   const fetchReissueRequests = async (options?: { force?: boolean }) => {
     if (!canRequestReissue) return;

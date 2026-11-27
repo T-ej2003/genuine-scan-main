@@ -1,6 +1,9 @@
+import type { BatchPrintAccountingDTO } from "../../../shared/contracts/runtime/batches";
+import type { PrintRunSummaryDTO } from "../../../shared/contracts/runtime/printing";
 import type { LatestDecision } from "@/lib/verification-decision";
 
 export type BatchRow = {
+  printAccounting?: BatchPrintAccountingDTO;
   id: string;
   name: string;
   licenseeId: string;
@@ -222,6 +225,7 @@ export type PrinterSelectionNotice = {
 };
 
 export type PrintJobRow = {
+  runSummary?: PrintRunSummaryDTO | null;
   id: string;
   jobNumber?: string | null;
   status: "PENDING" | "SENT" | "PAUSED" | "CONFIRMED" | "PARTIALLY_COMPLETED" | "FAILED" | "STOPPED" | "CANCELLED";

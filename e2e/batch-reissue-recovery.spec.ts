@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import type { PrintRunSummaryDTO } from "../shared/contracts/runtime/printing";
 
 type Role = "licensee_admin" | "manufacturer";
 
@@ -7,7 +8,7 @@ type ReissueFlowState = {
   printOutcome: "blocked" | "accepted";
   replacementPrintStarted: boolean;
   requestCount: number;
-  approvalCount: number;
+  brandReviewCount: number;
   printStartCount: number;
 };
 
@@ -87,6 +88,11 @@ const batchRows = [
     startCode: "QR-000001",
     endCode: "QR-000010",
     totalCodes: 10,
+    printAccounting: {
+      totalAllocated: 10, available: 5, confirmedPrinted: 5, reservedInProgress: 0,
+      awaitingRecovery: 0, retiredBlocked: 0, needsReconciliation: 0, scanned: 0, redeemed: 0,
+      activePrintRun: false, complete: true,
+    },
     printedAt: null,
     createdAt: now,
     updatedAt: now,
@@ -103,7 +109,7 @@ const batchRows = [
   },
 ];
 
-const stoppedPrintJob = {
+const stoppedPrintJob = (state: ReissueFlowState) => ({
   id: "job-stopped",
   jobNumber: "PJ-STOPPED",
   status: "PARTIALLY_COMPLETED",
@@ -118,6 +124,16 @@ const stoppedPrintJob = {
   batch: { id: "batch-manufacturer", name: "Factory Recovery Batch", licenseeId: "licensee-acme" },
   printer: { id: "printer-local", name: "ZDesigner ZT410-300dpi ZPL", connectionType: "LOCAL_AGENT" },
   operator: { name: "Morgan Factory" },
+  runSummary: {
+    jobId: "job-stopped", jobNumber: "PJ-STOPPED", batchId: "batch-manufacturer",
+    requestedCount: 10, confirmedCount: 5, pendingCount: 0, failedCount: 0,
+    uncertainCount: 0, cancelledOrRetiredCount: 5,
+    serialRange: { startCode: "QR-000001", endCode: "QR-000010" },
+    printer: { id: "printer-local", name: "ZDesigner ZT410-300dpi ZPL" },
+    operator: null, operationalStatus: "PARTIALLY_COMPLETED", recoveryReason: null,
+    allowedActions: state.reissueStatus === "NONE" ? ["requestReissue"] : [],
+    complete: true,
+  } satisfies PrintRunSummaryDTO,
   session: {
     id: "session-stopped",
     status: "STOPPED",
@@ -132,7 +148,7 @@ const stoppedPrintJob = {
     recoveryNeeded: true,
     nextPrintableIndex: "QR-000006",
   },
-};
+});
 
 const replacementPrintJob = {
   id: "job-replacement",
@@ -237,10 +253,10 @@ const reissueRequest = (state: ReissueFlowState) => ({
       ? "APPROVED_READY_TO_PRINT"
       : state.reissueStatus === "EXECUTED"
         ? "PRINT_JOB_CREATED"
-        : "BRAND_ADMIN_REVIEW",
+        : state.brandReviewCount > 0 ? "SUPER_ADMIN_REVIEW" : "BRAND_ADMIN_REVIEW",
   reason: "Labels were damaged after the stopped print run.",
   requestedByRole: "MANUFACTURER",
-  targetApproverRole: "LICENSEE_ADMIN",
+  targetApproverRole: state.brandReviewCount > 0 ? "SUPER_ADMIN" : "LICENSEE_ADMIN",
   quantity: 5,
   requestedCount: 5,
   affectedRangeStart: "QR-000006",
@@ -263,13 +279,13 @@ const reissueRequest = (state: ReissueFlowState) => ({
       ? "Print replacement labels"
       : state.reissueStatus === "EXECUTED"
         ? "Watch replacement print job"
-        : "Waiting for brand admin review",
+        : state.brandReviewCount > 0 ? "Waiting for final approval" : "Waiting for brand admin review",
   batch: { id: "batch-manufacturer", name: "Factory Recovery Batch", licenseeId: "licensee-acme" },
   printer: { id: "printer-local", displayName: "ZDesigner ZT410-300dpi ZPL" },
   requestedBy: { id: "manufacturer-p0-user", name: "Morgan Factory", email: "factory@acme.example", role: "MANUFACTURER" },
   decidedBy:
     state.reissueStatus === "APPROVED" || state.reissueStatus === "EXECUTED"
-      ? { id: "licensee-p0-admin", name: "Avery Brand", email: "admin@acme.example", role: "LICENSEE_ADMIN" }
+      ? { id: "platform-p0-admin", name: "Jamie Platform", email: "platform@acme.example", role: "SUPER_ADMIN" }
       : null,
 });
 
@@ -349,7 +365,8 @@ const installBatchReissueMocks = async (page: Page, role: Role, state: ReissueFl
     }
     if (path.startsWith("/manufacturer/printers")) return json(route, { success: true, data: registeredPrinters });
     if (path.startsWith("/manufacturer/print-jobs") && method === "GET") {
-      return json(route, { success: true, data: state.reissueStatus === "EXECUTED" ? [replacementPrintJob, stoppedPrintJob] : [stoppedPrintJob] });
+      const original = stoppedPrintJob(state);
+      return json(route, { success: true, data: state.reissueStatus === "EXECUTED" ? [replacementPrintJob, original] : [original] });
     }
     if (path === "/manufacturer/print-jobs/job-stopped/reissue-request" && method === "POST") {
       state.requestCount += 1;
@@ -361,8 +378,7 @@ const installBatchReissueMocks = async (page: Page, role: Role, state: ReissueFl
       return json(route, { success: true, data: requests });
     }
     if (path === "/manufacturer/print-reissue-requests/reissue-1/approve" && method === "POST") {
-      state.approvalCount += 1;
-      state.reissueStatus = "APPROVED";
+      state.brandReviewCount += 1;
       return json(route, { success: true, data: { request: reissueRequest(state), result: null } });
     }
     if (path === "/manufacturer/print-reissue-requests/reissue-1/print" && method === "POST") {
@@ -422,13 +438,13 @@ const closePrinterOnboardingIfVisible = async (page: Page) => {
 };
 
 test.describe("batch operations reissue recovery", () => {
-  test("manufacturer request, brand approval, and replacement print blocked then accepted stay truthful", async ({ browser }) => {
+  test("manufacturer request, brand forwarding, and replacement print blocked then accepted stay truthful", async ({ browser }) => {
     const state: ReissueFlowState = {
       reissueStatus: "NONE",
       printOutcome: "blocked",
       replacementPrintStarted: false,
       requestCount: 0,
-      approvalCount: 0,
+      brandReviewCount: 0,
       printStartCount: 0,
     };
 
@@ -441,7 +457,9 @@ test.describe("batch operations reissue recovery", () => {
     await manufacturerPage.getByText("Factory Recovery Batch").first().click({ force: true });
     await manufacturerPage.getByRole("tab", { name: "Operations" }).click();
     await manufacturerPage.getByRole("button", { name: /Stopped prints/i }).click();
-    await expect(manufacturerPage.getByText("QR-000006 to QR-000010")).toBeVisible();
+    await expect(manufacturerPage.getByText("Range QR-000001 to QR-000010", { exact: true })).toBeVisible();
+    await expect(manufacturerPage.getByText("Confirmed 5", { exact: true })).toBeVisible();
+    await expect(manufacturerPage.getByText("Cancelled / retired 5", { exact: true })).toBeVisible();
     await manufacturerPage.getByLabel("Re-issue request reason").fill("Labels were damaged after the stopped print run.");
     await manufacturerPage.getByRole("button", { name: "Request re-issue" }).click();
 
@@ -461,9 +479,13 @@ test.describe("batch operations reissue recovery", () => {
     await brandPage.getByLabel("Decision note").fill("Approved after evidence review.");
     await brandPage.getByRole("button", { name: "Approve" }).click();
 
-    await expect.poll(() => state.approvalCount).toBe(1);
-    await expect(brandPage.getByText(/Reissue approved/i).first()).toBeVisible();
+    await expect.poll(() => state.brandReviewCount).toBe(1);
+    await expect(brandPage.getByText("Forwarded to super admin", { exact: true }).first()).toBeVisible();
+    expect(state.reissueStatus).toBe("PENDING");
+    expect(state.printStartCount).toBe(0);
 
+    // The final platform decision is external to this manufacturer/brand browser flow.
+    state.reissueStatus = "APPROVED";
     const replacementPage = await context.newPage();
     await installBatchReissueMocks(replacementPage, "manufacturer", state);
     await replacementPage.goto("/batches");

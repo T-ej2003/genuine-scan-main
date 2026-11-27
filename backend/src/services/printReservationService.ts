@@ -54,7 +54,21 @@ export type ReservableQrCodeRow = {
   previousAttemptCount: number | null;
 };
 
+export type BatchPrintAccounting = {
+  totalAllocated: number;
+  available: number;
+  reservedInProgress: number;
+  confirmedPrinted: number;
+  awaitingRecovery: number;
+  retiredBlocked: number;
+  needsReconciliation: number;
+  scanned: number;
+  redeemed: number;
+  activePrintRun: boolean;
+};
+
 export type ReservableQrCodeSummary = {
+  accounting?: BatchPrintAccounting;
   count: number;
   startCode: string | null;
   endCode: string | null;
@@ -309,13 +323,14 @@ export const listReservableQrCodeSummaries = async (
   if (batchIds.length === 0) return new Map();
 
   const rows = await client.$queryRaw<
-    Array<{ batch_id: string; count: bigint | number | string; start_code: string | null; end_code: string | null }>
+    Array<{ batch_id: string; count: bigint | number | string; start_code: string | null; end_code: string | null; accounting?: BatchPrintAccounting }>
   >`
     SELECT
       batch_id,
       item_count AS count,
       start_code,
-      end_code
+      end_code,
+      to_jsonb(summary)->'accounting' AS accounting
     FROM app_rls.batch_reservable_qr_summaries(
       ${boundary.databaseSessionCapability}, ${boundary.purpose}, ${boundary.requestId},
       ${boundary.auditId},
@@ -324,7 +339,7 @@ export const listReservableQrCodeSummaries = async (
       ${boundary.focusBatchId},
       ${boundary.scopeFingerprint},
       ARRAY[${Prisma.join(batchIds)}]::text[]
-    )
+    ) AS summary
   `;
 
   return rows.reduce<Map<string, ReservableQrCodeSummary>>((acc, row) => {
@@ -336,6 +351,7 @@ export const listReservableQrCodeSummaries = async (
       count,
       startCode: row.start_code || null,
       endCode: row.end_code || null,
+      accounting: row.accounting,
     });
     return acc;
   }, new Map());

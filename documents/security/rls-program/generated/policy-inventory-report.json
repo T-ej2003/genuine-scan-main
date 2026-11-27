@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 391,
+  "count": 400,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -2103,6 +2103,7 @@
       "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (id=current_setting('app.printing_batch_id',true) OR current_setting('app.printing_operation',true)='printing-readiness')) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND id=current_setting('app.printing_batch_id',true)) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:Batch:SELECT",
         "contract:release-fix-5-control-job:Batch:SELECT",
         "contract:release-fix-5-create-job:Batch:SELECT",
         "contract:release-fix-5-readiness:Batch:SELECT",
@@ -2148,6 +2149,29 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-batch",
+      "table": "Batch",
+      "policyName": "printing_run_projection_batch_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND id IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_batch_ids',true),'')::jsonb,'[]'::jsonb)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:Batch:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -4711,6 +4735,7 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND id=current_setting('app.printing_licensee_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:Licensee:SELECT",
         "contract:release-fix-5-connector-registration:Licensee:SELECT",
         "contract:release-fix-5-control-job:Licensee:SELECT",
         "contract:release-fix-5-create-job:Licensee:SELECT",
@@ -5257,6 +5282,7 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>''",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-5-connector-registration:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-5-control-job:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-5-create-job:ManufacturerLicenseeLink:SELECT",
@@ -5915,6 +5941,7 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>''",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:Organization:SELECT",
         "contract:release-fix-5-connector-registration:Organization:SELECT",
         "contract:release-fix-5-control-job:Organization:SELECT",
         "contract:release-fix-5-create-job:Organization:SELECT",
@@ -6577,6 +6604,7 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND \"batchId\"=current_setting('app.printing_batch_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintAuditEvent:SELECT",
         "contract:release-fix-5-control-job:PrintAuditEvent:SELECT",
         "contract:release-fix-5-readiness:PrintAuditEvent:SELECT",
         "contract:release-fix-5-record-sample:PrintAuditEvent:SELECT",
@@ -6584,6 +6612,29 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-audit-event",
+      "table": "PrintAuditEvent",
+      "policyName": "printing_run_projection_printauditevent_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintAuditEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -6687,6 +6738,7 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND ((\"printerRegistrationId\"=current_setting('app.printing_registration_id',true)) OR (current_setting('app.printing_operation',true) IN ('printing-connector-identity','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail','printing-connector-gateway-check_dispatch') AND \"gatewayId\"=current_setting('app.printing_gateway_id',true) AND \"gatewaySecretHash\"=current_setting('app.printing_gateway_secret_hash',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%' AND current_setting('app.printing_operation',true)='printing-worker-network' AND (id=current_setting('app.printing_printer_id',true) OR (\"deliveryMode\"='DIRECT' AND \"isActive\" AND \"connectionType\" IN ('NETWORK_DIRECT','NETWORK_IPP'))))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:Printer:SELECT",
         "contract:release-fix-5-connector-event:Printer:SELECT",
         "contract:release-fix-5-connector-identity:Printer:SELECT",
         "contract:release-fix-5-connector-registration:Printer:SELECT",
@@ -7065,6 +7117,7 @@
       "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND \"printSessionId\" IN (SELECT ps.id FROM public.\"PrintSession\" ps WHERE ps.\"printerId\" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_printers',true),'')::jsonb)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-printer-admin-diagnostic_lease' AND \"printSessionId\" IN (SELECT ps.id FROM public.\"PrintSession\" ps WHERE ps.\"printerId\"=current_setting('app.printing_printer_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (current_setting('app.printing_operation',true)='printing-readiness' OR \"printSessionId\"=current_setting('app.printing_session_row_id',true) OR (current_setting('app.printing_operation',true)='printing-reissue' AND \"printSessionId\"=current_setting('app.printing_original_session_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND (current_setting('app.printing_operation',true)='printing-connector-gateway-claim' AND \"printSessionId\" IN (SELECT ps.id FROM public.\"PrintSession\" ps WHERE ps.\"printerId\"=current_setting('app.printing_printer_id',true)) OR \"printSessionId\"=current_setting('app.printing_session_row_id',true))) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintItem:SELECT",
         "contract:release-fix-5-connector-event:PrintItem:SELECT",
         "contract:release-fix-5-control-job:PrintItem:SELECT",
         "contract:release-fix-5-create-job:PrintItem:SELECT",
@@ -7113,6 +7166,29 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-item",
+      "table": "PrintItem",
+      "policyName": "printing_run_projection_printitem_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"printSessionId\" IN (SELECT ps.id FROM public.\"PrintSession\" ps WHERE ps.\"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintItem:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -7191,11 +7267,35 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND \"printItemId\" IN (SELECT pi.id FROM public.\"PrintItem\" pi WHERE pi.\"printSessionId\"=current_setting('app.printing_original_session_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintItemEvent:SELECT",
         "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT",
         "contract:release-fix-5-upgrade-protect-unknown:PrintItemEvent:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-item-event",
+      "table": "PrintItemEvent",
+      "policyName": "printing_run_projection_printitemevent_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"printItemId\" IN (SELECT pi.id FROM public.\"PrintItem\" pi JOIN public.\"PrintSession\" ps ON ps.id=pi.\"printSessionId\" WHERE ps.\"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintItemEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -7311,6 +7411,7 @@
       "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND \"printerId\" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_printers',true),'')::jsonb))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (current_setting('app.printing_operation',true)='printing-readiness' OR id=current_setting('app.printing_job_id',true) OR \"batchId\"=current_setting('app.printing_batch_id',true) OR (current_setting('app.printing_operation',true)='printing-printer-admin-delete' AND \"printerId\"=current_setting('app.printing_printer_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND (id=current_setting('app.printing_job_id',true) OR (current_setting('app.printing_operation',true) IN ('printing-connector-claim','printing-connector-gateway-claim') AND \"printerId\"=current_setting('app.printing_printer_id',true)))) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintJob:SELECT",
         "contract:release-fix-5-connector-event:PrintJob:SELECT",
         "contract:release-fix-5-control-job:PrintJob:SELECT",
         "contract:release-fix-5-create-job:PrintJob:SELECT",
@@ -7361,6 +7462,29 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-print-job",
+      "table": "PrintJob",
+      "policyName": "printing_run_projection_printjob_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"manufacturerId\"=current_setting('app.printing_user_id',true) AND \"batchId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_batch_ids',true),'')::jsonb,'[]'::jsonb)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintJob:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-print-job-chunk",
       "table": "PrintJobChunk",
       "policyName": "printing_lifecycle_printjobchunk_select",
@@ -7380,10 +7504,34 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND (\"printJobId\"=current_setting('app.printing_job_id',true) OR \"printSessionId\"=current_setting('app.printing_original_session_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintJobChunk:SELECT",
         "contract:release-fix-5-reissue-request:PrintJobChunk:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-job-chunk",
+      "table": "PrintJobChunk",
+      "policyName": "printing_run_projection_printjobchunk_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND (\"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))) OR \"printSessionId\" IN (SELECT ps.id FROM public.\"PrintSession\" ps WHERE ps.\"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb)))))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintJobChunk:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -7434,6 +7582,7 @@
       "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (current_setting('app.printing_operation',true)='printing-readiness' OR id=current_setting('app.printing_reissue_id',true) OR \"batchId\"=current_setting('app.printing_batch_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintReissueRequest:SELECT",
         "contract:release-fix-5-reissue-request:PrintReissueRequest:SELECT"
       ],
       "workflowId": null,
@@ -7465,6 +7614,29 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-reissue-request",
+      "table": "PrintReissueRequest",
+      "policyName": "printing_run_projection_printreissuerequest_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"originalPrintJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintReissueRequest:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -7557,6 +7729,7 @@
       "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND \"printerId\" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_printers',true),'')::jsonb))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-printer-admin-diagnostic_lease' AND \"printerId\"=current_setting('app.printing_printer_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (\"batchId\"=current_setting('app.printing_batch_id',true) OR id=current_setting('app.printing_session_row_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND (current_setting('app.printing_operation',true)='printing-connector-gateway-claim' AND \"printerId\"=current_setting('app.printing_printer_id',true) OR id=current_setting('app.printing_session_row_id',true) OR (\"printJobId\"=current_setting('app.printing_job_id',true) AND (\"printerRegistrationId\"=current_setting('app.printing_registration_id',true) OR (current_setting('app.printing_operation',true) IN ('printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail') AND \"printerId\"=current_setting('app.printing_printer_id',true)))))) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintSession:SELECT",
         "contract:release-fix-5-connector-event:PrintSession:SELECT",
         "contract:release-fix-5-control-job:PrintSession:SELECT",
         "contract:release-fix-5-create-job:PrintSession:SELECT",
@@ -7602,6 +7775,29 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-session",
+      "table": "PrintSession",
+      "policyName": "printing_run_projection_printsession_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"manufacturerId\"=current_setting('app.printing_user_id',true) AND (\"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))) OR (\"batchId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_batch_ids',true),'')::jsonb,'[]'::jsonb))) AND status IN ('ACTIVE','PAUSED','RESUME_PENDING')))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:PrintSession:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -7854,6 +8050,7 @@
       "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND \"batchId\"=current_setting('app.printing_batch_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printJobId\"=current_setting('app.printing_job_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%' AND current_setting('app.printing_operation',true)='printing-worker-network' AND \"printJobId\"=current_setting('app.printing_job_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:QRCode:SELECT",
         "contract:release-fix-5-control-job:QRCode:SELECT",
         "contract:release-fix-5-create-job:QRCode:SELECT",
         "contract:release-fix-5-gateway-job:QRCode:SELECT",
@@ -7899,6 +8096,29 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-qrcode",
+      "table": "QRCode",
+      "policyName": "printing_run_projection_qrcode_select",
+      "command": "SELECT",
+      "actors": [
+        "manufacturer"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "printing-readiness"
+      ],
+      "scopeType": "verified-manufacturer-print-run-ids",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:QRCode:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Manufacturer print run projection",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -10991,6 +11211,7 @@
       "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND id IN (\n    current_setting('app.printing_user_id',true),\n    current_setting('app.printing_released_user_id',true),\n    current_setting('app.printing_approved_user_id',true)\n  )) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND id=current_setting('app.printing_user_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:manufacturer-print-run-projection:User:SELECT",
         "contract:release-fix-5-connector-registration:User:SELECT",
         "contract:release-fix-5-control-job:User:SELECT",
         "contract:release-fix-5-create-job:User:SELECT",

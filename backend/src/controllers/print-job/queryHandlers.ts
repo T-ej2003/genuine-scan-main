@@ -15,6 +15,7 @@ import {
   ensurePrintOperationsUser,
   listPrintJobsQuerySchema,
   printJobIdParamSchema,
+  handleUserSafeError,
   reissuePrintJobSchema,
 } from "./shared";
 import { describeMissingPrinterReadinessFields, isPhysicalOutcomeUnconfirmed } from "./errorResponses";
@@ -26,7 +27,7 @@ import {
   reissueRequestDecisionSchema,
   reissueRequestIdParamSchema,
 } from "./operationSchemas";
-import { getOrComputeVersionedCache } from "../../services/versionedCacheService";
+import { bumpCacheNamespaceVersion, getOrComputeVersionedCache } from "../../services/versionedCacheService";
 
 const isPlatformAdmin = (role: UserRole) =>
   role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
@@ -51,13 +52,14 @@ export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response)
 
     const rows = await getOrComputeVersionedCache(
       "print-jobs",
-      [user.role, user.userId, getEffectiveLicenseeId(req) || "none", parsed.data.batchId || "all", parsed.data.limit].join(":"),
+      [user.role, user.userId, getEffectiveLicenseeId(req) || "none", parsed.data.licenseeId || "all",
+        parsed.data.batchId || "all", parsed.data.limit].join(":"),
       5,
       () => readPrintingProjection({
         ...printBoundary(req),
         operation: "JOB_LIST",
         subjectId: parsed.data.batchId || "00000000-0000-4000-8000-000000000000",
-        options: { batchId: parsed.data.batchId || null, limit: parsed.data.limit || 50 },
+        options: { batchId: parsed.data.batchId || null, limit: parsed.data.limit || 50, licenseeId: parsed.data.licenseeId || null },
       })
     );
 
@@ -78,11 +80,15 @@ export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Respo
       return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid print job id" });
     }
 
+    const licenseeId = typeof req.query?.licenseeId === "string" ? req.query.licenseeId.trim() : null;
     const view = await getOrComputeVersionedCache(
       "print-jobs",
-      [user.role, user.userId, getEffectiveLicenseeId(req) || "none", "status", parsedParams.data.id].join(":"),
+      [user.role, user.userId, getEffectiveLicenseeId(req) || "none", licenseeId || "all", "status", parsedParams.data.id].join(":"),
       3,
-      () => readPrintingProjection({ ...printBoundary(req), operation: "JOB", subjectId: parsedParams.data.id })
+      () => readPrintingProjection({
+        ...printBoundary(req), operation: "JOB", subjectId: parsedParams.data.id,
+        options: { licenseeId },
+      })
     );
     if (!view) {
       return res.status(404).json({ success: false, error: "Print job not found" });
@@ -104,18 +110,6 @@ const printBoundary = (req: AuthRequest) => ({
   capability: String(req.databaseSessionCapability || ""),
   requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
 });
-
-const handleUserSafeError = (res: Response, error: any, fallback: string) => {
-  const statusCode = typeof error?.statusCode === "number" ? error.statusCode : 500;
-  const message = String(error?.message || fallback);
-  const code = typeof error?.code === "string" ? error.code : undefined;
-  return res.status(statusCode).json({
-    success: false,
-    error: statusCode >= 500 ? fallback : message,
-    message: statusCode >= 500 ? fallback : message,
-    ...(statusCode < 500 && code ? { code, errorCode: code } : {}),
-  });
-};
 
 export const pauseManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
   try {
@@ -161,6 +155,14 @@ export const resumeManufacturerPrintJob = async (req: AuthRequest, res: Response
     });
     return res.json({ success: true, data: result.view, meta: { idempotent: result.idempotent } });
   } catch (error: any) {
+    if (isPhysicalOutcomeUnconfirmed(error) && error?.code === "P2010") {
+      await bumpCacheNamespaceVersion("print-jobs").catch(() => undefined);
+      return handleUserSafeError(res, {
+        statusCode: 409,
+        code: "PHYSICAL_OUTCOME_UNCONFIRMED",
+        message: "This run cannot resume until the outcome of the previous print attempt is resolved.",
+      }, "Print run could not be resumed.");
+    }
     console.error("resumeManufacturerPrintJob error:", error);
     return handleUserSafeError(res, error, "Print run could not be resumed.");
   }

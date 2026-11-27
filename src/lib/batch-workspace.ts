@@ -1,4 +1,7 @@
+import type { BatchPrintAccountingDTO } from "../../shared/contracts/runtime/batches";
+
 export type BatchWorkspaceRow = {
+  printAccounting?: BatchPrintAccountingDTO;
   id: string;
   name: string;
   licenseeId: string;
@@ -26,6 +29,7 @@ export type BatchWorkspaceRow = {
 };
 
 export type BatchWorkspaceAllocation = {
+  printAccounting?: BatchPrintAccountingDTO;
   batchId: string;
   batchName: string;
   manufacturerId: string;
@@ -42,6 +46,29 @@ export type BatchWorkspaceAllocation = {
   currentRangeStart?: string | null;
   currentRangeEnd?: string | null;
 };
+
+type WorkspacePrintAccounting = Omit<BatchPrintAccountingDTO, "activePrintRun">;
+
+export function aggregateBatchPrintAccounting(allocations: BatchWorkspaceAllocation[]): WorkspacePrintAccounting | undefined {
+  let total: WorkspacePrintAccounting | undefined;
+  for (const { printAccounting } of allocations) {
+    if (!printAccounting) return undefined;
+    const { activePrintRun: _activePrintRun, ...accounting } = printAccounting;
+    total = total ? {
+      totalAllocated: total.totalAllocated + accounting.totalAllocated,
+      available: total.available + accounting.available,
+      reservedInProgress: total.reservedInProgress + accounting.reservedInProgress,
+      confirmedPrinted: total.confirmedPrinted + accounting.confirmedPrinted,
+      awaitingRecovery: total.awaitingRecovery + accounting.awaitingRecovery,
+      retiredBlocked: total.retiredBlocked + accounting.retiredBlocked,
+      needsReconciliation: total.needsReconciliation + accounting.needsReconciliation,
+      scanned: total.scanned + accounting.scanned,
+      redeemed: total.redeemed + accounting.redeemed,
+      complete: total.complete && accounting.complete,
+    } : accounting;
+  }
+  return total;
+}
 
 export type ManufacturerOperationalSnapshot = {
   assignedLabelCount: number;
@@ -230,6 +257,7 @@ export const buildStableBatchOverviewRows = (rows: BatchWorkspaceRow[]) => {
     } else {
       const allocation: BatchWorkspaceAllocation = {
         batchId: row.id,
+        printAccounting: row.printAccounting,
         batchName: row.name,
         manufacturerId: String(row.manufacturer?.id || row.manufacturerId || "").trim(),
         manufacturerName: row.manufacturer?.name || "Assigned manufacturer",
@@ -294,7 +322,7 @@ export const buildStableBatchOverviewRows = (rows: BatchWorkspaceRow[]) => {
       redeemedCodes: group.redeemedCodes,
       blockedCodes: group.blockedCodes,
       manufacturerCount: group.allocationsByManufacturer.size,
-      manufacturerOperational: buildManufacturerOperationalSnapshot(Array.from(group.allocationsByManufacturer.values())),
+      manufacturerOperational: buildManufacturerOperationalSnapshot(group.allocations),
       allocations: group.allocations.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
       manufacturerSummary: Array.from(group.allocationsByManufacturer.values()).sort(
         (left, right) => right.allocatedCodes - left.allocatedCodes || left.manufacturerName.localeCompare(right.manufacturerName)

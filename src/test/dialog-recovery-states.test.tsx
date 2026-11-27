@@ -7,9 +7,17 @@ import { PrintProgressDialog } from "@/components/printing/PrintProgressDialog";
 import { LicenseeBatchWorkspaceDialog } from "@/components/batches/LicenseeBatchWorkspaceDialog";
 import { BatchPrintJobDialog, DeleteBatchDialog, RenameBatchDialog } from "@/features/batches/components/BatchDialogs";
 import { LicenseeDialogs } from "@/features/licensees/components/LicenseeDialogs";
+import type { PrintJobRow } from "@/features/batches/types";
 import { ManufacturerDetailsDialog } from "@/features/manufacturers/components/ManufacturerDetailsDialog";
 
 describe("dialog recovery states", () => {
+  const runSummary = (jobId: string, status: string, requestedCount: number, overrides: Partial<NonNullable<PrintJobRow["runSummary"]>> = {}): NonNullable<PrintJobRow["runSummary"]> => ({
+    jobId, jobNumber: null, batchId: "batch-1", requestedCount,
+    confirmedCount: 0, pendingCount: 0, failedCount: 0, uncertainCount: 0, cancelledOrRetiredCount: 0,
+    serialRange: { startCode: null, endCode: null }, printer: null, operator: null,
+    operationalStatus: status, recoveryReason: null, allowedActions: [], complete: true,
+    ...overrides,
+  });
   const manufacturerOperational = (overrides: Record<string, unknown> = {}) => ({
     assignedLabelCount: 0,
     confirmedPrintedCount: 0,
@@ -190,7 +198,7 @@ describe("dialog recovery states", () => {
     expect(onRelink).toHaveBeenCalled();
   });
 
-  it("offers a safe close action for failed print runs with no confirmed items", () => {
+  it("offers Abandon only for a failed run the server confirms is unused", () => {
     const onAbandon = vi.fn();
     renderPrintDialog({
       recentPrintJobs: [
@@ -200,7 +208,8 @@ describe("dialog recovery states", () => {
           printMode: "LOCAL_AGENT",
           quantity: 1,
           createdAt: new Date().toISOString(),
-          failureReason: "Printer agent did not acknowledge issued label before deadline.",
+          failureReason: "pre_dispatch_failure",
+          runSummary: runSummary("job-failed", "FAILED", 1, { failedCount: 1, allowedActions: ["abandon"] }),
           printer: { name: "E2E Local Agent Printer" },
           session: { confirmedItems: 0, remainingToPrint: 1 },
         } as any,
@@ -208,7 +217,7 @@ describe("dialog recovery states", () => {
       onAbandonPrintJob: onAbandon,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Close and release labels" }));
+    fireEvent.click(screen.getByRole("button", { name: "Abandon unused run" }));
     expect(onAbandon).toHaveBeenCalledWith("job-failed");
   });
 
@@ -272,6 +281,7 @@ describe("dialog recovery states", () => {
         {
           id: "job-active",
           jobNumber: "PJ-ACTIVE",
+          runSummary: runSummary("job-active", "SENT", 12, { confirmedCount: 4, pendingCount: 7, failedCount: 1, allowedActions: ["pause", "stop"] }),
           status: "SENT",
           printMode: "LOCAL_AGENT",
           quantity: 12,
@@ -284,6 +294,7 @@ describe("dialog recovery states", () => {
         {
           id: "job-paused",
           jobNumber: "PJ-PAUSED",
+          runSummary: runSummary("job-paused", "PAUSED", 10, { confirmedCount: 5, pendingCount: 5, allowedActions: ["resume", "stop"] }),
           status: "PAUSED",
           printMode: "LOCAL_AGENT",
           quantity: 10,
@@ -295,6 +306,7 @@ describe("dialog recovery states", () => {
         {
           id: "job-confirmed",
           jobNumber: "PJ-CONFIRMED",
+          runSummary: runSummary("job-confirmed", "CONFIRMED", 10, { confirmedCount: 10, allowedActions: ["requestReissue"] }),
           status: "CONFIRMED",
           pipelineState: "LOCKED",
           printMode: "LOCAL_AGENT",
@@ -319,6 +331,7 @@ describe("dialog recovery states", () => {
     expect(screen.getByRole("button", { name: "Resume printing" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Labels physically printed/i })).not.toBeInTheDocument();
     expect(screen.getByText(/Waiting for connector physical confirmation/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Stop printing" })).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Request reissue" }));
     expect(onOpenReissue).toHaveBeenCalledWith(expect.objectContaining({ id: "job-confirmed" }));
   });
@@ -421,7 +434,7 @@ describe("dialog recovery states", () => {
     expect(screen.getByText("Operator: Priya Operator")).toBeInTheDocument();
   });
 
-  it("renders manufacturer batch modal with remaining labels, requested range, and no source-batch sample proof", () => {
+  it("renders manufacturer batch modal with available labels, requested range, and no source-batch sample proof", () => {
     render(
       <MemoryRouter>
         <LicenseeBatchWorkspaceDialog
@@ -454,16 +467,40 @@ describe("dialog recovery states", () => {
                 batchName: "Manufacturer Launch Batch",
                 manufacturerId: "mfg-1",
                 manufacturerName: "Factory",
-                allocatedCodes: 1000,
-                printableCodes: 925,
+                printAccounting: {
+                  totalAllocated: 900, available: 825, confirmedPrinted: 74, retiredBlocked: 1,
+                  reservedInProgress: 0, awaitingRecovery: 0, needsReconciliation: 0,
+                  scanned: 1, redeemed: 0, activePrintRun: false, complete: true,
+                },
+                allocatedCodes: 900,
+                printableCodes: 825,
                 printedCodes: 74,
                 redeemedCodes: 1,
                 blockedCodes: 0,
                 createdAt: "2026-06-18T10:00:00.000Z",
                 batchRangeStart: "QR-000001",
-                batchRangeEnd: "QR-001000",
+                batchRangeEnd: "QR-000900",
                 currentRangeStart: "QR-000075",
-                currentRangeEnd: "QR-001000",
+                currentRangeEnd: "QR-000900",
+              },
+              {
+                batchId: "batch-mfg-newer",
+                batchName: "Second allocation",
+                manufacturerId: "mfg-1",
+                manufacturerName: "Factory",
+                printAccounting: {
+                  totalAllocated: 100, available: 100, confirmedPrinted: 0, retiredBlocked: 0,
+                  reservedInProgress: 0, awaitingRecovery: 0, needsReconciliation: 0,
+                  scanned: 0, redeemed: 0, activePrintRun: false, complete: true,
+                },
+                allocatedCodes: 100,
+                printableCodes: 100,
+                printedCodes: 0,
+                redeemedCodes: 0,
+                blockedCodes: 0,
+                createdAt: "2026-06-19T10:00:00.000Z",
+                batchRangeStart: "QR-000901",
+                batchRangeEnd: "QR-001000",
               },
             ],
             manufacturerSummary: [],
@@ -503,6 +540,9 @@ describe("dialog recovery states", () => {
             {
               id: "job-retired-unknown",
               jobNumber: "PJ-RETIRED",
+              runSummary: runSummary("job-retired-unknown", "STOPPED", 1, {
+                cancelledOrRetiredCount: 1, recoveryReason: "QR retired. Historical physical output remains unknown.",
+              }),
               status: "STOPPED",
               pipelineState: "STOPPED",
               failureReason: "historical_physical_outcome_unknown_qr_retired",
@@ -515,6 +555,9 @@ describe("dialog recovery states", () => {
             {
               id: "job-range",
               jobNumber: "PJ-RANGE",
+              runSummary: runSummary("job-range", "CONFIRMED", 10, {
+                confirmedCount: 10, serialRange: { startCode: "QR-000065", endCode: "QR-000074" },
+              }),
               status: "CONFIRMED",
               pipelineState: "PRINT_CONFIRMED",
               printMode: "LOCAL_AGENT",
@@ -550,20 +593,20 @@ describe("dialog recovery states", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getAllByText(/remaining labels/i).length).toBeGreaterThan(0);
-    expect(screen.getByText((_, element) => element?.textContent === "925 remaining labels")).toBeInTheDocument();
+    expect(screen.getAllByText(/available to print/i).length).toBeGreaterThan(0);
+    expect(screen.getByText((_, element) => element?.textContent === "925 available to print")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Confirmed prints/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Stopped prints/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Replacement labels/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Pending re-issue requests/i })).toBeInTheDocument();
     expect(screen.queryByText("Recovery required before next range")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Stopped prints/i }));
-    expect(screen.getByText("QR retired; output unknown")).toBeInTheDocument();
+    expect(screen.getByText("QR retired. Historical physical output remains unknown.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Request re-issue" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Back to operations/i }));
 
     fireEvent.click(screen.getByRole("button", { name: /Confirmed prints/i }));
-    expect(screen.getByText("QR-000065 to QR-000074")).toBeInTheDocument();
+    expect(screen.getByText("Range QR-000065 to QR-000074")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Back to operations/i }));
     fireEvent.click(screen.getByRole("button", { name: /Replacement labels/i }));
     expect(screen.queryByText(/source batch/i)).not.toBeInTheDocument();
@@ -669,7 +712,7 @@ describe("dialog recovery states", () => {
   it("shows active local-agent print controls without waiting for recent jobs", () => {
     const onOpenControl = vi.fn();
     const onRefresh = vi.fn();
-    renderPrintDialog({
+    const props = {
       printJobId: "job-live",
       printProgressPhase: "Local print session active",
       printProgressTotal: 30,
@@ -680,8 +723,16 @@ describe("dialog recovery states", () => {
       recentPrintJobs: [],
       onOpenPrintControlDialog: onOpenControl,
       onRefreshPrintStatus: onRefresh,
-    });
+    };
 
+    const pending = renderPrintDialog(props);
+    expect(screen.queryByRole("button", { name: "Stop print run" })).not.toBeInTheDocument();
+    pending.unmount();
+    renderPrintDialog({ ...props, authoritativeProgressJob: {
+      id: "job-live", status: "SENT", printMode: "LOCAL_AGENT", quantity: 30,
+      createdAt: "2026-11-26T21:00:00Z",
+      runSummary: runSummary("job-live", "SENT", 30, { confirmedCount: 5, pendingCount: 25, allowedActions: ["stop"] }),
+    } });
     expect(screen.getByText("5 printed")).toBeInTheDocument();
     expect(screen.getByText("25 remaining")).toBeInTheDocument();
     expect(screen.getByText("30 total labels")).toBeInTheDocument();
@@ -912,6 +963,9 @@ describe("dialog recovery states", () => {
     renderPrintDialog({
       recentPrintJobs: [{
         id: "job-stopped-before-dispatch",
+        runSummary: runSummary("job-stopped-before-dispatch", "STOPPED", 1, {
+          cancelledOrRetiredCount: 1, allowedActions: ["requestReissue"],
+        }),
         status: "STOPPED",
         pipelineState: "STOPPED",
         printMode: "LOCAL_AGENT",
@@ -996,6 +1050,9 @@ describe("dialog recovery states", () => {
       recentPrintJobs: [
         {
           id: "job-awaiting",
+          runSummary: runSummary("job-awaiting", "NEEDS_OPERATOR_ACTION", 1, {
+            uncertainCount: 1, recoveryReason: "The outcome of a previous print attempt is unresolved.",
+          }),
           status: "SENT",
           pipelineState: "NEEDS_OPERATOR_ACTION",
           printMode: "LOCAL_AGENT",
@@ -1010,7 +1067,10 @@ describe("dialog recovery states", () => {
       ],
     });
 
-    expect(screen.getByText(/Sent to printer, awaiting\/manual confirmation/i)).toBeInTheDocument();
+    expect(screen.getByText("Needs operator review")).toBeInTheDocument();
+    expect(screen.getByText("The outcome of a previous print attempt is unresolved.")).toBeInTheDocument();
+    expect(screen.getByText("Uncertain 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resume printing" })).not.toBeInTheDocument();
     expect(screen.queryByText(/compatible setup/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Remaining 0/i)).not.toBeInTheDocument();
   });
