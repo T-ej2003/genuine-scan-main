@@ -20,7 +20,7 @@ const realtimeRoutesSource = readNormalized("src/routes/modules/realtimeRoutes.t
 const governanceRoutesSource = readNormalized("src/routes/modules/governanceRoutes.ts");
 const auditRoutesSource = readNormalized("src/routes/auditRoutes.ts");
 const authControllerSharedSource = readNormalized("src/controllers/authControllerShared.ts");
-const { buildPublicActorRateLimitKey, fromBodyFields } = require("../dist/middleware/publicRateLimit");
+const { buildPublicActorRateLimitKey, buildPublicIpRateLimitKey, fromBodyFields } = require("../dist/middleware/publicRateLimit");
 
 assert(!indexSource.includes("app.use(cookieParser())"), "app root should not mount cookie parsing globally");
 assert(!appSource.includes("app.use(cookieParser())"), "app root should not mount cookie parsing globally");
@@ -63,9 +63,14 @@ assert(
   auditRoutesSource.includes('"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
   "audit stream connections must require the role-aware recent-authentication boundary before tenant isolation"
 );
+assert(routesSource.includes('const printRecoveryReadIpLimiter = createPublicIpRateLimiter({ scope: "print.recovery.read:ip",'),
+  "recovery reads must use a credential-independent limiter");
+const recoveryIpKey = (ip, bearer) => buildPublicIpRateLimitKey({ ip, headers: { authorization: bearer } }, "print.recovery.read:ip");
+assert.equal(recoveryIpKey("192.0.2.1", "Bearer changed"), recoveryIpKey("192.0.2.1", "Bearer original"));
+assert.notEqual(recoveryIpKey("192.0.2.1", "Bearer original"), recoveryIpKey("192.0.2.2", "Bearer original"));
 for (const route of ["/manufacturer/batches/:batchId/history", "/manufacturer/print-jobs/:id/retirement"]) {
   assert(
-    routesSource.includes(`"${route}", printReadPreAuthRouteLimiter, authenticate, requireOpsUser, printReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation,`),
+    routesSource.includes(`"${route}", printRecoveryReadIpLimiter, authenticate, requireOpsUser, printReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation,`),
     `${route} must rate-limit before authorization and retain protected actor and tenant limits`
   );
 }

@@ -529,6 +529,13 @@ const printReadPreAuthRouteLimiter = createSharedRateLimiter({
   handler: createRateLimitJsonHandler("print.read.pre-auth", "Too many print status reads. Please wait before retrying."),
 });
 
+const printRecoveryReadIpLimiter = createPublicIpRateLimiter({
+  scope: "print.recovery.read:ip",
+  windowMs: 10 * 60 * 1000,
+  max: 180,
+  message: "Too many print recovery reads. Please wait before retrying.",
+});
+
 const printExportRouteLimiter = createSharedRateLimiter({
   windowMs: 10 * 60 * 1000,
   max: 12,
@@ -1961,7 +1968,7 @@ protectedMutationRouter.post(
 );
 protectedReadRouter.get(
   "/manufacturer/batches/:batchId/history",
-  printReadPreAuthRouteLimiter,
+  printRecoveryReadIpLimiter,
   authenticate,
   requireOpsUser,
   printReadRouteLimiter,
@@ -1999,7 +2006,7 @@ protectedReadRouter.get(
 );
 protectedReadRouter.get(
   "/manufacturer/print-jobs/:id/retirement",
-  printReadPreAuthRouteLimiter,
+  printRecoveryReadIpLimiter,
   authenticate,
   requireOpsUser,
   printReadRouteLimiter,
