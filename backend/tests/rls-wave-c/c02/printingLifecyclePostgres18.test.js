@@ -1974,6 +1974,10 @@ async function main() {
   denied(app, `BEGIN; SELECT pg_sleep(2); ${executeStopped()}; ROLLBACK`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "reprintOfJobId"='${stopJobId}'`), "0");
   psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"=now()+interval '1 day' WHERE id='${stopQrId}'`);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds'
+    WHERE id='${maintainedSession}'`);
+  denied(app, executeStopped(), /PRINTER_ATTESTATION_STALE/);
+  json(app, advance(maintainedSession,2).replaceAll(ids.discoveredPrinter,ids.printer));
   psql(admin, `UPDATE public."PrintJob" SET status='FAILED' WHERE id='${stopJobId}'`);
   const archivedEvidenceId = randomUUID();
   psql(admin, `INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType")
@@ -1985,10 +1989,6 @@ async function main() {
   denied(app, executeStopped(), /NOT_ENOUGH_CODES/);
   psql(admin, `DELETE FROM public."PrintItemEvent" WHERE id='${archivedEvidenceId}';
     UPDATE public."PrintJob" SET status='STOPPED' WHERE id='${stopJobId}'`);
-  psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds'
-    WHERE id='${maintainedSession}'`);
-  denied(app, executeStopped(), /PRINTER_ATTESTATION_STALE/);
-  json(app, advance(maintainedSession,2).replaceAll(ids.discoveredPrinter,ids.printer));
   const recoveredStop = json(app, executeStopped());
   assert.equal(recoveredStop.status, "EXECUTED");
   assert.equal(json(app, executeStopped()).idempotent, true);
