@@ -63,6 +63,12 @@ assert(
   auditRoutesSource.includes('"/stream", auditStreamPreAuthRouteLimiter, authenticateSSE, requireAuditViewer, requireRecentAdminMfa, enforceTenantIsolation,'),
   "audit stream connections must require the role-aware recent-authentication boundary before tenant isolation"
 );
+for (const route of ["/manufacturer/batches/:batchId/history", "/manufacturer/print-jobs/:id/retirement"]) {
+  assert(
+    routesSource.includes(`"${route}", printReadPreAuthRouteLimiter, authenticate, requireOpsUser, printReadRouteLimiter, protectedReadRouteLimiter, enforceTenantIsolation,`),
+    `${route} must rate-limit before authorization and retain protected actor and tenant limits`
+  );
+}
 assert(
   routesSource.includes('"/incidents/evidence-files/:fileName", incidentExportPreAuthRouteLimiter, authenticate, requireAnyAdmin, incidentExportRouteLimiter, protectedReadRouteLimiter, requireRecentAdminMfa, enforceTenantIsolation,'),
   "incident evidence downloads must require role-aware recent authentication"

@@ -1961,6 +1961,7 @@ protectedMutationRouter.post(
 );
 protectedReadRouter.get(
   "/manufacturer/batches/:batchId/history",
+  printReadPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   printReadRouteLimiter,
@@ -1998,6 +1999,7 @@ protectedReadRouter.get(
 );
 protectedReadRouter.get(
   "/manufacturer/print-jobs/:id/retirement",
+  printReadPreAuthRouteLimiter,
   authenticate,
   requireOpsUser,
   printReadRouteLimiter,
