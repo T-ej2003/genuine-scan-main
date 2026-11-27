@@ -14,7 +14,11 @@ import {
 } from "@/lib/active-print-session";
 import { useDashboardStats } from "@/features/dashboard/hooks";
 import { useDashboardNotifications, useOperationalAttentionQueue } from "@/features/layout/hooks";
-import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
+import { ManufacturerPrinterRuntimeProvider } from "@/features/printing/manufacturer-printer-runtime";
+import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import type { User } from "@/types";
+
+const user = { id: "print-maker", role: "manufacturer" } as User;
 
 vi.mock("@/lib/api-client", () => ({
   default: {
@@ -25,6 +29,7 @@ vi.mock("@/lib/api-client", () => ({
     getPrinterConnectionStatus: vi.fn(),
     getLocalPrintAgentStatus: vi.fn(),
     listRegisteredPrinters: vi.fn(),
+    streamPrinterConnectionStatus: vi.fn(() => () => undefined),
   },
 }));
 
@@ -41,13 +46,13 @@ function AutoReadProbe() {
   useDashboardStats();
   useDashboardNotifications(true);
   useOperationalAttentionQueue(true);
-  useManufacturerPrinterRuntime(true, true);
   return <div>probe ready</div>;
 }
 
 describe("active print session read suppression", () => {
   afterEach(() => {
     clearActivePrintSession();
+    setRequestCoordinatorScope(null);
     vi.clearAllMocks();
   });
 
@@ -59,7 +64,8 @@ describe("active print session read suppression", () => {
       terminal: false,
     });
 
-    renderWithClient(<AutoReadProbe />);
+    setRequestCoordinatorScope(user);
+    renderWithClient(<ManufacturerPrinterRuntimeProvider user={user}><AutoReadProbe /></ManufacturerPrinterRuntimeProvider>);
 
     expect(screen.getByText("probe ready")).toBeInTheDocument();
     expect(apiClient.getDashboardStats).not.toHaveBeenCalled();
@@ -105,7 +111,8 @@ describe("active print session read suppression", () => {
     expect(hasRecoverableActivePrintSession()).toBe(true);
     expect(getActivePrintRecoveryLabel()).toBe("View print result");
 
-    renderWithClient(<AutoReadProbe />);
+    setRequestCoordinatorScope(user);
+    renderWithClient(<ManufacturerPrinterRuntimeProvider user={user}><AutoReadProbe /></ManufacturerPrinterRuntimeProvider>);
 
     expect(screen.getByText("probe ready")).toBeInTheDocument();
     expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(1);

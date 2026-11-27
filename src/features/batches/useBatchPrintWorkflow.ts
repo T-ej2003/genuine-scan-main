@@ -13,12 +13,8 @@ import {
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
-import {
-  refreshManufacturerPrinterRuntimeSnapshot,
-  useManufacturerPrinterRuntime,
-  usePrintJobs,
-  type ManufacturerPrinterRuntime,
-} from "@/features/printing/hooks";
+import { usePrintJobs } from "@/features/printing/hooks";
+import { useManufacturerPrinterRuntime } from "@/features/printing/manufacturer-printer-runtime";
 
 import {
   buildManagedNetworkPrinterNotice,
@@ -44,7 +40,6 @@ import {
 } from "./batchPrintWorkflowHelpers";
 import type {
   BatchRow,
-  LocalPrinterRow,
   PrintJobRow,
   PrinterConnectionStatus,
   PrinterSelectionNotice,
@@ -67,9 +62,9 @@ export function useBatchPrintWorkflow({
   const [printQuantity, setPrintQuantity] = useState("");
   const [printJobId, setPrintJobId] = useState("");
   const [directRemainingToPrint, setDirectRemainingToPrint] = useState<number | null>(null);
-  const [detectedPrinters, setDetectedPrinters] = useState<LocalPrinterRow[]>([]);
+
   const [selectedPrinterId, setSelectedPrinterId] = useState("");
-  const [registeredPrinters, setRegisteredPrinters] = useState<RegisteredPrinterRow[]>([]);
+
   const [selectedPrinterProfileId, setSelectedPrinterProfileId] = useState("");
   const [recentPrintJobs, setRecentPrintJobs] = useState<PrintJobRow[]>([]);
   const [sampleScanCodeByJobId, setSampleScanCodeByJobId] = useState<Record<string, string>>({});
@@ -103,20 +98,16 @@ export function useBatchPrintWorkflow({
   const [printProgressDispatchMode, setPrintProgressDispatchMode] = useState<
     "LOCAL_AGENT" | "NETWORK_DIRECT" | "NETWORK_IPP" | null
   >(null);
-  const [localPrinterAgent, setLocalPrinterAgent] = useState<LocalPrinterAgentSnapshot>({
-    reachable: false,
-    connected: false,
-    error: "Local print agent has not been checked yet.",
-    checkedAt: null,
-  });
-  const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatus>(defaultPrinterStatus);
+  const runtime = useManufacturerPrinterRuntime();
+  const localPrinterAgent: LocalPrinterAgentSnapshot = runtime?.snapshot.localAgent ??
+    { reachable: false, connected: false, error: null, checkedAt: null };
+  const printerStatus: PrinterConnectionStatus = runtime?.snapshot.remoteStatus ?? defaultPrinterStatus;
+  const detectedPrinters = runtime?.snapshot.detectedPrinters ?? [];
+  const registeredPrinters = (runtime?.snapshot.registeredPrinters ?? []) as RegisteredPrinterRow[];
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
   const actionInFlightRef = useRef(new Map<string, Promise<void>>());
-  const printerRefreshGenerationRef = useRef(0);
-
   const printJobsQuery = usePrintJobs(printBatch?.id, 8, false);
-  const printerRuntimeQuery = useManufacturerPrinterRuntime(true, isManufacturer && !printJobId);
 
   const securePrintReadiness = useMemo(() => buildSecurePrintReadiness(printerStatus), [printerStatus]);
   const printerReady = securePrintReadiness.ready;
@@ -168,7 +159,7 @@ export function useBatchPrintWorkflow({
       : false;
   const selectedLocalProfileRegistrationStale = Boolean(
     selectedPrinterProfile?.connectionType === "LOCAL_AGENT" &&
-      printerReady &&
+      runtime?.snapshot.deviceVerified &&
       selectedPrinterProfile.printerRegistrationId &&
       printerStatus.registrationId &&
       selectedPrinterProfile.printerRegistrationId !== printerStatus.registrationId &&
@@ -176,15 +167,30 @@ export function useBatchPrintWorkflow({
   );
   const selectedPrinterCanPrint = Boolean(
     selectedPrinterProfile &&
+      !runtime?.checking && !runtime?.suppressed && !runtime?.snapshot.rosterUnavailable &&
       selectedPrinterProfile.isActive &&
       (selectedPrinterProfile.connectionType !== "LOCAL_AGENT"
         ? selectedPrinterProfile.registryStatus?.state === "READY"
         : printerReady && selectedLocalProfileMatchesAgent && !selectedLocalProfileRegistrationStale)
   );
   const selectedPrinterNotice = useMemo<PrinterSelectionNotice>(() => {
+    if (runtime?.suppressed) return {
+      title: "Print run in progress", summary: "Printing is already in progress.",
+      detail: "Finish or stop the current run before starting another one.", tone: "warning",
+    };
+    if (runtime?.snapshot.rosterUnavailable) return {
+      title: "Printer verification unavailable", summary: "Saved printers could not be verified.",
+      detail: "Refresh printer status before starting this print run.", tone: "warning",
+    };
     if (selectedPrinterProfile?.connectionType !== "LOCAL_AGENT") {
       return buildManagedNetworkPrinterNotice(selectedPrinterProfile);
     }
+    if (printerReady && !selectedLocalProfileMatchesAgent) return {
+      title: "Check the selected printer",
+      summary: "This printer is awaiting verification.",
+      detail: "Apply the printer selection on this computer and retry verification.",
+      tone: "warning",
+    };
 
     return {
       title: printerDiagnostics.title,
@@ -201,6 +207,8 @@ export function useBatchPrintWorkflow({
       tone: selectedLocalProfileRegistrationStale ? "warning" : securePrintReadiness.tone || printerDiagnostics.tone,
     };
   }, [
+    runtime?.suppressed,
+    runtime?.snapshot.rosterUnavailable,
     printerDiagnostics.detail,
     printerDiagnostics.summary,
     printerDiagnostics.title,
@@ -213,6 +221,7 @@ export function useBatchPrintWorkflow({
     securePrintReadiness.tone,
     selectedDetectedPrinter?.printerName,
     selectedLocalProfileRegistrationStale,
+    selectedLocalProfileMatchesAgent,
     selectedPrinterProfile,
   ]);
   const selectedPrinterReadinessDisplay = useMemo(
@@ -239,15 +248,9 @@ export function useBatchPrintWorkflow({
   const applyRegisteredPrintersSnapshot = (
     printers: RegisteredPrinterRow[], preferredLocalPrinterId?: string | null, preferredRegistrationId?: string | null
   ) => {
-    setRegisteredPrinters(printers);
     setSelectedPrinterProfileId((previous) => {
       const current = printers.find((row) => row.id === previous && row.isActive);
-      if (
-        current &&
-        (current.connectionType !== "LOCAL_AGENT" ||
-          !preferredRegistrationId ||
-          current.printerRegistrationId === preferredRegistrationId)
-      ) return previous;
+      if (current) return previous;
 
       const trimmedLocalId = String(preferredLocalPrinterId || "").trim();
       if (trimmedLocalId) {
@@ -270,45 +273,6 @@ export function useBatchPrintWorkflow({
 
   const buildCalibrationPayload = () =>
     buildBatchCalibrationPayload({ calibrationProfile, selectedDetectedPrinter, printerStatus });
-
-  const applyPrinterRuntimeSnapshot = (
-    snapshot: ManufacturerPrinterRuntime,
-    preferredLocalPrinterId?: string | null
-  ) => {
-    setLocalPrinterAgent(snapshot.localAgent);
-    setPrinterStatus({
-      ...(snapshot.remoteStatus as PrinterConnectionStatus),
-      printers: snapshot.detectedPrinters as LocalPrinterRow[],
-    });
-    setDetectedPrinters(snapshot.detectedPrinters as LocalPrinterRow[]);
-    const nextPreferredPrinterId = String(
-      chooseStablePrinterSelection(
-        snapshot.detectedPrinters as LocalPrinterRow[],
-        selectedPrinterId || preferredLocalPrinterId,
-        snapshot.remoteStatus.selectedPrinterId,
-        snapshot.remoteStatus.printerId
-      )?.printerId ||
-        preferredLocalPrinterId ||
-        snapshot.preferredPrinterId ||
-        ""
-    ).trim();
-    if (nextPreferredPrinterId) {
-      setSelectedPrinterId((previous) => {
-        const repaired = chooseStablePrinterSelection(
-          snapshot.detectedPrinters as LocalPrinterRow[],
-          previous || nextPreferredPrinterId,
-          snapshot.remoteStatus.selectedPrinterId,
-          snapshot.remoteStatus.printerId
-        );
-        return repaired?.printerId || previous || nextPreferredPrinterId;
-      });
-    }
-    applyRegisteredPrintersSnapshot(
-      snapshot.registeredPrinters as RegisteredPrinterRow[],
-      nextPreferredPrinterId || snapshot.preferredPrinterId,
-      snapshot.remoteStatus.registrationId
-    );
-  };
 
   useEffect(() => {
     if (!printCooldownUntil || printCooldownUntil <= Date.now()) return;
@@ -356,79 +320,30 @@ export function useBatchPrintWorkflow({
     setRecentPrintJobs(Array.isArray(response.data) ? (response.data as PrintJobRow[]) : []);
   };
 
-  const loadPrinterStatus = async (options: { force?: boolean } = {}) => {
-    if (!isManufacturer) return;
-    const generation = ++printerRefreshGenerationRef.current;
-    if (options.force) {
-      setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false,
-        trustReason: "Checking current printer verification." }));
-      try {
-        const snapshot = await refreshManufacturerPrinterRuntimeSnapshot();
-        if (generation === printerRefreshGenerationRef.current) applyPrinterRuntimeSnapshot(snapshot);
-      } catch {
-        if (generation !== printerRefreshGenerationRef.current) return;
-        setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false, stale: true,
-          trustReason: "Printer verification is unavailable. Refresh printer status and try again." }));
-      }
-      return;
+  const loadPrinterStatus = async (options?: { force?: boolean }) => { await runtime?.refresh(options); };
+  const scope = runtime?.scope || userId;
+  const previousScope = useRef(scope);
+  useEffect(() => {
+    if (previousScope.current !== scope) {
+      previousScope.current = scope;
+      setSelectedPrinterProfileId("");
+      setSelectedPrinterId("");
+      setPrintOpen(false);
+      setPrintBatch(null);
     }
-    const response = await printerRuntimeQuery.refetch();
-    if (generation !== printerRefreshGenerationRef.current) return;
-    if (!response.data) {
-      setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false, stale: true,
-        trustReason: "Printer verification is unavailable. Refresh printer status and try again." }));
-      return;
-    }
-    applyPrinterRuntimeSnapshot(response.data);
-  };
-
-  const applyPrinterRuntimeSnapshotRef = useRef(applyPrinterRuntimeSnapshot);
-  applyPrinterRuntimeSnapshotRef.current = applyPrinterRuntimeSnapshot;
-  const appliedRuntimeQueryRef = useRef<ManufacturerPrinterRuntime | null>(null);
-  const previousManufacturerIdRef = useRef(userId);
+  }, [scope]);
 
   useEffect(() => {
-    if (previousManufacturerIdRef.current === userId) return;
-    previousManufacturerIdRef.current = userId;
-    ++printerRefreshGenerationRef.current;
-    appliedRuntimeQueryRef.current = printerRuntimeQuery.data || null;
-    setPrinterStatus(defaultPrinterStatus);
-    setRegisteredPrinters([]);
-    setDetectedPrinters([]);
-    setSelectedPrinterProfileId("");
-    setSelectedPrinterId("");
-    setPrintOpen(false);
-    setPrintBatch(null);
-  }, [userId, printerRuntimeQuery.data]);
-
-  useEffect(() => {
-    if (printJobsQuery.data) {
-      setRecentPrintJobs(Array.isArray(printJobsQuery.data) ? (printJobsQuery.data as PrintJobRow[]) : []);
-    }
-  }, [printJobsQuery.data]);
-
-  useEffect(() => {
-    if (!printerRuntimeQuery.data || document.visibilityState === "hidden") return;
-    if (printerRuntimeQuery.data === appliedRuntimeQueryRef.current) return;
-    appliedRuntimeQueryRef.current = printerRuntimeQuery.data;
-    if (!printOpen) applyPrinterRuntimeSnapshotRef.current(printerRuntimeQuery.data);
-  }, [printerRuntimeQuery.data, printOpen]);
-
-  useEffect(() => {
-    if (!isManufacturer) return;
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        ++printerRefreshGenerationRef.current;
-        setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false, stale: true,
-          trustReason: "Printer verification expired while this tab was hidden." }));
-      } else if (printOpen) {
-        void loadPrinterStatus({ force: true });
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+    if (!runtime) return;
+    setSelectedPrinterId((previous) => previous || runtime.snapshot.preferredPrinterId || "");
+    applyRegisteredPrintersSnapshot(registeredPrinters, runtime.snapshot.preferredPrinterId,
+      runtime.snapshot.remoteStatus.registrationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isManufacturer, printOpen]);
+  }, [runtime?.snapshot]);
+
+  useEffect(() => {
+    if (printJobsQuery.data) setRecentPrintJobs(printJobsQuery.data as PrintJobRow[]);
+  }, [printJobsQuery.data]);
 
   useEffect(() => {
     if (!isManufacturer || !printOpen) return;
@@ -455,8 +370,7 @@ export function useBatchPrintWorkflow({
     setSelectedPrinterProfileId((previous) => {
       const current = registeredPrinters.find((row) => row.id === previous) || null;
       if (current?.connectionType && current.connectionType !== "LOCAL_AGENT") return previous;
-      if (current?.isActive && current.nativePrinterId === selectedPrinterId &&
-          (!printerStatus.registrationId || current.printerRegistrationId === printerStatus.registrationId)) return previous;
+      if (current?.isActive && current.nativePrinterId === selectedPrinterId) return previous;
 
       const matchingLocal = registeredPrinters.find(
         (row) =>
@@ -516,17 +430,16 @@ export function useBatchPrintWorkflow({
     if (!selectedPrinterId) return;
     setSwitchingPrinter(true);
     try {
-      const response = await apiClient.selectLocalPrinter(selectedPrinterId);
-      if (!response.success) {
+      const response = await runtime?.changePrinter(selectedPrinterId);
+      if (!response?.success) {
         toast({
           title: "Switch failed",
-          description: sanitizePrinterUiError(response.error, "Could not switch the printer on this computer."),
+          description: sanitizePrinterUiError(response?.error, "Could not switch the printer on this computer."),
           variant: "destructive",
         });
         return;
       }
       toast({ title: "Printer updated", description: "The printer on this computer has been updated." });
-      await loadPrinterStatus({ force: true });
     } finally {
       setSwitchingPrinter(false);
     }
@@ -869,7 +782,7 @@ export function useBatchPrintWorkflow({
         printerStatus,
         activeLocalPrinterId,
         selectedPrinterCanPrint,
-        setPrinterStatus,
+        onPrinterVerificationFailed: (reason) => runtime?.invalidate(reason),
         buildCalibrationPayload,
         autoReportPrinterFailure,
         onBatchesChanged,
@@ -914,10 +827,7 @@ export function useBatchPrintWorkflow({
     selectedPrinterProfileId,
     onSelectedPrinterProfileIdChange: (profileId: string) => {
       if (profileId === selectedPrinterProfileId) return;
-      ++printerRefreshGenerationRef.current;
       setSelectedPrinterProfileId(profileId);
-      setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false, stale: true,
-        trustReason: "Printer selection changed. Refresh printer verification." }));
       void loadPrinterStatus({ force: true });
     },
     selectedPrinterProfile,
@@ -925,10 +835,8 @@ export function useBatchPrintWorkflow({
     selectedPrinterId,
     onSelectedPrinterIdChange: (printerId: string) => {
       if (printerId === selectedPrinterId) return;
-      ++printerRefreshGenerationRef.current;
       setSelectedPrinterId(printerId);
-      setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false, stale: true,
-        trustReason: "Printer selection changed. Refresh printer verification." }));
+      runtime?.invalidate("Printer selection changed. Refresh printer verification.");
     },
     switchingPrinter,
     onSwitchSelectedPrinter: switchSelectedPrinter,

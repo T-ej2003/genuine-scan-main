@@ -500,7 +500,7 @@ export function BatchPrintJobDialog({
                   </div>
                   <div>
                     <div className="font-medium text-foreground">Secure verification</div>
-                    <div>{selectedPrinterCanPrint ? "Fresh" : "Refresh printer helper before starting this print run."}</div>
+                    <div>{printerVerificationPending ? "Checking printer" : selectedPrinterCanPrint ? "Fresh" : "Verification required"}</div>
                   </div>
                   <div>
                     <div className="font-medium text-foreground">Connector version</div>

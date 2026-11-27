@@ -6,10 +6,11 @@ import { PRINTER_FAILURE_REPORT_COOLDOWN_MS } from "./manufacturerPrinterConnect
 import type { User } from "@/types";
 import type { PrinterConnectionStatusDTO } from "../../../shared/contracts/runtime/printing.ts";
 
-export function createManufacturerPrinterFailureReporter({ user, printerFailureReportRef, printerFailureInFlightRef }: {
+export function createManufacturerPrinterFailureReporter({ user, printerFailureReportRef, printerFailureInFlightRef, isCurrent }: {
   user: User | null;
   printerFailureReportRef: MutableRefObject<{ signature: string; at: number }>;
   printerFailureInFlightRef: MutableRefObject<boolean>;
+  isCurrent: () => boolean;
 }) {
   const isSecurePrinterStatusReady = (status?: PrinterConnectionStatusDTO | null) => buildSecurePrintReadiness(status).ready;
   return async (params: {
@@ -61,6 +62,7 @@ export function createManufacturerPrinterFailureReporter({ user, printerFailureR
     printerFailureReportRef.current = { signature, at: now };
     try {
       const screenshot = await captureSupportScreenshot();
+      if (!isCurrent()) return;
       const form = new FormData();
       form.append(
         "title",

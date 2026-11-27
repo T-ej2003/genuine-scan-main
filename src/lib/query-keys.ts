@@ -16,7 +16,6 @@ export const queryKeys = {
   },
   printing: {
     jobs: (batchId?: string, limit = 8) => ["printing", "jobs", scopedValue(batchId), limit] as const,
-    runtime: (includeInactive = false, scope?: string) => ["printing", "runtime", includeInactive, scopedValue(scope)] as const,
   },
   layout: {
     notifications: (limit = 24, unreadOnly?: boolean) =>

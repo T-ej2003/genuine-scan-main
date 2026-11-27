@@ -8,11 +8,15 @@ import { useBatchPrintWorkflow } from "@/features/batches/useBatchPrintWorkflow"
 import { defaultPrinterStatus } from "@/features/batches/print-workflow-utils";
 import { BatchPrintJobDialog } from "@/features/batches/components/BatchDialogs";
 import { queryClient } from "@/lib/query-client";
+import { ManufacturerPrinterRuntimeProvider } from "@/features/printing/manufacturer-printer-runtime";
+import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import type { User } from "@/types";
 import type { BatchRow, PrintJobRow } from "@/features/batches/types";
 
 vi.mock("@/lib/api-client", () => ({ default: new Proxy({
   getPrinterConnectionStatus: vi.fn(), getLocalPrintAgentStatus: vi.fn(),
   listRegisteredPrinters: vi.fn(), listPrintJobs: vi.fn(), getPrintJobStatus: vi.fn(), createPrintJob: vi.fn(),
+  streamPrinterConnectionStatus: vi.fn(() => () => undefined), configureLocalPrintAgentBackend: vi.fn(),
 }, { get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn() }) }));
 
 type RemoteStatus = NonNullable<Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>["data"]>;
@@ -22,14 +26,16 @@ const verified: RemoteStatus = { ...defaultPrinterStatus, connected: true, trust
   securePrinterSession: true, freshHelperHeartbeat: true, helperConnection: true, eligiblePrinter: true,
   stale: false, connectionClass: "TRUSTED", registrationId: "registration-1", selectedPrinterId: "queue-1",
   printerId: "queue-1", selectedPrinterName: "Generic ZPL printer", trustStatus: "TRUSTED",
-  requiredForPrinting: true, lastHeartbeatAt: "2026-10-28T12:00:00.000Z", ageSeconds: 0 };
+  requiredForPrinting: true, lastHeartbeatAt: new Date().toISOString(), ageSeconds: 0,
+  agentId: "agent-1", deviceFingerprint: "device-1",
+  signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: new Date().toISOString() } };
 const printer = { printerId: "queue-1", printerName: "Generic ZPL printer", online: true };
 const localStatus: LocalStatus = {
   connected: true, printerName: printer.printerName, printerId: printer.printerId,
   selectedPrinterId: printer.printerId, selectedPrinterName: printer.printerName,
   deviceName: null, agentVersion: "2026.6.26", protocolVersion: null,
   buildVersion: "2026.6.26", transportDiagnosticsVersion: null,
-  capabilities: null, error: null, agentId: null, deviceFingerprint: null,
+  capabilities: null, error: null, agentId: "agent-1", deviceFingerprint: "device-1",
   publicKeyPem: null, clientCertFingerprint: null, heartbeatNonce: null,
   heartbeatIssuedAt: null, heartbeatSignature: null, compatibilityMode: false,
   websocket: null, capabilitySummary: null, printers: [printer], calibrationProfile: null,
@@ -52,22 +58,25 @@ function MountedPrintDialog() {
   </>;
 }
 
-const mount = () => {
-  const wrapper = ({ children }: { children: React.ReactNode }) =>
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-  return renderHook(useWorkflow, { wrapper });
-};
+const user = { id: "manufacturer-1", role: "manufacturer" } as User;
+const Wrapper = ({ children }: { children: React.ReactNode }) =>
+  <QueryClientProvider client={queryClient}>
+    <ManufacturerPrinterRuntimeProvider user={user}>{children}</ManufacturerPrinterRuntimeProvider>
+  </QueryClientProvider>;
+
+const mount = () => renderHook(useWorkflow, { wrapper: Wrapper });
 
 describe("Start print run dialogue lifecycle", () => {
   beforeEach(() => {
     queryClient.clear();
+    setRequestCoordinatorScope(user);
     vi.clearAllMocks();
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({ success: true, data: verified });
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: true, data: localStatus });
     vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({ success: true, data: [profile] });
     vi.mocked(apiClient.listPrintJobs).mockResolvedValue({ success: true, data: [] });
   });
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => { setRequestCoordinatorScope(null); vi.clearAllMocks(); });
 
   it("renders reconciled run facts and only server-permitted controls from the list", async () => {
     const run = (id: string, status: PrintJobRow["status"], actions: NonNullable<PrintJobRow["runSummary"]>["allowedActions"], complete = true): PrintJobRow => ({
@@ -87,7 +96,7 @@ describe("Start print run dialogue lifecycle", () => {
       run("Fenced run", "PAUSED", ["stop"]),
       run("Safely paused run", "PAUSED", ["resume", "stop"]),
     ] });
-    render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
+    render(<Wrapper><MountedPrintDialog /></Wrapper>);
     fireEvent.click(screen.getByRole("button", { name: "Open print run" }));
     const row = async (name: string) => within((await screen.findByText(name)).parentElement!.parentElement!);
     const completed = await row("Completed legacy run");
@@ -114,7 +123,7 @@ describe("Start print run dialogue lifecycle", () => {
   });
 
   it("mounts the real dialog, verifies once on opening, and never submits a job", async () => {
-    const view = render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
+    const view = render(<Wrapper><MountedPrintDialog /></Wrapper>);
     await waitFor(() => expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalled());
     vi.mocked(apiClient.getPrinterConnectionStatus).mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Open print run" }));
@@ -125,7 +134,7 @@ describe("Start print run dialogue lifecycle", () => {
   });
 
   it.each([401, 429, 500])("blocks the mounted dialog after HTTP %i", async (status) => {
-    const view = render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
+    const view = render(<Wrapper><MountedPrintDialog /></Wrapper>);
     await waitFor(() => expect(screen.getByTestId("selected-profile")).toHaveTextContent("profile-1"));
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValueOnce({ success: false, status,
       error: "Verification unavailable" });
@@ -141,7 +150,7 @@ describe("Start print run dialogue lifecycle", () => {
   });
 
   it("keeps a matching verified printer eligible in the mounted dialog", async () => {
-    const view = render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
+    const view = render(<Wrapper><MountedPrintDialog /></Wrapper>);
     await waitFor(() => expect(screen.getByTestId("selected-profile")).toHaveTextContent("profile-1"));
     fireEvent.click(screen.getByRole("button", { name: "Open print run" }));
     await waitFor(() => expect(screen.getByTestId("print-job-start-button")).not.toBeDisabled());
@@ -161,6 +170,18 @@ describe("Start print run dialogue lifecycle", () => {
     view.unmount();
   });
 
+  it("offers relink for a stale saved profile while blocking print execution", async () => {
+    const staleProfile = { ...profile, printerRegistrationId: "previous-registration" };
+    vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({ success: true, data: [staleProfile] });
+    const view = mount();
+    await waitFor(() => expect(view.result.current.dialogProps.registeredPrinters).toHaveLength(1));
+    act(() => view.result.current.dialogProps.onSelectedPrinterProfileIdChange(staleProfile.id));
+    await waitFor(() => expect(view.result.current.dialogProps.selectedLocalProfileRegistrationStale).toBe(true));
+    expect(view.result.current.dialogProps.securePrintReadiness.ready).toBe(false);
+    expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(false);
+    expect(apiClient.createPrintJob).not.toHaveBeenCalled();
+  });
+
   it("does not expire verification when the already selected printer is selected again", async () => {
     const view = mount();
     await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe("profile-1"));
@@ -173,7 +194,7 @@ describe("Start print run dialogue lifecycle", () => {
   });
 
   it("keeps connected hardware blocked when the mounted dialog sees expired attestation", async () => {
-    const view = render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
+    const view = render(<Wrapper><MountedPrintDialog /></Wrapper>);
     await waitFor(() => expect(screen.getByTestId("selected-profile")).toHaveTextContent("profile-1"));
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValueOnce({ success: true,
       data: { ...verified, trusted: true, eligibleForPrinting: false, stale: false,
@@ -187,7 +208,7 @@ describe("Start print run dialogue lifecycle", () => {
   });
 
   it("recovers in the same mounted dialog after a transient server failure", async () => {
-    const view = render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
+    const view = render(<Wrapper><MountedPrintDialog /></Wrapper>);
     await waitFor(() => expect(screen.getByTestId("selected-profile")).toHaveTextContent("profile-1"));
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValueOnce({ success: false, status: 500 });
     fireEvent.click(screen.getByRole("button", { name: "Open print run" }));
@@ -199,7 +220,7 @@ describe("Start print run dialogue lifecycle", () => {
   });
 
   it("presents pending verification while the mounted dialog waits for the server", async () => {
-    const view = render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
+    const view = render(<Wrapper><MountedPrintDialog /></Wrapper>);
     await waitFor(() => expect(screen.getByTestId("selected-profile")).toHaveTextContent("profile-1"));
     let finish: ((value: Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>) => void) | undefined;
     vi.mocked(apiClient.getPrinterConnectionStatus).mockImplementationOnce(() =>
@@ -306,19 +327,20 @@ describe("Start print run dialogue lifecycle", () => {
     await waitFor(() => expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledTimes(3));
     expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe("profile-2");
     expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(false);
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterNotice.title).toBe("Check the selected printer"));
     expect(apiClient.createPrintJob).not.toHaveBeenCalled();
     view.unmount();
   });
 
   it("closes the dialog and invalidates old verification when the account changes", async () => {
-    const wrapper = ({ children }: { children: React.ReactNode }) =>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    const wrapper = Wrapper;
     const view = renderHook(({ manufacturerId }) => useBatchPrintWorkflow({
       isManufacturer: true, userId: manufacturerId, toast: vi.fn(), getAvailableInventory: () => 10,
     }), { wrapper, initialProps: { manufacturerId: "manufacturer-1" } });
     await waitFor(() => expect(view.result.current.dialogProps.securePrintReadiness.ready).toBe(true));
     act(() => view.result.current.openPrintPack(batch));
     await waitFor(() => expect(view.result.current.dialogProps.open).toBe(true));
+    act(() => setRequestCoordinatorScope({ ...user, id: "manufacturer-2" }));
     view.rerender({ manufacturerId: "manufacturer-2" });
     expect(view.result.current.dialogProps.open).toBe(false);
     expect(view.result.current.dialogProps.securePrintReadiness.ready).toBe(false);

@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import apiClient from "@/lib/api-client";
-import { loadManufacturerPrinterRuntimeSnapshot, refreshManufacturerPrinterRuntimeSnapshot } from "@/features/printing/hooks";
+import { loadManufacturerPrinterRuntimeSnapshot } from "@/features/printing/hooks";
 import { defaultPrinterStatus } from "@/features/batches/print-workflow-utils";
 import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 import { queryClient } from "@/lib/query-client";
-import { queryKeys } from "@/lib/query-keys";
-import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 vi.mock("@/lib/api-client", () => ({ default: {
   getPrinterConnectionStatus: vi.fn(), getLocalPrintAgentStatus: vi.fn(), listRegisteredPrinters: vi.fn(),
@@ -58,39 +56,6 @@ describe("start print run runtime verification", () => {
     expect(buildSecurePrintReadiness(result.remoteStatus).reasonCode).toBe("VERIFICATION_UNAVAILABLE");
   });
 
-  it("restores authenticated readiness after 503 and honors an explicit disconnect", async () => {
-    const key = queryKeys.printing.runtime(true, getRequestCoordinatorScope());
-    vi.mocked(apiClient.getPrinterConnectionStatus)
-      .mockResolvedValueOnce({ success: true, data: trustedStatus })
-      .mockResolvedValueOnce({ success: false, status: 503, error: "Status unavailable" })
-      .mockResolvedValueOnce({ success: true, data: trustedStatus })
-      .mockResolvedValueOnce({ success: true, data: { ...trustedStatus, connected: false, trusted: false, eligibleForPrinting: false, trustStatus: "DISCONNECTED" } });
-    const ready = await refreshManufacturerPrinterRuntimeSnapshot();
-    const uncertain = await refreshManufacturerPrinterRuntimeSnapshot();
-    expect(uncertain.remoteStatus.registrationId).toBe("registration-1");
-    expect(buildSecurePrintReadiness(uncertain.remoteStatus).ready).toBe(false);
-    const recovered = await refreshManufacturerPrinterRuntimeSnapshot();
-    expect(buildSecurePrintReadiness(recovered.remoteStatus).ready).toBe(true);
-    const disconnected = await refreshManufacturerPrinterRuntimeSnapshot();
-    expect(disconnected.remoteStatus.connected).toBe(false);
-    expect(queryClient.getQueryData(key)).toEqual(disconnected);
-    expect(ready.remoteStatus.connected).toBe(true);
-  });
-
-  it("does not overwrite a newer verified disconnect with an older status response", async () => {
-    let releaseOlder!: (response: Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>) => void;
-    vi.mocked(apiClient.getPrinterConnectionStatus)
-      .mockImplementationOnce(() => new Promise((resolve) => { releaseOlder = resolve; }))
-      .mockResolvedValueOnce({ success: true, data: { ...trustedStatus, connected: false, trusted: false, eligibleForPrinting: false } });
-    const older = refreshManufacturerPrinterRuntimeSnapshot();
-    await vi.waitFor(() => expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledTimes(1));
-    const newer = await refreshManufacturerPrinterRuntimeSnapshot();
-    releaseOlder({ success: true, data: trustedStatus });
-    await expect(older).rejects.toThrow(/superseded/);
-    expect(queryClient.getQueryData<{ remoteStatus: { connected: boolean } }>(queryKeys.printing.runtime(true, getRequestCoordinatorScope()))?.remoteStatus.connected).toBe(false);
-    expect(newer.remoteStatus.connected).toBe(false);
-  });
-
   it("fails closed when a status request rejects or returns malformed data", async () => {
     const previous = {
       localAgent: { reachable: true, connected: true, error: null, checkedAt: "2026-10-28T11:59:55Z" },
@@ -136,7 +101,7 @@ describe("start print run runtime verification", () => {
         connectionClass: "TRUSTED", trustStatus: "TRUSTED", stale: false, rateLimited: true,
         requiredForPrinting: true, lastHeartbeatAt: null, ageSeconds: 0 },
     });
-    const result = await refreshManufacturerPrinterRuntimeSnapshot();
+    const result = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true });
     expect(result.remoteStatus.eligibleForPrinting).toBe(false);
     expect(result.remoteStatus.trustReason).toMatch(/verification is unavailable/i);
   });
@@ -160,10 +125,10 @@ describe("start print run runtime verification", () => {
         ...expiredStatus, eligibleForPrinting: true, trustReason: null,
         signedAttestation: { ...expiredStatus.signedAttestation, fresh: true },
       } });
-    const before = await refreshManufacturerPrinterRuntimeSnapshot();
+    const before = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true });
     expect(before.localAgent.connected).toBe(true);
     expect(before.remoteStatus.eligibleForPrinting).toBe(false);
-    const after = await refreshManufacturerPrinterRuntimeSnapshot();
+    const after = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true });
     expect(after.remoteStatus.eligibleForPrinting).toBe(true);
     expect(apiClient.reportPrinterHeartbeat).not.toHaveBeenCalled();
   });
@@ -172,7 +137,7 @@ describe("start print run runtime verification", () => {
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
       success: false, status: 503, error: "verification unavailable",
     });
-    const result = await refreshManufacturerPrinterRuntimeSnapshot();
+    const result = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true });
     expect(result.remoteStatus.eligibleForPrinting).toBe(false);
     expect(apiClient.reportPrinterHeartbeat).not.toHaveBeenCalled();
   });

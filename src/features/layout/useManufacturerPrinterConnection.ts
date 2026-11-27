@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { APP_PATHS } from "@/app/route-metadata";
-import apiClient from "@/lib/api-client";
-import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { getOrCreateAnonDeviceId } from "@/lib/anon-device";
 import {
   removeOptionalLocalStorageItem,
@@ -16,32 +14,20 @@ import {
   getPrinterDiagnosticSummary,
   selectPreferredManagedPrinter,
   shouldPreferNetworkDirectSummary,
-  type LocalPrinterAgentSnapshot,
 } from "@/lib/printer-diagnostics";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
-import { canPollVisibleDocument } from "@/lib/query-polling-policy";
-import { getAuthenticatedStreamScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
-import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
-import { normalizeLocalPrinterRows } from "@/features/printing/hooks";
 import {
   derivePrinterIdentity,
   formatPrinterTimestamp,
   type ManagedPrinterProfile,
 } from "@/features/layout/components/PrinterDialogs";
-import {
-  buildHeartbeatPayloadFromLocalStatus,
-  resolvePreferredLocalPrinter,
-  type LocalPrinterStatusPayload,
-} from "@/features/layout/printer-heartbeat-payload";
+import { useManufacturerPrinterRuntime } from "@/features/printing/manufacturer-printer-runtime";
 import {
   defaultPrinterStatus,
-  DISABLE_E2E_PRINTER_AGENT_POLLING,
   PRINTER_DIALOG_SESSION_STORAGE_VERSION,
-  PRINTER_FAILURE_REPORT_COOLDOWN_MS,
   PRINTER_ONBOARDING_STORAGE_VERSION,
 } from "@/features/layout/manufacturerPrinterConnectionUtils";
-import { createManufacturerPrinterFailureReporter } from "./manufacturerPrinterFailureReporter";
 import { usePrinterOnboardingAutoOpen } from "@/features/layout/usePrinterOnboardingAutoOpen";
 import type { User } from "@/types";
 import type { PrinterConnectionStatusDTO } from "../../../shared/contracts/runtime/printing.ts";
@@ -51,9 +37,6 @@ type ToastLike = (options: {
   description?: string;
   variant?: "default" | "destructive";
 }) => unknown;
-
-const isSecurePrinterStatusReady = (status?: PrinterConnectionStatusDTO | null) =>
-  buildSecurePrintReadiness(status).ready;
 
 type UseManufacturerPrinterConnectionParams = {
   user: User | null;
@@ -69,55 +52,25 @@ export function useManufacturerPrinterConnection({
   navigate,
   toast,
 }: UseManufacturerPrinterConnectionParams) {
-  const activePrintSuppressed = useActivePrintSessionSuppression();
-  const detectedPrintersRef = useRef<NonNullable<PrinterConnectionStatusDTO["printers"]>>([]);
-  const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
-  const printerFailureInFlightRef = useRef(false);
-  const configuredBackendUrlRef = useRef("");
-  const printerStatusRef = useRef<PrinterConnectionStatusDTO>(defaultPrinterStatus);
-  const syncInFlightRef = useRef<Promise<void> | null>(null);
-  const syncRunIdRef = useRef(0);
-  const statusRevisionRef = useRef(0);
-  const lastEventServerTimeMsRef = useRef(0);
-  const streamSecurityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
-  const printerScope = JSON.stringify([streamSecurityScope,
-    user?.id, user?.role, user?.licenseeId, user?.orgId, user?.scopeVersion,
-    user?.linkedLicensees?.map((link) => [link.id, link.orgId, link.scopeVersion, Boolean(link.isPrimary)]),
-  ]);
-  const activePrinterScopeRef = useRef(printerScope);
-  activePrinterScopeRef.current = printerScope;
-  const appliedPrinterScopeRef = useRef(printerScope);
-  const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatusDTO>(defaultPrinterStatus);
+  const runtime = useManufacturerPrinterRuntime();
+  const printerStatus = runtime?.snapshot.remoteStatus ?? defaultPrinterStatus;
+  const localPrinterAgent = runtime?.snapshot.localAgent ?? { reachable: false, connected: false, error: null, checkedAt: null };
+  const detectedPrinters = runtime?.snapshot.detectedPrinters ?? [];
+  const managedPrinterProfiles = (runtime?.snapshot.registeredPrinters ?? []) as ManagedPrinterProfile[];
+  const printerStatusChecking = Boolean(runtime?.checking);
+  const printerStatusLive = Boolean(runtime?.live);
   const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
   const [printerOnboardingOpen, setPrinterOnboardingOpen] = useState(false);
   const [printerSwitching, setPrinterSwitching] = useState(false);
-  const [printerStatusChecking, setPrinterStatusChecking] = useState(false);
-  const [printerStatusLive, setPrinterStatusLive] = useState(false);
-  const [printerStatusUpdatedAt, setPrinterStatusUpdatedAt] = useState<string | null>(null);
-  const [localPrinterAgent, setLocalPrinterAgent] = useState<LocalPrinterAgentSnapshot>({
-    reachable: false,
-    connected: false,
-    error: "Local print agent has not been checked yet.",
-    checkedAt: null,
-  });
-  const [detectedPrinters, setDetectedPrinters] = useState<NonNullable<PrinterConnectionStatusDTO["printers"]>>([]);
-  const [selectedLocalPrinterId, setSelectedLocalPrinterId] = useState("");
-  const [managedPrinterProfiles, setManagedPrinterProfiles] = useState<ManagedPrinterProfile[]>([]);
-  const [managedPrinterProfilesLoaded, setManagedPrinterProfilesLoaded] = useState(false);
+  const [selectedLocalPrinterId, setDraftPrinterId] = useState("");
+  const setSelectedLocalPrinterId = (id: string) => {
+    setDraftPrinterId(id);
+    if (id && id !== printerStatus.selectedPrinterId) {
+      runtime?.invalidate("Printer selection changed. Refresh printer verification.");
+    }
+  };
 
-  useEffect(() => {
-    if (appliedPrinterScopeRef.current === printerScope) return;
-    appliedPrinterScopeRef.current = printerScope;
-    ++statusRevisionRef.current;
-    ++syncRunIdRef.current;
-    syncInFlightRef.current = null;
-    lastEventServerTimeMsRef.current = 0;
-    printerStatusRef.current = defaultPrinterStatus;
-    setPrinterStatus(defaultPrinterStatus);
-    setDetectedPrinters([]);
-    setManagedPrinterProfiles([]);
-    setManagedPrinterProfilesLoaded(false);
-  }, [printerScope]);
+  useEffect(() => setDraftPrinterId(""), [runtime?.scope]);
 
   const printerDialogSessionKey =
     user?.role === "manufacturer" && user?.id
@@ -137,394 +90,22 @@ export function useManufacturerPrinterConnection({
     }
   };
 
-  const applyPrinterStatusSnapshot = (
-    nextStatus: PrinterConnectionStatusDTO,
-    options?: {
-      fallbackPrinters?: NonNullable<PrinterConnectionStatusDTO["printers"]>;
-      updatedAt?: string | null;
-      revision?: number;
-    }
-  ) => {
-    if (options?.revision !== undefined && options.revision !== statusRevisionRef.current) return;
-    const fallbackPrinters = Array.isArray(options?.fallbackPrinters)
-      ? options?.fallbackPrinters
-      : detectedPrintersRef.current;
-    const remotePrinters = normalizeLocalPrinterRows(nextStatus.printers || []);
-    const mergedPrinters = remotePrinters.length > 0 ? remotePrinters : fallbackPrinters;
-
-    setPrinterStatus((previous) => {
-      if (options?.revision !== undefined && options.revision !== statusRevisionRef.current) return previous;
-      const ready = isSecurePrinterStatusReady(nextStatus);
-      const merged = {
-        ...previous,
-        ...nextStatus,
-        degraded: ready ? false : Boolean(nextStatus.degraded),
-        refreshPaused: ready ? false : Boolean(nextStatus.refreshPaused),
-        rateLimited: ready ? false : Boolean(nextStatus.rateLimited),
-        printers: mergedPrinters,
-      };
-      printerStatusRef.current = merged;
-      return merged;
-    });
-    setDetectedPrinters(mergedPrinters);
-    setPrinterStatusUpdatedAt(options?.updatedAt || nextStatus.lastHeartbeatAt || new Date().toISOString());
-
-    setSelectedLocalPrinterId((previous) => {
-      if (options?.revision !== undefined && options.revision !== statusRevisionRef.current) return previous;
-      const fallbackPrinter = chooseStablePrinterSelection(
-        mergedPrinters,
-        previous,
-        nextStatus.selectedPrinterId,
-        nextStatus.printerId
-      );
-      return fallbackPrinter?.printerId || previous;
-    });
-  };
-
-  const maybeAutoReportPrinterFailure = createManufacturerPrinterFailureReporter({
-    user, printerFailureReportRef, printerFailureInFlightRef,
-  });
-
-  const loadManagedPrinterProfiles = async (options?: { force?: boolean }) => {
-    if (!user || user.role !== "manufacturer") return;
-
-    const scope = printerScope;
-    const response = await apiClient.listRegisteredPrinters(false, { force: Boolean(options?.force) });
-    if (activePrinterScopeRef.current !== scope) return;
-    if (!response.success) {
-      setManagedPrinterProfiles([]);
-      setManagedPrinterProfilesLoaded(true);
-      return;
-    }
-
-    setManagedPrinterProfiles(
-      (Array.isArray(response.data) ? response.data : []).filter(
-        (row): row is ManagedPrinterProfile =>
-          Boolean(row && typeof row === "object" && (row as { id?: unknown }).id && (row as { name?: unknown }).name)
-      )
-    );
-    setManagedPrinterProfilesLoaded(true);
-  };
-
-  const syncManufacturerPrinterStatus = async (options?: { silent?: boolean; force?: boolean }) => {
-    if (!user || user.role !== "manufacturer") return;
-    if (activePrintSuppressed && !options?.force) return;
-    if (syncInFlightRef.current) return syncInFlightRef.current;
-    const revision = ++statusRevisionRef.current;
-    const runId = ++syncRunIdRef.current;
-    const run = (async () => {
-      setPrinterStatusChecking(true);
-      try {
-        if (DISABLE_E2E_PRINTER_AGENT_POLLING) {
-      applyPrinterStatusSnapshot(
-        {
-          ...defaultPrinterStatus,
-          refreshPaused: true,
-          notice: "Printer polling is disabled for this automated test run.",
-        } as PrinterConnectionStatusDTO,
-        { fallbackPrinters: [], updatedAt: new Date().toISOString(), revision }
-      );
-      setLocalPrinterAgent({
-        reachable: false,
-        connected: false,
-        error: null,
-        checkedAt: new Date().toISOString(),
-      });
-      setManagedPrinterProfilesLoaded(true);
-      return;
-        }
-
-    await loadManagedPrinterProfiles({ force: Boolean(options?.force) });
-    if (activePrinterScopeRef.current !== printerScope) return;
-
-    let local = await apiClient.getLocalPrintAgentStatus();
-    if (activePrinterScopeRef.current !== printerScope) return;
-    const browserBackendUrl = window.location.origin;
-    if (local.success && configuredBackendUrlRef.current !== browserBackendUrl) {
-      const backendConfiguration = await apiClient.configureLocalPrintAgentBackend(browserBackendUrl);
-      if (activePrinterScopeRef.current !== printerScope) return;
-      if (!backendConfiguration.success) {
-        console.warn("Local print agent backend configuration failed:", backendConfiguration.error);
-      } else {
-        configuredBackendUrlRef.current = browserBackendUrl;
-      }
-    }
-    let localPrinters = normalizeLocalPrinterRows(
-      ((local.data as { printers?: unknown[] } | undefined)?.printers) || []
-    );
-    const localData = local.data as LocalPrinterStatusPayload | undefined;
-    const preferredLocalPrinter = resolvePreferredLocalPrinter(localPrinters, localData);
-    const localSelectedId = String(localData?.selectedPrinterId || localData?.printerId || "").trim();
-    if (local.success && preferredLocalPrinter?.printerId && preferredLocalPrinter.printerId !== localSelectedId) {
-      const switched = await apiClient.selectLocalPrinter(preferredLocalPrinter.printerId);
-      if (activePrinterScopeRef.current !== printerScope) return;
-      if (switched.success) {
-        local = await apiClient.getLocalPrintAgentStatus();
-        if (activePrinterScopeRef.current !== printerScope) return;
-        localPrinters = normalizeLocalPrinterRows(
-          ((local.data as { printers?: unknown[] } | undefined)?.printers) || localPrinters
-        );
-      }
-    }
-    setLocalPrinterAgent({
-      reachable: Boolean(local.success),
-      connected: Boolean((local.data as { connected?: boolean } | undefined)?.connected),
-      error: local.success
-        ? String((local.data as { error?: string } | undefined)?.error || "").trim() || null
-        : String(local.error || "Local print agent is unavailable"),
-      checkedAt: new Date().toISOString(),
-    });
-
-    const heartbeatPayload = local.success
-      ? buildHeartbeatPayloadFromLocalStatus(local.data as LocalPrinterStatusPayload | undefined, localPrinters)
-      : {
-          connected: false,
-          error: String(local.error || "Local print agent unavailable"),
-        };
-
-    const heartbeat = await apiClient.reportPrinterHeartbeat(heartbeatPayload);
-    if (activePrinterScopeRef.current !== printerScope) return;
-    const heartbeatStatus =
-      heartbeat.success && heartbeat.data ? (heartbeat.data as PrinterConnectionStatusDTO) : null;
-    const heartbeatDegraded = Boolean(heartbeat.degraded || heartbeatStatus?.degraded);
-
-    if (heartbeatStatus) {
-      const localSelectedPrinter = resolvePreferredLocalPrinter(localPrinters, localData);
-      const degradedStatus: PrinterConnectionStatusDTO = {
-        ...heartbeatStatus,
-        printers: localPrinters.length > 0 ? localPrinters : heartbeatStatus.printers,
-        printerName: localSelectedPrinter?.printerName || heartbeatStatus.printerName,
-        printerId: localSelectedPrinter?.printerId || heartbeatStatus.printerId,
-        selectedPrinterId: localSelectedPrinter?.printerId || heartbeatStatus.selectedPrinterId,
-        selectedPrinterName: localSelectedPrinter?.printerName || heartbeatStatus.selectedPrinterName,
-        trusted: heartbeatDegraded ? false : heartbeatStatus.trusted,
-        eligibleForPrinting: heartbeatDegraded ? false : heartbeatStatus.eligibleForPrinting,
-        degraded: heartbeatDegraded,
-      };
-      applyPrinterStatusSnapshot(degradedStatus, {
-        fallbackPrinters: localPrinters,
-        updatedAt: degradedStatus.lastHeartbeatAt || new Date().toISOString(),
-        revision,
-      });
-
-      if (!isSecurePrinterStatusReady(degradedStatus)) {
-        void maybeAutoReportPrinterFailure({
-          localResult: local,
-          remoteStatus: degradedStatus,
-          printers: localPrinters.map((item) => ({ printerId: item.printerId, printerName: item.printerName })),
-        });
-      }
-      return;
-    }
-
-    const remote = await apiClient.getPrinterConnectionStatus({ force: Boolean(options?.force) });
-    if (activePrinterScopeRef.current !== printerScope) return;
-    if (remote.success && remote.data && !remote.degraded &&
-        String(remote.code || remote.errorCode || "").toUpperCase() !== "RATE_LIMITED") {
-      const nextStatus = {
-        ...(remote.data as PrinterConnectionStatusDTO),
-        trusted: remote.data.degraded ? false : remote.data.trusted,
-        eligibleForPrinting: remote.data.degraded ? false : remote.data.eligibleForPrinting,
-        degraded: Boolean(remote.data.degraded),
-      } satisfies PrinterConnectionStatusDTO;
-      applyPrinterStatusSnapshot(nextStatus, {
-        fallbackPrinters: localPrinters,
-        updatedAt: nextStatus.lastHeartbeatAt || new Date().toISOString(),
-        revision,
-      });
-
-      const mergedPrinters =
-        normalizeLocalPrinterRows(nextStatus.printers || []).length > 0
-          ? normalizeLocalPrinterRows(nextStatus.printers || [])
-          : localPrinters;
-      const nowConnected = isSecurePrinterStatusReady(nextStatus);
-      if (!nowConnected) {
-        void maybeAutoReportPrinterFailure({
-          localResult: local,
-          remoteStatus: nextStatus,
-          printers: mergedPrinters.map((item) => ({ printerId: item.printerId, printerName: item.printerName })),
-        });
-      }
-      return;
-    }
-
-    const authorizationRejected = [401, 403].includes(Number(remote.status || 0));
-    const previous = authorizationRejected ? defaultPrinterStatus : printerStatusRef.current;
-    applyPrinterStatusSnapshot(
-      {
-        ...previous,
-        printers: previous.printers && previous.printers.length > 0 ? previous.printers : localPrinters,
-        connected: false,
-        trusted: false,
-        eligibleForPrinting: false,
-        securePrinterSession: false,
-        freshHelperHeartbeat: false,
-        ageSeconds: null,
-        signedAttestation: previous.signedAttestation ? { ...previous.signedAttestation, fresh: false } : undefined,
-        stale: true,
-        degraded: true,
-        connectionClass: "BLOCKED",
-        trustStatus: "UNAVAILABLE",
-        trustReason: "Printer verification is unavailable. Refresh printer status and try again.",
-        error: null,
-        refreshPaused: true,
-        rateLimited: remote.status === 429 || String(remote.code || "").toUpperCase() === "RATE_LIMITED",
-      } as PrinterConnectionStatusDTO,
-      {
-        fallbackPrinters: previous.printers && previous.printers.length > 0 ? previous.printers : localPrinters,
-        updatedAt: previous.lastHeartbeatAt || printerStatusUpdatedAt || new Date().toISOString(),
-        revision,
-      }
-    );
-    if (authorizationRejected) {
-      setManagedPrinterProfiles([]);
-      setSelectedLocalPrinterId("");
-    }
-      } catch {
-        const previous = printerStatusRef.current;
-        applyPrinterStatusSnapshot({
-          ...previous, connected: false, trusted: false, eligibleForPrinting: false,
-          stale: true, refreshPaused: true, ageSeconds: null, trustStatus: "UNAVAILABLE", connectionClass: "BLOCKED",
-          signedAttestation: previous.signedAttestation ? { ...previous.signedAttestation, fresh: false } : undefined,
-          trustReason: "Printer verification is unavailable. Refresh printer status and try again.",
-        }, { revision });
-      } finally {
-        if (runId === syncRunIdRef.current) {
-          setPrinterStatusChecking(false);
-          syncInFlightRef.current = null;
-        }
-      }
-    })();
-    syncInFlightRef.current = run;
-    return run;
-  };
-
   const switchLocalPrinter = async (targetOverride?: string) => {
-    const targetPrinterId = String(targetOverride || selectedLocalPrinterId || "").trim();
-    if (!targetPrinterId) return;
-    setSelectedLocalPrinterId(targetPrinterId);
+    const target = targetOverride || selectedLocalPrinterId;
+    if (!target || printerSwitching || !runtime) return;
     setPrinterSwitching(true);
     try {
-      const switched = await apiClient.selectLocalPrinter(targetPrinterId);
-      if (!switched.success) {
-        toast({
-          title: "Printer switch failed",
-          description: sanitizePrinterUiError(switched.error, "Could not switch the workstation printer."),
-          variant: "destructive",
-        });
-        return;
-      }
-      toast({
-        title: "Printer switched",
-        description: "The workstation printer has been updated.",
-      });
-      await syncManufacturerPrinterStatus({ silent: true });
+      const response = await runtime.changePrinter(target);
+      toast(response?.success
+        ? { title: "Printer switched", description: "The workstation printer has been updated." }
+        : { title: "Printer switch failed", description: sanitizePrinterUiError(response?.error,
+          "Could not switch the workstation printer."), variant: "destructive" });
     } finally {
       setPrinterSwitching(false);
     }
   };
 
-  useEffect(() => {
-    if (!user || user.role !== "manufacturer") return;
-    void loadManagedPrinterProfiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printerScope]);
-
-  useEffect(() => {
-    if (!user || user.role !== "manufacturer") return;
-    if (activePrintSuppressed || printerStatusLive) return;
-    const timer = window.setInterval(() => {
-      if (!canPollVisibleDocument()) return;
-      void syncManufacturerPrinterStatus({ silent: true });
-    }, 60_000);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printerScope, activePrintSuppressed, printerStatusLive]);
-
-  useEffect(() => {
-    detectedPrintersRef.current = detectedPrinters;
-  }, [detectedPrinters]);
-
-  useEffect(() => {
-    if (!user || user.role !== "manufacturer") return;
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        ++statusRevisionRef.current;
-        ++syncRunIdRef.current;
-        syncInFlightRef.current = null;
-        setPrinterStatusChecking(false);
-        setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false,
-          stale: true, refreshPaused: true,
-          trustReason: "Printer verification expired while this tab was hidden." }));
-      } else {
-        void syncManufacturerPrinterStatus({ silent: true, force: true });
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printerScope]);
-
-  useEffect(() => {
-    if (!user || user.role !== "manufacturer") return;
-    if (DISABLE_E2E_PRINTER_AGENT_POLLING) return;
-    if (activePrintSuppressed) return;
-    const streamScope = printerScope;
-
-    const stop = apiClient.streamPrinterConnectionStatus(
-      (payload) => {
-        if (activePrinterScopeRef.current !== streamScope) return;
-        if (document.visibilityState === "hidden") return;
-        const serverTimeMs = Date.parse(payload.serverTime || "");
-        if (!Number.isFinite(serverTimeMs) || serverTimeMs <= lastEventServerTimeMsRef.current) return;
-        lastEventServerTimeMsRef.current = serverTimeMs;
-        ++statusRevisionRef.current;
-        setPrinterStatusLive(true);
-        applyPrinterStatusSnapshot(payload.status as PrinterConnectionStatusDTO, {
-          updatedAt: payload.serverTime || payload.status.lastHeartbeatAt || new Date().toISOString(),
-        });
-      },
-      () => {
-        if (activePrinterScopeRef.current !== streamScope) return;
-        ++statusRevisionRef.current;
-        setPrinterStatusLive(false);
-        setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false,
-          stale: true, refreshPaused: true,
-          trustReason: "Printer verification is unavailable. Refresh printer status and try again." }));
-      },
-      () => {
-        if (activePrinterScopeRef.current !== streamScope) return;
-        setPrinterStatusLive(true);
-      }
-    );
-
-    return () => {
-      setPrinterStatusLive(false);
-      stop();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printerScope, activePrintSuppressed]);
-
-  useEffect(() => {
-    if (!printerStatus) return;
-    const next = String(
-      chooseStablePrinterSelection(
-        detectedPrinters,
-        selectedLocalPrinterId,
-        printerStatus.selectedPrinterId,
-        printerStatus.printerId
-      )?.printerId || ""
-    ).trim();
-    if (next && next !== selectedLocalPrinterId) setSelectedLocalPrinterId(next);
-  }, [detectedPrinters, printerStatus, selectedLocalPrinterId]);
-
-  const securePrintReadiness = useMemo(() => {
-    if (selectedLocalPrinterId && selectedLocalPrinterId !== printerStatus.selectedPrinterId) {
-      return buildSecurePrintReadiness({ ...printerStatus, trusted: false, eligibleForPrinting: false,
-        stale: true, trustReason: "Printer selection changed. Refresh printer verification." });
-    }
-    return buildSecurePrintReadiness(printerStatus);
-  }, [printerStatus, selectedLocalPrinterId]);
+  const securePrintReadiness = buildSecurePrintReadiness(printerStatus);
   const printerReady = securePrintReadiness.ready;
   const managedNetworkPrinters = useMemo(
     () => managedPrinterProfiles.filter((printer) => printer.connectionType !== "LOCAL_AGENT" && printer.isActive),
@@ -575,7 +156,7 @@ export function useManufacturerPrinterConnection({
     ) ||
     detectedPrinters[0] ||
     null;
-  const activePrinterId = String(selectedPrinter?.printerId || printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
+  const activePrinterId = String(runtime?.snapshot.localBinding?.printerId || printerStatus.selectedPrinterId || printerStatus.printerId || "").trim();
   const printerIdentity = derivePrinterIdentity({
     printerName: shouldUseManagedPrinterSummary
       ? preferredManagedNetworkPrinter?.name
@@ -589,7 +170,7 @@ export function useManufacturerPrinterConnection({
     deviceName: shouldUseManagedPrinterSummary ? null : printerStatus.deviceName,
   });
   const printerFeedLabel = printerStatusLive ? "Live updates" : "Checking status";
-  const printerUpdatedLabel = formatPrinterTimestamp(printerStatusUpdatedAt || printerStatus.lastHeartbeatAt);
+  const printerUpdatedLabel = formatPrinterTimestamp(printerStatus.lastHeartbeatAt);
   const printerRefreshPaused = Boolean((printerStatus as PrinterConnectionStatusDTO & { refreshPaused?: boolean }).refreshPaused);
   const printerRateLimited = Boolean((printerStatus as PrinterConnectionStatusDTO & { rateLimited?: boolean }).rateLimited);
   const printerReadinessDisplay = buildPrinterReadinessDisplay({
@@ -631,17 +212,17 @@ export function useManufacturerPrinterConnection({
 
   const openPrinterConnectionDialog = () => {
     setPrinterDialogOpen(true);
-    void syncManufacturerPrinterStatus({ silent: true, force: true });
+    void runtime?.refresh({ force: true });
   };
 
   const refreshPrinterConnectionStatus = () => {
-    void syncManufacturerPrinterStatus({ silent: true, force: true });
+    void runtime?.refresh({ force: true });
   };
 
   usePrinterOnboardingAutoOpen({
     storageKey: printerOnboardingStorageKey,
     enabled: currentPath === APP_PATHS.batches,
-    managedProfilesLoaded: managedPrinterProfilesLoaded,
+    managedProfilesLoaded: Boolean(runtime?.snapshot.localAgent.checkedAt),
     printerReady,
     managedPrinterReady: false,
     managedNetworkPrinterCount: managedNetworkPrinters.length,

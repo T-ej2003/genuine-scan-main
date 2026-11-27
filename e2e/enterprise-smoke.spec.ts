@@ -664,13 +664,16 @@ test.describe.serial("Enterprise smoke flows", () => {
     const printDialog = page.getByTestId("create-print-job-dialog");
     const startButton = page.getByTestId("print-job-start-button");
       await expect(printDialog).toContainText(/Printer ready/, { timeout: 30_000 });
-      const relinkButton = page.getByRole("button", { name: /relink saved printer/i });
-      if (await relinkButton.isVisible().catch(() => false)) {
-        await relinkButton.click();
-        await expect(relinkButton).toBeHidden({ timeout: 30_000 });
-      }
+      await expect(page.getByRole("button", { name: /relink saved printer/i })).toBeHidden();
       await expect(startButton).toBeEnabled({ timeout: 30_000 });
+      const printCreated = page.waitForResponse((response) =>
+        new URL(response.url()).pathname === "/api/manufacturer/print-jobs" &&
+        response.request().method() === "POST"
+      );
       await startButton.click();
+      const creation = await printCreated;
+      const creationError = creation.ok() ? null : await creation.json().catch(() => null);
+      expect(creation.ok(), `Print creation returned HTTP ${creation.status()} (${creationError?.errorCode ?? creationError?.code ?? "no code"})`).toBe(true);
 
       await expect(printDialog).toBeHidden({ timeout: 30_000 });
       await expect(
