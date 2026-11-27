@@ -15,6 +15,7 @@ import {
   ensurePrintOperationsUser,
   listPrintJobsQuerySchema,
   printJobIdParamSchema,
+  handleUserSafeError,
   reissuePrintJobSchema,
 } from "./shared";
 import { describeMissingPrinterReadinessFields, isPhysicalOutcomeUnconfirmed } from "./errorResponses";
@@ -109,18 +110,6 @@ const printBoundary = (req: AuthRequest) => ({
   capability: String(req.databaseSessionCapability || ""),
   requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
 });
-
-const handleUserSafeError = (res: Response, error: any, fallback: string) => {
-  const statusCode = typeof error?.statusCode === "number" ? error.statusCode : 500;
-  const message = String(error?.message || fallback);
-  const code = typeof error?.code === "string" ? error.code : undefined;
-  return res.status(statusCode).json({
-    success: false,
-    error: statusCode >= 500 ? fallback : message,
-    message: statusCode >= 500 ? fallback : message,
-    ...(statusCode < 500 && code ? { code, errorCode: code } : {}),
-  });
-};
 
 export const pauseManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
   try {

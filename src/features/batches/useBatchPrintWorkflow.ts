@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import apiClient from "@/lib/api-client";
-import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
 import { normalizePrintJobView } from "@/lib/print-job-view";
-import { queryClient } from "@/lib/query-client";
 import { clearActivePrintSession, updateActivePrintSession } from "@/lib/active-print-session";
 import { getOptionalLocalStorageItem } from "@/lib/consent";
 import {
@@ -31,7 +29,7 @@ import {
   PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS,
 } from "./print-workflow-utils";
 import { createPrintJob as executeCreatePrintJob, formatActionablePrintWorkflowError, syncProgressFromPrintJob as syncPrintJobProgress } from "./batch-print-operations";
-import { abandonPrintJobAction, printDiagnosticTestLabelAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
+import { abandonPrintJobAction, printDiagnosticTestLabelAction, refreshPrintRunConflict, relinkSelectedPrinterAction, updateRecentPrintJob } from "./print-workflow-recovery-actions";
 import { createBatchPrinterFailureReporter } from "./batchPrinterFailureReporter";
 import { runSingleFlightAction } from "./singleFlightAction";
 import { clampPrintRunQuantityInput, resolveMaxPrintRunQuantity } from "./print-run-limits";
@@ -566,14 +564,7 @@ export function useBatchPrintWorkflow({
   };
 
   const replaceRecentPrintJob = (nextJob: PrintJobRow) => {
-    setRecentPrintJobs((previous) => {
-      const found = previous.some((row) => row.id === nextJob.id);
-      return found ? previous.map((row) => (row.id === nextJob.id ? nextJob : row)) : [nextJob, ...previous].slice(0, 8);
-    });
-    if (nextJob.runSummary) {
-      queryClient.setQueriesData<PrintJobRow[]>({ queryKey: ["printing", "jobs"] }, (jobs) =>
-        jobs?.map((job) => job.id === nextJob.id ? { ...job, ...nextJob } : job));
-    }
+    updateRecentPrintJob(nextJob, setRecentPrintJobs);
     syncPrintJobProgress(nextJob, progressStateSetters);
   };
 
@@ -642,13 +633,8 @@ export function useBatchPrintWorkflow({
         const response = await apiClient.resumePrintJob(trimmedJobId);
         if (!response.success) {
           handlePrintControlFailure(response, "Print run could not be resumed.");
-          if (response.status === 409) {
-            clearRequestCoordinator(["manufacturer-print-jobs:", "manufacturer-print-job-status:"]);
-            setRecentPrintJobs((jobs) => jobs.map((job) => job.id === trimmedJobId && job.runSummary
-              ? { ...job, runSummary: { ...job.runSummary, allowedActions: [] } }
-              : job));
-            await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.(), onPrintRunConflict?.(trimmedJobId)]);
-          }
+          if (response.status === 409) await refreshPrintRunConflict(trimmedJobId, setRecentPrintJobs,
+            () => Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.(), onPrintRunConflict?.(trimmedJobId)]));
           return;
         }
         if (response.data) replaceRecentPrintJob(normalizePrintJobView(response.data) as PrintJobRow);
@@ -960,6 +946,7 @@ export function useBatchPrintWorkflow({
     selectedPrinterCanPrint,
     printerVerificationPending: securePrintReadiness.reasonCode === "VERIFICATION_PENDING",
     printJobId,
+    authoritativeProgressJob,
     printProgressPrinterName,
     printProgressDispatchMode,
     printProgressPhase,

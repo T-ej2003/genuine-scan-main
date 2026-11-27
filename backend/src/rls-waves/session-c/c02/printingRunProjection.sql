@@ -84,7 +84,6 @@ BEGIN
           count(*) FILTER (WHERE bucket='cancelled') AS cancelled,
           coalesce(bool_or(resume_fence),false) AS resume_fence,
           coalesce(bool_or(abandon_fence),false) AS abandon_fence,
-          count(*) FILTER (WHERE reusable) AS reusable_count,
           count(*) FILTER (WHERE safe_stopped) AS safe_stopped_count
         FROM (
           SELECT CASE
@@ -104,8 +103,6 @@ BEGIN
           pi.state IN ('ISSUED','AGENT_ACKED','FROZEN') AS resume_fence,
           (pi.state IN ('ISSUED','AGENT_ACKED','PRINT_CONFIRMED','CLOSED','FROZEN')
             OR pi."printConfirmedAt" IS NOT NULL OR evidence.present) AS abandon_fence,
-          (q.status='ACTIVATED' AND pi."printConfirmedAt" IS NULL AND NOT evidence.present
-            AND pi.state IN ('FAILED','CANCELLED','RESERVED')) AS reusable,
           (pi.state='CANCELLED' AND pi."pipelineState"='STOPPED' AND pi."attemptCount"=0
             AND pi."currentRenderTokenHash" IS NULL AND NOT evidence.present
             AND pi."confirmationDeadlineAt" IS NULL AND pi."printConfirmedAt" IS NULL
@@ -148,10 +145,11 @@ BEGIN
         CASE WHEN session_id IS NOT NULL AND status IN ('PENDING','SENT','PAUSED') THEN 'stop' END,
         CASE WHEN complete AND status='FAILED' AND "pipelineState"<>'NEEDS_OPERATOR_ACTION'
           AND uncertain=0 AND NOT abandon_fence THEN 'abandon' END,
-        CASE WHEN complete AND "releasedAt" IS NULL AND "suspendedAt" IS NULL AND "lifecycleState"<>'RELEASED'
-          AND "pipelineState"<>'NEEDS_OPERATOR_ACTION' AND uncertain=0
+        CASE WHEN session_id IS NOT NULL AND quantity BETWEEN 1 AND 200000
+          AND "releasedAt" IS NULL AND "suspendedAt" IS NULL AND "lifecycleState"<>'RELEASED'
           AND NOT EXISTS (SELECT 1 FROM public."PrintReissueRequest" r WHERE r."originalPrintJobId"=facts.id AND r.status IN ('PENDING','APPROVED'))
-          AND ((status IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED') AND reusable_count=coalesce("itemCount",quantity))
+          -- Request creation and execution have different guards. Execution still verifies label reuse.
+          AND (status IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED')
             OR (status='STOPPED' AND "pipelineState"='STOPPED' AND session_status='STOPPED'
               AND "completedAt" IS NOT NULL AND session_completed IS NOT NULL AND "sentAt" IS NULL AND "confirmedAt" IS NULL
               AND "issuedItems"=0 AND "confirmedItems"=0 AND "frozenItems"=0 AND "itemCount"=quantity

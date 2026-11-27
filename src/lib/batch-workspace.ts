@@ -47,6 +47,27 @@ export type BatchWorkspaceAllocation = {
   currentRangeEnd?: string | null;
 };
 
+export function aggregateBatchPrintAccounting(allocations: BatchWorkspaceAllocation[]): BatchPrintAccountingDTO | undefined {
+  let total: BatchPrintAccountingDTO | undefined;
+  for (const { printAccounting: accounting } of allocations) {
+    if (!accounting) return undefined;
+    total = total ? {
+      totalAllocated: total.totalAllocated + accounting.totalAllocated,
+      available: total.available + accounting.available,
+      reservedInProgress: total.reservedInProgress + accounting.reservedInProgress,
+      confirmedPrinted: total.confirmedPrinted + accounting.confirmedPrinted,
+      awaitingRecovery: total.awaitingRecovery + accounting.awaitingRecovery,
+      retiredBlocked: total.retiredBlocked + accounting.retiredBlocked,
+      needsReconciliation: total.needsReconciliation + accounting.needsReconciliation,
+      scanned: total.scanned + accounting.scanned,
+      redeemed: total.redeemed + accounting.redeemed,
+      activePrintRun: total.activePrintRun || accounting.activePrintRun,
+      complete: total.complete && accounting.complete,
+    } : accounting;
+  }
+  return total;
+}
+
 export type ManufacturerOperationalSnapshot = {
   assignedLabelCount: number;
   confirmedPrintedCount: number;

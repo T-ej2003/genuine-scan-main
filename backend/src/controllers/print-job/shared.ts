@@ -21,6 +21,18 @@ import {
 } from "../../rls-waves/session-c/c02/printingLifecycleRepository";
 import type { B03AuthenticatedFunctionBoundary } from "../../rls-waves/session-b/b03/repositoryFunctions";
 
+export const handleUserSafeError = (res: Response, error: { statusCode?: unknown; message?: unknown; code?: unknown } | null | undefined, fallback: string) => {
+  const statusCode = typeof error?.statusCode === "number" ? error.statusCode : 500;
+  const message = String(error?.message || fallback);
+  const code = typeof error?.code === "string" ? error.code : undefined;
+  return res.status(statusCode).json({
+    success: false,
+    error: statusCode >= 500 ? fallback : message,
+    message: statusCode >= 500 ? fallback : message,
+    ...(statusCode < 500 && code ? { code, errorCode: code } : {}),
+  });
+};
+
 const MANUFACTURER_ROLES: UserRole[] = [UserRole.MANUFACTURER_ADMIN];
 export const PRINT_OPERATIONS_ROLES: UserRole[] = [
   UserRole.SUPER_ADMIN,

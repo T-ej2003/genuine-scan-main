@@ -1982,7 +1982,7 @@ async function main() {
   )`);
   assert.equal(lateConfirmation.remainingToPrint, 0);
   assert.equal(readRun(expiredJobId).job.runSummary.confirmedCount, 1);
-  assert.deepEqual(readRun(expiredJobId).job.runSummary.allowedActions, []);
+  assert.deepEqual(readRun(expiredJobId).job.runSummary.allowedActions, ["requestReissue"]);
 
   assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${expiredJobId}'`), "CONFIRMED");
   assert.equal(psql(admin, `SELECT status FROM public."PrintSession" WHERE id='${expiredSessionId}'`), "COMPLETED");
@@ -2047,6 +2047,14 @@ async function main() {
   assert.equal(json(app, `BEGIN; SELECT app_rls.printing_reissue_request(
     '${caps.maker}','printing-reissue','${requestId()}','CREATE',NULL,
     '${expiredJobId}',1,NULL,NULL,'Confirmed-job reissue stays available before release',NULL); ROLLBACK`).status, 'PENDING');
+  psql(admin, `UPDATE public."PrintJob" SET status='PARTIALLY_COMPLETED', quantity=2 WHERE id='${expiredJobId}'`);
+  const historicalPartial = readRun(expiredJobId).job.runSummary;
+  assert.equal(historicalPartial.complete, false);
+  assert.deepEqual(historicalPartial.allowedActions, ["requestReissue"]);
+  assert.equal(json(app, `BEGIN; SELECT app_rls.printing_reissue_request(
+    '${caps.maker}','printing-reissue','${requestId()}','CREATE',NULL,
+    '${expiredJobId}',2,NULL,NULL,'Partial-job reissue stays available before release',NULL); ROLLBACK`).status, 'PENDING');
+  psql(admin, `UPDATE public."PrintJob" SET status='CONFIRMED', quantity=1 WHERE id='${expiredJobId}'`);
   psql(admin, `UPDATE public."Batch" SET "lifecycleState"='${originalRaceLifecycle}' WHERE id='${ids.raceBatch}'`);
 
   const createExpiredRun = (label, count, unexpired = 0) => {

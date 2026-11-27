@@ -4,6 +4,7 @@ import React from "react";
 import { format } from "date-fns";
 import { Activity, AlertTriangle, CheckCircle2, Download, PackageCheck, PencilLine, RefreshCcw, Trash2, UserCog, Boxes, Factory, Printer, ShieldCheck } from "lucide-react";
 
+import { aggregateBatchPrintAccounting } from "@/lib/batch-workspace";
 import type { BatchWorkspaceAllocation, StableBatchOverviewRow } from "@/lib/batch-workspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -408,7 +409,7 @@ export function LicenseeBatchWorkspaceDialog({
     "menu" | "confirmed" | "stopped" | "replacement" | "pending"
   >("menu");
   const manufacturerOps = workspace?.manufacturerOperational || null;
-  const printAccounting = workspace?.allocations[0]?.printAccounting;
+  const printAccounting = workspace ? aggregateBatchPrintAccounting(workspace.allocations) : undefined;
   const blockingRecoveryJob = recentPrintJobs.find((job) => isManufacturerMode
     ? job.runSummary?.operationalStatus === "NEEDS_OPERATOR_ACTION" || job.pipelineState === "NEEDS_OPERATOR_ACTION"
     : needsRecovery(job)) || null;

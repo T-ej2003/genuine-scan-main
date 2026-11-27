@@ -179,6 +179,7 @@ type PrintJobDialogProps = {
   printJobId: string | null;
   printProgressPrinterName: string | null;
   printProgressDispatchMode: string | null;
+  authoritativeProgressJob?: PrintJobRow | null;
   printProgressPhase?: string | null;
   printProgressTotal?: number;
   printProgressPrinted?: number;
@@ -305,6 +306,7 @@ export function BatchPrintJobDialog({
   printJobId,
   printProgressPrinterName,
   printProgressDispatchMode,
+  authoritativeProgressJob,
   printProgressPhase = null,
   printProgressTotal = 0,
   printProgressPrinted = 0,
@@ -360,8 +362,11 @@ export function BatchPrintJobDialog({
     printControlDialog.action === "stop"
       ? "Stopping prevents new label dispatch. Labels already sent may still print; only items proven unissued can be recovered."
       : "Pausing stops new label dispatch while preserving labels already confirmed by MSCQR.";
+  const recentActiveJob = recentPrintJobs.find((job) => job.id === printJobId);
+  const polledActiveJob = authoritativeProgressJob?.id === printJobId ? authoritativeProgressJob : null;
   const activePrintJob =
-    (printJobId ? recentPrintJobs.find((job) => job.id === printJobId) : null) ||
+    (polledActiveJob && (!recentActiveJob || String(polledActiveJob.updatedAt || "") > String(recentActiveJob.updatedAt || ""))
+      ? polledActiveJob : recentActiveJob) ||
     (printJobId
       ? ({
           id: printJobId,

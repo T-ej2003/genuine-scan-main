@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "390727b1b7fa2d1083cfe4bd9fb2912f0324cc8eee552f93d4f498903c6f92b2",
+  "sourceContractSha256": "e28da7b5737e7205d4e6ab1acdab776fd558ce322d28f163e979c0dc35e4e085",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -68,7 +68,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingRunProjection.sql",
-      "sha256": "3b49fc203792013779faaa0474efaecb36591c6655b44737657273c5706f164e"
+      "sha256": "40a5477c2f80edfa5faa00e31a8366e8ae250ee557cd4a672e59bad70ede0682"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -388,7 +388,7 @@
     },
     {
       "path": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
-      "sha256": "490f3a18762d430fb355f0924184bd65b417f4d16113fbd1824adaca1b0dd803"
+      "sha256": "9d93ff18d0fcc87b60984d198442a9a0f81149ede154fbcb59f939175a70ae5c"
     }
   ],
   "greenDatabasePattern": "^mscqr_full_rls_cert_[a-z0-9_]+$",
@@ -416,7 +416,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:390727b1b7fa2d1083cfe4bd9fb2912f0324cc8eee552f93d4f498903c6f92b2",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:e28da7b5737e7205d4e6ab1acdab776fd558ce322d28f163e979c0dc35e4e085",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

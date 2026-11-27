@@ -436,6 +436,32 @@ const main = async () => {
     assert.equal(stressPage.data[0]._count.qrCodes, 2);
     console.log(`${stressRows} batch application path ${Math.round(performance.now() - stressStart)}ms`);
 
+    let previousTotal = 2; // Use the already-authorized partial-print batch.
+    for (const total of [100000, 200000]) {
+      await bootstrap.$executeRawUnsafe(`
+        INSERT INTO public."QRCode" (id, code, "licenseeId", "batchId", status, "updatedAt")
+        SELECT gen_random_uuid()::text, 'batch-owned-stress-' || n, $1, $2,
+          (CASE WHEN n % 100 = 0 THEN 'BLOCKED' WHEN n % 100 = 1 THEN 'PRINTED' ELSE 'ALLOCATED' END)::public."QRStatus", now()
+        FROM generate_series($3::integer + 1, $4::integer) AS n
+      `, ids.licenseeA, ids.childA, previousTotal, total);
+      await bootstrap.$executeRawUnsafe('ANALYZE public."QRCode"');
+      const startedAt = performance.now();
+      const owned = expectSuccess(await invoke(getBatches, {
+        user: manufacturerClaims(), requestId: `batch-pg-owned-${total}`, query: { licenseeId: ids.licenseeA },
+        originalUrl: "/api/qr/batches",
+      }), "large manufacturer batch").data.find((row) => row.id === ids.childA).printAccounting;
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      assert.equal(owned.totalAllocated, total);
+      assert.equal(owned.confirmedPrinted, 1);
+      assert.equal(owned.awaitingRecovery, 1);
+      assert.equal(owned.retiredBlocked, total / 100);
+      assert.equal(owned.needsReconciliation, total / 100 - 1);
+      assert.equal(owned.available, total - 2 - owned.retiredBlocked - owned.needsReconciliation);
+      assert.equal(owned.complete, false);
+      console.log(`${total} owned identities via manufacturer batch application path ${elapsedMs}ms`);
+      previousTotal = total;
+    }
+
     console.log("batch operational reads PostgreSQL 18 application-path proof passed");
   } finally {
     await Promise.allSettled([prisma.$disconnect(), bootstrap.$disconnect()]);
