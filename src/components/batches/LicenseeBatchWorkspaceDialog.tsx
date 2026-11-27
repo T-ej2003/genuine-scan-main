@@ -1,3 +1,5 @@
+import { ManufacturerPrintRunFacts } from "./ManufacturerPrintRunFacts";
+import { manufacturerRunStatus, printRunCount } from "@/lib/print-job-view";
 import React from "react";
 import { format } from "date-fns";
 import { Activity, AlertTriangle, CheckCircle2, Download, PackageCheck, PencilLine, RefreshCcw, Trash2, UserCog, Boxes, Factory, Printer, ShieldCheck } from "lucide-react";
@@ -192,6 +194,7 @@ const formatCodeRange = (range?: { startCode?: string | null; endCode?: string |
 
 const needsRecovery = (job: PrintJobRow) => {
   if (isRetiredUncertainJob(job)) return false;
+  if (job.runSummary) return job.runSummary.operationalStatus === "NEEDS_OPERATOR_ACTION";
   const counts = getPrintRunCounts(job);
   return Boolean(
     job.session?.recoveryNeeded ||
@@ -289,7 +292,7 @@ const isStoppedPrintRun = (job: PrintJobRow) =>
   job.pipelineState === "NEEDS_OPERATOR_ACTION";
 
 const canRequestReissueForJob = (job: PrintJobRow) =>
-  !isRetiredUncertainJob(job) && (isEligibleForReissue(job) || isStoppedPrintRun(job));
+  job.runSummary?.allowedActions.includes("requestReissue") === true;
 
 const workspacePrimaryRange = (workspace: StableBatchOverviewRow) => {
   const allocation = workspace.allocations[0] || null;
@@ -397,12 +400,18 @@ export function LicenseeBatchWorkspaceDialog({
     reissueRequestsMode === "print" || reissueRequests.some((request) => request.status === "APPROVED");
   const isManufacturerMode = role === "manufacturer";
   const isSuperAdminMode = role === "super_admin" || role === "platform_super_admin";
-  const [selectedPrintJobDetail, setSelectedPrintJobDetail] = React.useState<PrintJobRow | null>(null);
+  const [selectedDetailJob, setSelectedPrintJobDetail] = React.useState<PrintJobRow | null>(null);
+  const selectedPrintJobDetail = selectedDetailJob && (isManufacturerMode
+    ? recentPrintJobs.find((job) => job.id === selectedDetailJob.id) ?? null
+    : selectedDetailJob);
   const [manufacturerOperationSection, setManufacturerOperationSection] = React.useState<
     "menu" | "confirmed" | "stopped" | "replacement" | "pending"
   >("menu");
   const manufacturerOps = workspace?.manufacturerOperational || null;
-  const blockingRecoveryJob = recentPrintJobs.find(needsRecovery) || null;
+  const printAccounting = workspace?.allocations[0]?.printAccounting;
+  const blockingRecoveryJob = recentPrintJobs.find((job) => isManufacturerMode
+    ? job.runSummary?.operationalStatus === "NEEDS_OPERATOR_ACTION" || job.pipelineState === "NEEDS_OPERATOR_ACTION"
+    : needsRecovery(job)) || null;
   const confirmedPrintJobs = React.useMemo(
     () => recentPrintJobs.filter((job) => isConfirmedPrintRun(job) && !isStoppedPrintRun(job)),
     [recentPrintJobs]
@@ -464,9 +473,9 @@ export function LicenseeBatchWorkspaceDialog({
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <Badge variant="secondary">Assigned batch</Badge>
                     <Badge variant={statusTone(manufacturerOps?.remainingLabelCount ?? manufacturerRemainingLabels(workspace))}>
-                      {(manufacturerOps?.remainingLabelCount ?? manufacturerRemainingLabels(workspace)).toLocaleString()} remaining labels
+                      {printRunCount(printAccounting?.available)} available to print
                     </Badge>
-                    <Badge variant="outline">{(manufacturerOps?.assignedLabelCount ?? workspace.originalTotalCodes).toLocaleString()} assigned labels</Badge>
+                    <Badge variant="outline">{printRunCount(printAccounting?.totalAllocated)} assigned labels</Badge>
                   </div>
                 </div>
                 <div className="min-w-[16rem] rounded-lg border bg-muted/20 px-4 py-3 text-sm">
@@ -498,15 +507,15 @@ export function LicenseeBatchWorkspaceDialog({
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       <div className="rounded-lg border bg-muted/20 p-4">
                         <div className="text-xs font-medium uppercase text-muted-foreground">Assigned labels</div>
-                        <div className="mt-3 text-3xl font-semibold">{(manufacturerOps?.assignedLabelCount ?? workspace.originalTotalCodes).toLocaleString()}</div>
+                        <div className="mt-3 text-3xl font-semibold">{printRunCount(printAccounting?.totalAllocated)}</div>
                       </div>
                       <div className="rounded-lg border bg-muted/20 p-4">
                         <div className="text-xs font-medium uppercase text-muted-foreground">Confirmed printed</div>
-                        <div className="mt-3 text-3xl font-semibold">{(manufacturerOps?.confirmedPrintedCount ?? workspace.printedCodes).toLocaleString()}</div>
+                        <div className="mt-3 text-3xl font-semibold">{printRunCount(printAccounting?.confirmedPrinted)}</div>
                       </div>
                       <div className="rounded-lg border bg-muted/20 p-4">
-                        <div className="text-xs font-medium uppercase text-muted-foreground">Remaining labels</div>
-                        <div className="mt-3 text-3xl font-semibold">{(manufacturerOps?.remainingLabelCount ?? manufacturerRemainingLabels(workspace)).toLocaleString()}</div>
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Available to print</div>
+                        <div className="mt-3 text-3xl font-semibold">{printRunCount(printAccounting?.available)}</div>
                         <div className="mt-2 text-xs text-muted-foreground font-mono break-all">
                           {blockingRecoveryJob
                             ? getRecoveryInstruction(blockingRecoveryJob).secondLine
@@ -514,9 +523,17 @@ export function LicenseeBatchWorkspaceDialog({
                         </div>
                       </div>
                       <div className="rounded-lg border bg-muted/20 p-4">
-                        <div className="text-xs font-medium uppercase text-muted-foreground">Scanned / blocked</div>
-                        <div className="mt-3 text-3xl font-semibold">{(manufacturerOps?.scannedCount ?? workspace.redeemedCodes).toLocaleString()} / {(manufacturerOps?.blockedCount ?? workspace.blockedCodes).toLocaleString()}</div>
+                        <div className="text-xs font-medium uppercase text-muted-foreground">Scanned / redeemed</div>
+                        <div className="mt-3 text-3xl font-semibold">{printRunCount(printAccounting?.scanned)} / {printRunCount(printAccounting?.redeemed)}</div>
                       </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 text-sm">
+                      {printAccounting?.reservedInProgress ? <Badge variant="secondary">Reserved / in progress {printAccounting.reservedInProgress}</Badge> : null}
+                      {printAccounting?.awaitingRecovery ? <Badge variant="secondary">Awaiting recovery {printAccounting.awaitingRecovery}</Badge> : null}
+                      {printAccounting?.retiredBlocked ? <Badge variant="secondary">Retired / blocked {printAccounting.retiredBlocked}</Badge> : null}
+                      {printAccounting?.needsReconciliation ? <Badge variant="secondary">Needs reconciliation {printAccounting.needsReconciliation}</Badge> : null}
+                      {!printAccounting?.complete ? <span className="text-muted-foreground">Some batch accounting details could not be verified.</span> : null}
                     </div>
 
                     <div className="rounded-lg border p-4">
@@ -670,27 +687,10 @@ export function LicenseeBatchWorkspaceDialog({
                                     <div className="space-y-2">
                                       <div className="flex flex-wrap items-center gap-2">
                                         <div className="font-medium">{job.jobNumber || job.id}</div>
-                                        <Badge variant={getPrintJobStatusBadgeVariant(job)}>{getPrintJobStageLabel(job)}</Badge>
+                                        <Badge variant={getPrintJobStatusBadgeVariant(job)}>{manufacturerRunStatus(job)}</Badge>
                                         {job.reprintOfJobId ? <Badge variant="outline">Replacement</Badge> : null}
                                       </div>
-                                      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
-                                        <div>Range <span className="font-mono">{printJobRange(job)}</span></div>
-                                        <div>Requested {getPrintRunCounts(job).requested.toLocaleString()}</div>
-                                        <div>Confirmed {getPrintRunCounts(job).confirmed.toLocaleString()}</div>
-                                        <div>Pending {getPrintRunCounts(job).pending.toLocaleString()}</div>
-                                        <div>Failed {getPrintRunCounts(job).failed.toLocaleString()}</div>
-                                        <div>Printer {job.printer?.name || "Not recorded"}</div>
-                                        <div>Operator {printJobOperator(job)}</div>
-                                        <div>Created {formatDateTime(job.createdAt)}</div>
-                                        <div>Updated {formatDateTime(job.updatedAt)}</div>
-                                      </div>
-                                      {needsRecovery(job) ? (
-                                        <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-                                          <div>{getRecoveryInstruction(job).firstLine}</div>
-                                          <div>{getRecoveryInstruction(job).secondLine}</div>
-                                        </div>
-                                      ) : null}
-                                      {job.failureReason ? <div className="text-xs text-destructive">{isRetiredUncertainJob(job) ? "QR retired; historical physical output unknown." : `Failure: ${job.failureReason}`}</div> : null}
+                                      <ManufacturerPrintRunFacts job={job} />
                                     </div>
                                     <div className="flex flex-wrap justify-end gap-2">
                                       <Button size="sm" variant="outline" onClick={() => setSelectedPrintJobDetail(job)}>View details</Button>
@@ -1535,6 +1535,14 @@ export function LicenseeBatchWorkspaceDialog({
         </DialogHeader>
         {selectedPrintJobDetail ? (
           <div className="space-y-4 text-sm">
+            {isManufacturerMode ? (
+              <>
+                <div>{manufacturerRunStatus(selectedPrintJobDetail)}</div>
+                <div className="text-xs text-muted-foreground">Print job ID {selectedPrintJobDetail.id}</div>
+                <ManufacturerPrintRunFacts job={selectedPrintJobDetail} />
+              </>
+            ) : (
+              <>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-md border p-3">
                 <div className="text-xs font-medium text-muted-foreground">Requested label range</div>
@@ -1592,6 +1600,8 @@ export function LicenseeBatchWorkspaceDialog({
                 <div className="mt-1 font-medium">Next action: request re-issue, then print approved replacement labels.</div>
               </div>
             ) : null}
+              </>
+            )}
           </div>
         ) : null}
       </DialogContent>

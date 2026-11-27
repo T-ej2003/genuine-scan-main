@@ -3,7 +3,7 @@ import { BatchLifecycleState, Prisma, QRStatus } from "@prisma/client";
 import prisma from "../config/database";
 import { CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { timeReliabilityStage } from "../observability/reliabilityStageTiming";
-import { listReservableQrCodeSummaries } from "./printReservationService";
+import { listReservableQrCodeSummaries, type ReservableQrCodeSummary } from "./printReservationService";
 import {
   buildBatchPrintReadinessFromSummary,
   type BatchPrintReadiness,
@@ -183,6 +183,7 @@ const fingerprint = (value: unknown) => {
 
 export type BatchOperationalSummary = BatchWithScope & {
   batchKind: BatchKind;
+  printAccounting?: NonNullable<ReservableQrCodeSummary["accounting"]> & { complete: boolean };
   unassignedRemainingCodes: number;
   assignedCodes: number;
   printableCodes: number;
@@ -295,7 +296,7 @@ const buildCountMaps = async (
       countsMap: new Map<string, BatchInventoryCounts>(),
       unassignedRangeMap: new Map<string, { start: string | null; end: string | null }>(),
       printableRangeMap: new Map<string, { start: string | null; end: string | null }>(),
-      reservableCountMap: new Map<string, number>(),
+      reservableSummaryMap: new Map<string, ReservableQrCodeSummary>(),
     };
   }
 
@@ -348,7 +349,7 @@ const buildCountMaps = async (
   const manufacturerBatchIds = new Set(batches.filter((batch) => batch.manufacturerId).map((batch) => batch.id));
   const rollups = [] as Awaited<ReturnType<typeof readRollups>>;
   const unassignedRanges = [] as Awaited<ReturnType<typeof readUnassignedRanges>>;
-  const reservableSummaryMap = new Map<string, { count: number; startCode: string | null; endCode: string | null }>();
+  const reservableSummaryMap = new Map<string, ReservableQrCodeSummary>();
   for (const ids of chunks) {
     rollups.push(...await readRollups(ids));
     const parentIds = ids.filter((id) => !manufacturerBatchIds.has(id));
@@ -426,7 +427,7 @@ const buildCountMaps = async (
         { start: summary.startCode, end: summary.endCode },
       ])
     ),
-    reservableCountMap: new Map([...reservableSummaryMap.entries()].map(([batchId, summary]) => [batchId, summary.count])),
+    reservableSummaryMap,
   };
 };
 
@@ -437,7 +438,7 @@ export const enrichBatchSummaries = async (
 ): Promise<BatchOperationalSummary[]> => {
   if (!batches.length) return [];
 
-  const { countsMap, unassignedRangeMap, printableRangeMap, reservableCountMap } = await buildCountMaps(
+  const { countsMap, unassignedRangeMap, printableRangeMap, reservableSummaryMap } = await buildCountMaps(
     batches,
     db,
     boundary
@@ -447,10 +448,15 @@ export const enrichBatchSummaries = async (
     const counts = countsMap.get(batch.id) || emptyCounts();
     const batchKind: BatchKind = batch.manufacturerId ? "MANUFACTURER_CHILD" : "RECEIVED_PARENT";
     const unassignedRemainingCodes = batchKind === "RECEIVED_PARENT" ? counts.dormant + counts.active : 0;
-    const printableCodes = batchKind === "MANUFACTURER_CHILD" ? reservableCountMap.get(batch.id) || 0 : 0;
+    const printableCodes = batchKind === "MANUFACTURER_CHILD" ? reservableSummaryMap.get(batch.id)?.count ?? 0 : 0;
     const assignedCodes = batchKind === "MANUFACTURER_CHILD" ? batch.totalCodes : 0;
     const activeRange = batchKind === "MANUFACTURER_CHILD" ? printableRangeMap.get(batch.id) : unassignedRangeMap.get(batch.id);
-    const printReadiness = buildBatchPrintReadinessFromSummary({
+    const accounting = reservableSummaryMap.get(batch.id)?.accounting;
+    const printAccounting = accounting ? {
+      ...accounting,
+      complete: accounting.needsReconciliation === 0 && accounting.totalAllocated === assignedCodes,
+    } : undefined;
+    const lifecycleReadiness = buildBatchPrintReadinessFromSummary({
       batchId: batch.id,
       lifecycleState: batch.lifecycleState || BatchLifecycleState.DRAFT,
       releasedAt: batch.releasedAt || null,
@@ -464,9 +470,19 @@ export const enrichBatchSummaries = async (
       rootBatchId: batch.rootBatchId,
     });
 
+    const printReadiness = accounting?.activePrintRun && lifecycleReadiness.printable
+      ? {
+        ...lifecycleReadiness,
+        printable: false,
+        reasonCode: "ACTIVE_PRINT_JOB_EXISTS",
+        userMessage: "An active print run already exists for this batch. Review its status before starting another.",
+      }
+      : lifecycleReadiness;
+
     return {
       ...batch,
       batchKind,
+      printAccounting,
       unassignedRemainingCodes,
       assignedCodes,
       printableCodes,

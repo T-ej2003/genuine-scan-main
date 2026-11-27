@@ -1,10 +1,41 @@
 const assert = require("assert");
+const test = require("node:test");
 const { BatchStateTransitionError } = require("../dist/services/batchStateMachineService");
 const { describePrintJobCreateFailure, isPhysicalOutcomeUnconfirmed } = require("../dist/controllers/print-job/errorResponses");
 
 assert.strictEqual(isPhysicalOutcomeUnconfirmed({ code: "P2010", meta: { code: "P0001", message: "ERROR: PHYSICAL_OUTCOME_UNCONFIRMED" } }), true);
 assert.strictEqual(isPhysicalOutcomeUnconfirmed({ code: "P2010", meta: { code: "42501", message: "ERROR: PHYSICAL_OUTCOME_UNCONFIRMED" } }), false);
 assert.strictEqual(isPhysicalOutcomeUnconfirmed({ code: "P2010", meta: { code: "P0001", message: "ERROR: OTHER_FAILURE\nPHYSICAL_OUTCOME_UNCONFIRMED" } }), false);
+
+test("resume returns a typed conflict only for the reviewed physical-outcome exception", async (t) => {
+  const control = require("../dist/services/printOperationControlService");
+  const { resumeManufacturerPrintJob } = require("../dist/controllers/print-job/queryHandlers");
+  const req = {
+    user: { role: "MANUFACTURER_ADMIN", userId: "manufacturer" },
+    params: { id: "50000000-0000-4000-8000-000000000592" },
+  };
+  const dbFailure = Object.assign(new Error("private Prisma details"), {
+    code: "P2010",
+    meta: { code: "P0001", message: "ERROR: PHYSICAL_OUTCOME_UNCONFIRMED\nCONTEXT: private SQL" },
+  });
+  const resume = t.mock.method(control, "resumePrintJob", async () => { throw dbFailure; });
+  t.mock.method(console, "error", () => undefined);
+  const res = {
+    status(code) { this.statusCode = code; return this; },
+    json(body) { this.body = body; return this; },
+  };
+  await resumeManufacturerPrintJob(req, res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.errorCode, "PHYSICAL_OUTCOME_UNCONFIRMED");
+  assert.doesNotMatch(JSON.stringify(res.body), /private|Prisma|P2010/);
+  dbFailure.meta.message = "ERROR: UNRELATED_EXPLICIT_EXCEPTION\nCONTEXT: PHYSICAL_OUTCOME_UNCONFIRMED";
+  await resumeManufacturerPrintJob(req, res);
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.body, {
+    success: false, error: "Print run could not be resumed.", message: "Print run could not be resumed.",
+  });
+  assert.equal(resume.mock.callCount(), 2);
+});
 
 const error = new BatchStateTransitionError(
   "INVALID_STATE_TRANSITION",

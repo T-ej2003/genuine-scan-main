@@ -1,3 +1,4 @@
+import { printRunCount } from "@/lib/print-job-view";
 import { format } from "date-fns";
 import { Download, RefreshCw, Search } from "lucide-react";
 
@@ -228,7 +229,7 @@ export function BatchesWorkspaceTable({
                       </TableRow>
                     ) : (
                       filteredRows.map((batch) => {
-                        const printed = !!batch.printedAt;
+                        const printed = Boolean(batch.printedAt && batch.printAccounting?.confirmedPrinted);
                         const availableInventory = getAvailableInventory(batch);
                         const printReadiness = batch.printReadiness;
                         const lifecycleBlocked =
@@ -261,14 +262,14 @@ export function BatchesWorkspaceTable({
                                 <div className="flex items-center gap-2 text-xs">
                                   <Badge variant="default">Allocated batch</Badge>
                                   <Badge variant={Number(batch.totalCodes || 0) > 0 ? "outline" : "secondary"}>
-                                    {Number(batch.totalCodes || 0).toLocaleString()} total
+                                    {printRunCount(batch.printAccounting?.totalAllocated)} total
                                   </Badge>
                                 </div>
                               </div>
                             </TableCell>
 
                             <TableCell>
-                              <div className="text-sm font-medium">{Number(batch.totalCodes || 0).toLocaleString()} assigned</div>
+                              <div className="text-sm font-medium">{printRunCount(batch.printAccounting?.totalAllocated)} assigned</div>
 	                              {batch.startCode && batch.endCode ? (
 	                                <div className="mt-1 text-xs text-muted-foreground">
 	                                  Label range: <span className="font-mono">{batch.startCode} to {batch.endCode}</span>
@@ -279,7 +280,7 @@ export function BatchesWorkspaceTable({
                             <TableCell>
                               <div className="space-y-1">
                                 <Badge variant={getAvailabilityTone(getAvailableInventory(batch))}>
-                                  {getAvailabilityTitle(batch)}: {getAvailableInventory(batch).toLocaleString()}
+                                  Available to print: {printRunCount(batch.printAccounting?.available)}
                                 </Badge>
                                 {lifecycleBlocked ? (
                                   <div className="text-[11px] text-amber-700">
@@ -287,8 +288,14 @@ export function BatchesWorkspaceTable({
                                   </div>
                                 ) : null}
                                 <div className="text-[11px] text-muted-foreground">
-                                  Printed {Number(batch.printedCodes || 0).toLocaleString()} · Scanned {Number(batch.redeemedCodes || 0).toLocaleString()}
+                                  Confirmed {printRunCount(batch.printAccounting?.confirmedPrinted)} · Scanned {printRunCount(batch.printAccounting?.scanned)}
                                 </div>
+                                {batch.printAccounting?.awaitingRecovery ? (
+                                  <div className="text-xs text-muted-foreground">Awaiting recovery {batch.printAccounting.awaitingRecovery}</div>
+                                ) : null}
+                                {!batch.printAccounting?.complete ? (
+                                  <div className="text-xs text-muted-foreground">Accounting needs reconciliation</div>
+                                ) : null}
                                 {batch.remainingStartCode && batch.remainingEndCode ? (
                                   <details className="text-xs text-muted-foreground">
 	                                    <summary className="cursor-pointer">Label range</summary>
@@ -315,7 +322,7 @@ export function BatchesWorkspaceTable({
                                   {format(new Date(batch.printedAt as string), "MMM d, yyyy")}
                                 </Badge>
                               ) : (
-                                <Badge className="bg-muted text-muted-foreground">Not printed</Badge>
+                                <Badge className="bg-muted text-muted-foreground">No confirmed print date</Badge>
                               )}
                             </TableCell>
 

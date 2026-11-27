@@ -51,6 +51,7 @@ export const createPrintJobSchema = z.object({
 
 export const listPrintJobsQuerySchema = z.object({
   batchId: z.string().uuid().optional(),
+  licenseeId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 }).strict();
 export const reissuePrintJobSchema = z.object({

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import apiClient from "@/lib/api-client";
+import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
+import { normalizePrintJobView } from "@/lib/print-job-view";
+import { queryClient } from "@/lib/query-client";
 import { clearActivePrintSession, updateActivePrintSession } from "@/lib/active-print-session";
 import { getOptionalLocalStorageItem } from "@/lib/consent";
 import {
@@ -58,6 +61,7 @@ export function useBatchPrintWorkflow({
   toast,
   getAvailableInventory,
   onBatchesChanged,
+  onPrintRunConflict,
 }: UseBatchPrintWorkflowParams) {
   const [printOpen, setPrintOpen] = useState(false);
   const [printBatch, setPrintBatch] = useState<BatchRow | null>(null);
@@ -347,7 +351,7 @@ export function useBatchPrintWorkflow({
   const loadRecentPrintJobs = async () => {
     if (!isManufacturer) return;
     const response = await printJobsQuery.refetch();
-    if (!response.data) {
+    if (response.isError || !response.data) {
       setRecentPrintJobs([]);
       return;
     }
@@ -566,6 +570,10 @@ export function useBatchPrintWorkflow({
       const found = previous.some((row) => row.id === nextJob.id);
       return found ? previous.map((row) => (row.id === nextJob.id ? nextJob : row)) : [nextJob, ...previous].slice(0, 8);
     });
+    if (nextJob.runSummary) {
+      queryClient.setQueriesData<PrintJobRow[]>({ queryKey: ["printing", "jobs"] }, (jobs) =>
+        jobs?.map((job) => job.id === nextJob.id ? { ...job, ...nextJob } : job));
+    }
     syncPrintJobProgress(nextJob, progressStateSetters);
   };
 
@@ -592,7 +600,7 @@ export function useBatchPrintWorkflow({
           return;
         }
         if (response.data) {
-          replaceRecentPrintJob(response.data as PrintJobRow);
+          replaceRecentPrintJob(normalizePrintJobView(response.data) as PrintJobRow);
         } else if (action === "stop") {
           const finalStatus = await apiClient.getPrintJobStatus(job.id);
           if (finalStatus.success && finalStatus.data) replaceRecentPrintJob(finalStatus.data as PrintJobRow);
@@ -606,9 +614,8 @@ export function useBatchPrintWorkflow({
           });
           setPrintProgressOpen(true);
           setPrintProgressNotice("Only items proven unissued are eligible for controlled recovery.");
-        } else {
-          await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
         }
+        await Promise.allSettled([response.data ? undefined : loadRecentPrintJobs(), onBatchesChanged?.()]);
         setPrintControlDialog({ action: null, job: null, reason: "", submitting: false });
         toast({
           title: action === "pause" ? "Print run paused" : "Print run stopped",
@@ -635,12 +642,19 @@ export function useBatchPrintWorkflow({
         const response = await apiClient.resumePrintJob(trimmedJobId);
         if (!response.success) {
           handlePrintControlFailure(response, "Print run could not be resumed.");
+          if (response.status === 409) {
+            clearRequestCoordinator(["manufacturer-print-jobs:", "manufacturer-print-job-status:"]);
+            setRecentPrintJobs((jobs) => jobs.map((job) => job.id === trimmedJobId && job.runSummary
+              ? { ...job, runSummary: { ...job.runSummary, allowedActions: [] } }
+              : job));
+            await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.(), onPrintRunConflict?.(trimmedJobId)]);
+          }
           return;
         }
-        if (response.data) replaceRecentPrintJob(response.data as PrintJobRow);
+        if (response.data) replaceRecentPrintJob(normalizePrintJobView(response.data) as PrintJobRow);
         setPrintProgressError(null);
         setPrintCooldownUntil(0);
-        await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+        await Promise.allSettled([response.data ? undefined : loadRecentPrintJobs(), onBatchesChanged?.()]);
         toast({
           title: "Print run resumed",
           description: "MSCQR will continue from labels that are still pending. Confirmed labels will not be duplicated.",

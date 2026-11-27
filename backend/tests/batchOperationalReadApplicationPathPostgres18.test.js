@@ -248,6 +248,11 @@ const main = async () => {
     }), "manufacturer selected");
     assert.deepEqual(manufacturerSelected.data.map((row) => row.id), [ids.childA]);
     assert.equal(manufacturerSelected.meta.total, 1);
+    assert.deepEqual(manufacturerSelected.data[0].printAccounting, {
+      totalAllocated: 2, available: 2, reservedInProgress: 0, confirmedPrinted: 0,
+      awaitingRecovery: 0, retiredBlocked: 0, needsReconciliation: 0,
+      scanned: 0, redeemed: 0, activePrintRun: false, complete: true,
+    });
 
     const platformSelected = expectSuccess(await invoke(getBatches, {
       user: platformClaims(), requestId: success("batch-pg-platform-selected"), query: { licenseeId: ids.licenseeA },
@@ -379,6 +384,40 @@ const main = async () => {
     }
     assert(auditRows.filter((row) => row.details?.requestId === "batch-pg-manufacturer-selected")
       .every((row) => row.orgId === ids.orgA && row.licenseeId === ids.licenseeA));
+
+    // One item is associated with each QR even after multiple dispatch attempts.
+    await bootstrap.$transaction(async (tx) => {
+      const job = await tx.printJob.create({ data: {
+        batchId: ids.childA, manufacturerId: ids.manufacturerA, quantity: 2,
+        status: "PAUSED", pipelineState: "NEEDS_OPERATOR_ACTION",
+      } });
+      const session = await tx.printSession.create({ data: {
+        printJobId: job.id, batchId: ids.childA, manufacturerId: ids.manufacturerA,
+        status: "PAUSED", totalItems: 2,
+      } });
+      const qrRows = await tx.qRCode.findMany({ where: { batchId: ids.childA }, orderBy: { code: "asc" } });
+      const [confirmed, uncertain] = qrRows;
+      await tx.qRCode.update({ where: { id: confirmed.id }, data: { status: "PRINTED", printJobId: job.id } });
+      await tx.qRCode.update({ where: { id: uncertain.id }, data: { status: "ACTIVATED", printJobId: job.id } });
+      await tx.printItem.createMany({ data: [
+        { printSessionId: session.id, qrCodeId: confirmed.id, code: confirmed.code,
+          state: "PRINT_CONFIRMED", printConfirmedAt: new Date(), attemptCount: 3 },
+        { printSessionId: session.id, qrCodeId: uncertain.id, code: uncertain.code,
+          state: "AGENT_ACKED", pipelineState: "NEEDS_OPERATOR_ACTION", agentAckedAt: new Date(), attemptCount: 2 },
+      ] });
+    });
+    const partial = expectSuccess(await invoke(getBatches, {
+      user: manufacturerClaims(), requestId: "batch-pg-partial-accounting", query: { licenseeId: ids.licenseeA },
+      originalUrl: "/api/qr/batches",
+    }), "manufacturer partial").data[0];
+    assert.deepEqual(partial.printAccounting, {
+      totalAllocated: 2, available: 0, reservedInProgress: 0, confirmedPrinted: 1,
+      awaitingRecovery: 1, retiredBlocked: 0, needsReconciliation: 0, scanned: 0, redeemed: 0,
+      activePrintRun: true, complete: true,
+    });
+    assert.equal(partial.printReadiness.printable, false);
+    assert.equal(tenantPage.data[0].printAccounting.needsReconciliation, 2,
+      "legacy printed and redeemed states without item evidence remain explicit");
 
     const stressRows = Number(process.env.MSCQR_PERF_ROWS || 100000);
     assert(Number.isInteger(stressRows) && stressRows >= 1 && stressRows <= 200000);

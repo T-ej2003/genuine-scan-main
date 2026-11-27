@@ -156,6 +156,26 @@ export const printJobSessionSchema = z
   })
   .passthrough();
 
+export const printRunSummarySchema = z.object({
+  jobId: z.string(),
+  jobNumber: z.string().nullable(),
+  batchId: z.string(),
+  requestedCount: z.number(),
+  confirmedCount: z.number().nullable(),
+  pendingCount: z.number().nullable(),
+  failedCount: z.number().nullable(),
+  uncertainCount: z.number().nullable(),
+  cancelledOrRetiredCount: z.number().nullable(),
+  serialRange: z.object({ startCode: z.string().nullable(), endCode: z.string().nullable() }),
+  printer: z.object({ id: z.string(), name: z.string().nullable() }).nullable(),
+  operator: z.object({ id: z.string(), name: z.string().nullable() }).nullable(),
+  operationalStatus: z.string(),
+  recoveryReason: z.string().nullable(),
+  allowedActions: z.array(z.enum(["pause", "resume", "stop", "abandon", "requestReissue"])),
+  complete: z.boolean(),
+});
+export type PrintRunSummaryDTO = z.infer<typeof printRunSummarySchema>;
+
 export const printJobSchema = z
   .object({
     id: z.string(),
@@ -202,6 +222,7 @@ export const printJobSchema = z
       .nullable()
       .optional(),
     session: printJobSessionSchema.nullable().optional(),
+    runSummary: printRunSummarySchema.nullable().optional(),
   })
   .passthrough();
 

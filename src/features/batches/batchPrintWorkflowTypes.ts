@@ -17,5 +17,6 @@ export type UseBatchPrintWorkflowParams = {
   userId?: string | null;
   toast: ToastLike;
   getAvailableInventory: (batch: BatchRow) => number;
+  onPrintRunConflict?: (jobId: string) => Promise<unknown> | void;
   onBatchesChanged?: () => Promise<void> | void;
 };

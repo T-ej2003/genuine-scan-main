@@ -347,13 +347,14 @@ const qrSystemOwnerPrivileges = [...new Map(qrSystemContracts.flatMap((contract)
 const qrSystemOwnerPolicies = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const printingLifecycleBaseContracts = printingLifecycleContracts.filter((contract) => contract.definitionLocation.endsWith("/printingLifecycle.sql"));
 const printingLifecycleUpgradeContracts = printingLifecycleContracts.filter((contract) => contract.definitionLocation.endsWith("/printingUpgradeNoReplayDefinitions.sql"));
-const printingLifecycleFunctionSource = readContractSources(printingLifecycleBaseContracts, [
+const printingRunContracts = printingLifecycleContracts.filter((contract) => contract.definitionLocation.endsWith("/printingRunProjection.sql"));
+const printingLifecycleFunctionSource = readContractSources([...printingLifecycleBaseContracts,...printingRunContracts], [
   ["{{APP_ROLE}}", lit(roleNames.app)], ["{{WORKER_ROLE}}", lit(roleNames.worker)],
 ]);
 const printingLifecycleUpgradeSource = readContractSources(printingLifecycleUpgradeContracts, [
   ["{{APP_ROLE}}", lit(roleNames.app)], ["{{WORKER_ROLE}}", lit(roleNames.worker)],
 ]);
-const printingLifecycleAppSignatures = printingLifecycleBaseContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const printingLifecycleAppSignatures = [...printingLifecycleBaseContracts,...printingRunContracts].filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleUpgradeAppSignatures = printingLifecycleUpgradeContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleWorkerSignatures = printingLifecycleBaseContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleBaseOwnerPrivileges = [...new Map(printingLifecycleBaseContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
@@ -1492,28 +1493,73 @@ END
 $function$;
 
 CREATE FUNCTION app_rls.batch_reservable_qr_summaries(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,batch_ids text[])
-RETURNS TABLE(batch_id text,item_count bigint,start_code text,end_code text)
+RETURNS TABLE(batch_id text,item_count bigint,start_code text,end_code text,accounting jsonb)
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
 DECLARE fingerprint text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);
   IF ${batchOperationalArrayGuardSql} THEN RAISE EXCEPTION 'batch operational access denied'; END IF;
   RETURN QUERY
-  SELECT qcode.${q("batchId")},count(*),min(coalesce(qcode.${q("displayCode")},qcode.${q("code")})),max(coalesce(qcode.${q("displayCode")},qcode.${q("code")}))
+  WITH inventory AS (
+  SELECT qcode."batchId",qcode.status,coalesce(qcode."displayCode",qcode.code) AS serial,
+    pi.state AS item_state,ps.status AS session_status,pj.status AS job_status,pj."pipelineState" AS job_pipeline,
+    pi."printConfirmedAt",pi."confirmationDeadlineAt",pi."pipelineState" AS item_pipeline,
+    (pi."issuedAt" IS NOT NULL OR pi."dispatchedAt" IS NOT NULL OR pi."agentAckedAt" IS NOT NULL OR
+      pi."deviceJobRef" IS NOT NULL OR coalesce(pi."dispatchMetadata",'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb) OR
+      coalesce(pi."confirmationEvidence",'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)) AS has_evidence,
+    (qcode."printJobId"=pj.id AND ps."batchId"=qcode."batchId" AND pj."batchId"=qcode."batchId") AS current_binding,
+    (qcode.status='ALLOCATED' AND qcode."printJobId" IS NULL
+    AND (pi.id IS NULL OR (pi."issuedAt" IS NULL AND pi."dispatchedAt" IS NULL AND pi."agentAckedAt" IS NULL
+      AND pi."deviceJobRef" IS NULL AND coalesce(pi."dispatchMetadata",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+      AND ps."batchId"=qcode."batchId" AND pj."batchId"=qcode."batchId" AND pi."printConfirmedAt" IS NULL
+      AND coalesce(pi."confirmationEvidence",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+      AND ((pi.state IN ('FAILED','FROZEN') AND ps.status IN ('CANCELLED','FAILED') AND pj.status IN ('CANCELLED','FAILED')
+        AND (pi."deadLetterReason" IN ('operator_abandoned_unconfirmed_run','pre_dispatch_failure','connector_payload_validation_failed_before_dispatch','printer_agent_payload_failed_before_dispatch')
+          OR pi."failureReason" ILIKE ANY(ARRAY['%operator closed unconfirmed failed print run%','%operator abandoned unconfirmed print run%','%before any printer acknowledgement%','%pre-dispatch%','%pre dispatch%'])))
+        OR (pi.state='CANCELLED' AND ps.status='STOPPED' AND pj.status IN ('STOPPED','PARTIALLY_COMPLETED')))))) AS available
   FROM public.${q("QRCode")} qcode
   LEFT JOIN public.${q("PrintItem")} pi ON pi.${q("qrCodeId")}=qcode.${q("id")}
   LEFT JOIN public.${q("PrintSession")} ps ON ps.${q("id")}=pi.${q("printSessionId")}
   LEFT JOIN public.${q("PrintJob")} pj ON pj.${q("id")}=ps.${q("printJobId")}
-  WHERE qcode.${q("batchId")}=ANY(batch_ids) AND qcode.${q("status")}='ALLOCATED' AND qcode.${q("printJobId")} IS NULL
-    AND (pi.${q("id")} IS NULL OR (pi.${q("printConfirmedAt")} IS NULL
-      AND (pi.${q("confirmationEvidence")} IS NULL OR pi.${q("confirmationEvidence")}::text IN ('null','{}'))
-      AND ((pi.${q("state")}::text IN ('FAILED','FROZEN') AND pi.${q("agentAckedAt")} IS NULL AND pi.${q("dispatchedAt")} IS NULL AND pi.${q("deviceJobRef")} IS NULL
-        AND (pi.${q("deadLetterReason")} IN ('operator_abandoned_unconfirmed_run','pre_dispatch_failure','connector_payload_validation_failed_before_dispatch','printer_agent_payload_failed_before_dispatch')
-          OR pi.${q("failureReason")} ILIKE '%operator closed unconfirmed failed print run%' OR pi.${q("failureReason")} ILIKE '%operator abandoned unconfirmed print run%'
-          OR pi.${q("failureReason")} ILIKE '%before any printer acknowledgement%' OR pi.${q("failureReason")} ILIKE '%pre-dispatch%' OR pi.${q("failureReason")} ILIKE '%pre dispatch%')
-        AND ps.${q("status")}::text IN ('CANCELLED','FAILED') AND pj.${q("status")}::text IN ('CANCELLED','FAILED'))
-      OR (pi.${q("state")}::text='CANCELLED' AND ps.${q("status")}::text='STOPPED' AND pj.${q("status")}::text IN ('STOPPED','PARTIALLY_COMPLETED')))))
-  GROUP BY qcode.${q("batchId")};
+  WHERE qcode."batchId"=ANY(batch_ids)
+  ), classified AS (
+    SELECT *,CASE
+      WHEN status='BLOCKED' THEN 'retiredBlocked'
+      WHEN current_binding AND status IN ('PRINTED','SCANNED','REDEEMED') AND
+        item_state IN ('PRINT_CONFIRMED','CLOSED') AND "printConfirmedAt" IS NOT NULL THEN 'confirmedPrinted'
+      WHEN available THEN 'available'
+      WHEN current_binding AND status='ACTIVATED' AND item_state IN ('RESERVED','ISSUED','AGENT_ACKED')
+        AND session_status IN ('ACTIVE','PAUSED','RESUME_PENDING','RETRY_WAITING')
+        AND job_status IN ('PENDING','SENT','PAUSED')
+        AND job_pipeline<>'NEEDS_OPERATOR_ACTION' AND item_pipeline<>'NEEDS_OPERATOR_ACTION'
+        AND ("confirmationDeadlineAt" IS NULL OR "confirmationDeadlineAt">=transaction_timestamp()) THEN 'reservedInProgress'
+      WHEN "printConfirmedAt" IS NULL AND (has_evidence OR item_state IN ('FROZEN','ISSUED','AGENT_ACKED')
+        OR job_pipeline='NEEDS_OPERATOR_ACTION') THEN 'awaitingRecovery'
+      ELSE 'needsReconciliation' END AS bucket
+    FROM inventory
+  )
+  SELECT ids.id,count(*) FILTER (WHERE available),min(serial) FILTER (WHERE available),max(serial) FILTER (WHERE available),
+    jsonb_build_object(
+      'totalAllocated',count(bucket),
+      'available',count(*) FILTER (WHERE bucket='available'),
+      'reservedInProgress',count(*) FILTER (WHERE bucket='reservedInProgress'),
+      'confirmedPrinted',count(*) FILTER (WHERE bucket='confirmedPrinted'),
+      'awaitingRecovery',count(*) FILTER (WHERE bucket='awaitingRecovery'),
+      'retiredBlocked',count(*) FILTER (WHERE bucket='retiredBlocked'),
+      'needsReconciliation',count(*) FILTER (WHERE bucket='needsReconciliation'),
+      'scanned',count(*) FILTER (WHERE status='SCANNED'),
+      'redeemed',count(*) FILTER (WHERE status='REDEEMED'),
+      'activePrintRun',EXISTS (
+        SELECT 1 FROM public."PrintJob" active_job
+        JOIN public."PrintSession" active_session ON active_session."printJobId"=active_job.id
+        JOIN public."Batch" active_batch ON active_batch.id=active_job."batchId"
+        WHERE active_job."batchId"=ids.id AND active_job."manufacturerId"=active_batch."manufacturerId"
+          AND active_job.status IN ('PENDING','SENT','PAUSED')
+          AND active_session.status IN ('ACTIVE','PAUSED','RESUME_PENDING')
+      ))
+  FROM (SELECT DISTINCT unnest(batch_ids) AS id) ids
+  LEFT JOIN classified ON classified."batchId"=ids.id
+  GROUP BY ids.id;
 END
 $function$;`;
 
@@ -2121,6 +2167,12 @@ for (const [table, command, rawPredicate] of printingLifecycleOwnerPolicies) {
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);
   policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "release-fix-5-printing-lifecycle", ownerIdentity: "identity-auth-function-owner", scope: "verified session or exact connector/worker operation plus row-local printing selector" }))};`);
 }
+for (const [table, command, rawPredicate] of printingRunContracts.flatMap((contract) => contract.security.ownerPolicies)) {
+  const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app));
+  const policyName = shortName("printing_run_projection", table, command);
+  policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} USING (${predicate});`);
+  policyStatements.push(`COMMENT ON POLICY ${q(policyName)} ON public.${q(table)} IS ${lit(JSON.stringify({ boundary: "manufacturer-print-run-projection", scope: "bounded current manufacturer print run IDs" }))};`);
+}
 for (const [table, command, rawPredicate] of printingUpgradeOwnerPolicies) {
   const predicate = rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app));
   const policyName = shortName("printing_upgrade", table, command);
@@ -2534,6 +2586,23 @@ const policyInventory = [
     sourceCommandRuleIds: contractEvidenceFor(printingLifecycleContracts, table, command),
     workflowId: null,
     route: "Release Fix 5 exact printing boundary",
+    certificationStatus: "pending",
+    internalHelperOnly: true,
+  })),
+  ...printingRunContracts.flatMap((contract) => contract.security.ownerPolicies).map(([table, command, rawPredicate]) => ({
+    tableId: tables.find((entry) => entry.physicalTable === table)?.id,
+    table,
+    policyName: shortName("printing_run_projection", table, command),
+    command,
+    actors: ["manufacturer"],
+    assurance: "source-rule-specific",
+    purpose: ["printing-readiness"],
+    scopeType: "verified-manufacturer-print-run-ids",
+    scopePredicate: rawPredicate.replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner)).replaceAll("{{APP_ROLE}}", lit(roleNames.app)),
+    columns: [],
+    sourceCommandRuleIds: contractEvidenceFor(printingRunContracts, table, command),
+    workflowId: null,
+    route: "Manufacturer print run projection",
     certificationStatus: "pending",
     internalHelperOnly: true,
   })),

@@ -1,4 +1,7 @@
+import type { BatchPrintAccountingDTO } from "../../shared/contracts/runtime/batches";
+
 export type BatchWorkspaceRow = {
+  printAccounting?: BatchPrintAccountingDTO;
   id: string;
   name: string;
   licenseeId: string;
@@ -26,6 +29,7 @@ export type BatchWorkspaceRow = {
 };
 
 export type BatchWorkspaceAllocation = {
+  printAccounting?: BatchPrintAccountingDTO;
   batchId: string;
   batchName: string;
   manufacturerId: string;
@@ -230,6 +234,7 @@ export const buildStableBatchOverviewRows = (rows: BatchWorkspaceRow[]) => {
     } else {
       const allocation: BatchWorkspaceAllocation = {
         batchId: row.id,
+        printAccounting: row.printAccounting,
         batchName: row.name,
         manufacturerId: String(row.manufacturer?.id || row.manufacturerId || "").trim(),
         manufacturerName: row.manufacturer?.name || "Assigned manufacturer",
