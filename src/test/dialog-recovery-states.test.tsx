@@ -1,9 +1,11 @@
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import { PrintProgressDialog } from "@/components/printing/PrintProgressDialog";
+import { PrintRetirementPanel } from "@/components/batches/PrintRetirementPanel";
+import apiClient from "@/lib/api-client";
 import { LicenseeBatchWorkspaceDialog } from "@/components/batches/LicenseeBatchWorkspaceDialog";
 import { BatchPrintJobDialog, DeleteBatchDialog, RenameBatchDialog } from "@/features/batches/components/BatchDialogs";
 import { LicenseeDialogs } from "@/features/licensees/components/LicenseeDialogs";
@@ -11,6 +13,40 @@ import type { PrintJobRow } from "@/features/batches/types";
 import { ManufacturerDetailsDialog } from "@/features/manufacturers/components/ManufacturerDetailsDialog";
 
 describe("dialog recovery states", () => {
+  it("shows only the retirement decisions allowed by the scoped response", async () => {
+    const list = vi.spyOn(apiClient, "getPrintRetirements").mockResolvedValueOnce({
+      success: true,
+      data: [
+        { itemId: "item-1", serial: "QR-01", status: "PENDING", requestReason: "Interrupted print run",
+          canRequest: false, canApprove: true, canReject: true },
+        { itemId: "item-2", serial: "QR-02", status: "EXECUTED", requestReason: null,
+          canRequest: false, canApprove: false, canReject: false },
+      ],
+    }).mockResolvedValue({ success: true, data: [] });
+    const decide = vi.spyOn(apiClient, "decidePrintRetirement").mockResolvedValue({ success: true });
+    try {
+      const onChanged = vi.fn();
+      render(<PrintRetirementPanel jobId="job-1" onChanged={onChanged} />);
+      const details = screen.getByText("Retire affected labels").parentElement as HTMLDetailsElement;
+      expect(list).not.toHaveBeenCalled();
+      details.open = true;
+      fireEvent(details, new Event("toggle"));
+      expect(await screen.findByText("Interrupted print run")).toBeInTheDocument();
+      const approval = screen.getByRole("button", { name: "Approve retirement" });
+      expect(approval).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Request retirement" })).not.toBeInTheDocument();
+      fireEvent.change(screen.getByRole("textbox", { name: "Reason" }), { target: { value: "Confirmed approval reason" } });
+      fireEvent.click(approval);
+      await waitFor(() => expect(decide).toHaveBeenCalledWith("job-1", {
+        itemId: "item-1", action: "APPROVE", reason: "Confirmed approval reason",
+      }));
+      expect(onChanged).toHaveBeenCalledOnce();
+    } finally {
+      list.mockRestore();
+      decide.mockRestore();
+    }
+  });
+
   const runSummary = (jobId: string, status: string, requestedCount: number, overrides: Partial<NonNullable<PrintJobRow["runSummary"]>> = {}): NonNullable<PrintJobRow["runSummary"]> => ({
     jobId, jobNumber: null, batchId: "batch-1", requestedCount,
     confirmedCount: 0, pendingCount: 0, failedCount: 0, uncertainCount: 0, cancelledOrRetiredCount: 0,

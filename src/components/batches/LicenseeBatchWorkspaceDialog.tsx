@@ -78,6 +78,8 @@ type LicenseeBatchWorkspaceDialogProps = {
   onLoadMoreHistory?: () => void;
   recentPrintJobs: PrintJobRow[];
   printJobsLoading: boolean;
+  printJobsAllocationId?: string;
+  onPrintJobsAllocationChange?: (id: string) => void;
   canRequestReissue: boolean;
   reissueReason: string;
   onReissueReasonChange: (value: string) => void;
@@ -378,6 +380,8 @@ export function LicenseeBatchWorkspaceDialog({
   onLoadMoreHistory,
   recentPrintJobs,
   printJobsLoading,
+  printJobsAllocationId,
+  onPrintJobsAllocationChange,
   canRequestReissue,
   reissueReason,
   onReissueReasonChange,
@@ -409,9 +413,8 @@ export function LicenseeBatchWorkspaceDialog({
   const isManufacturerMode = role === "manufacturer";
   const isSuperAdminMode = role === "super_admin" || role === "platform_super_admin";
   const [selectedDetailJob, setSelectedPrintJobDetail] = React.useState<PrintJobRow | null>(null);
-  const selectedPrintJobDetail = selectedDetailJob && (isManufacturerMode
-    ? recentPrintJobs.find((job) => job.id === selectedDetailJob.id) ?? null
-    : selectedDetailJob);
+  const selectedPrintJobDetail = selectedDetailJob
+    ? recentPrintJobs.find((job) => job.id === selectedDetailJob.id) ?? null : null;
   const [manufacturerOperationSection, setManufacturerOperationSection] = React.useState<
     "menu" | "confirmed" | "stopped" | "replacement" | "pending"
   >("menu");
@@ -1404,6 +1407,19 @@ export function LicenseeBatchWorkspaceDialog({
                             )}
                           </div>
 
+                          {role === "licensee_admin" && workspace.allocations.length > 1 ? (
+                            <div className="space-y-1">
+                              <Label htmlFor="review-print-allocation">Print runs by allocation</Label>
+                              <Select value={printJobsAllocationId} onValueChange={onPrintJobsAllocationChange}>
+                                <SelectTrigger id="review-print-allocation"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {workspace.allocations.map((allocation) => (
+                                    <SelectItem key={allocation.batchId} value={allocation.batchId}>{allocation.batchName}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : null}
                           {printJobsLoading ? (
                             <div className="rounded-xl border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
                               Loading recent print jobs...
@@ -1444,6 +1460,11 @@ export function LicenseeBatchWorkspaceDialog({
                                           <div>{getRecoveryInstruction(job).firstLine}</div>
                                           <div>{getRecoveryInstruction(job).secondLine}</div>
                                         </div>
+                                      ) : null}
+                                      {role === "licensee_admin" ? (
+                                        <Button size="sm" variant="outline" onClick={() => setSelectedPrintJobDetail(job)}>
+                                          Review retirement requests
+                                        </Button>
                                       ) : null}
                                       {job.reprintReason ? (
                                         <div className="text-xs text-muted-foreground">Reason: {job.reprintReason}</div>
@@ -1616,7 +1637,7 @@ export function LicenseeBatchWorkspaceDialog({
             ) : null}
               </>
             )}
-            {retirementActorId && (isManufacturerMode || role === "licensee_admin") && needsRecovery(selectedPrintJobDetail) ? (
+            {retirementActorId && (role === "licensee_admin" || (isManufacturerMode && needsRecovery(selectedPrintJobDetail))) ? (
               <PrintRetirementPanel key={`${retirementActorId}:${selectedPrintJobDetail.id}`} jobId={selectedPrintJobDetail.id} onChanged={onRetirementChanged} />
             ) : null}
           </div>

@@ -100,13 +100,16 @@ export default function BatchesPage() {
     onWorkspaceDraftReset: operations.resetAssignDraft,
   });
 
+  const [reviewAllocationId, setReviewAllocationId] = useState<string>();
+  const reviewAllocations = role === "licensee_admin" ? workspace.workspaceBatch?.allocations : undefined;
+  const reviewAllocation = reviewAllocations?.find((allocation) => allocation.batchId === reviewAllocationId) || reviewAllocations?.[0];
   const workspacePrintJobsBatchId = isManufacturer
     ? workspace.workspaceBatch?.focusBatchId || workspace.workspaceBatch?.allocations[0]?.batchId
-    : workspace.workspaceBatch?.sourceBatchRow?.id;
+    : reviewAllocation?.batchId || workspace.workspaceBatch?.sourceBatchRow?.id;
   const workspacePrintJobsQuery = usePrintJobs(
     workspacePrintJobsBatchId,
     12,
-    workspace.workspaceOpen && canRequestReissue
+    workspace.workspaceOpen && canRequestReissue && Boolean(workspacePrintJobsBatchId)
   );
 
   const printWorkflow = useBatchPrintWorkflow({
@@ -469,6 +472,8 @@ export default function BatchesPage() {
           }
         }}
         recentPrintJobs={workspacePrintJobsQuery.data || []}
+        printJobsAllocationId={reviewAllocation?.batchId}
+        onPrintJobsAllocationChange={setReviewAllocationId}
         printJobsLoading={workspacePrintJobsQuery.isLoading || workspacePrintJobsQuery.isFetching}
         canRequestReissue={canRequestReissue}
         reissueReason={reissueReason}
