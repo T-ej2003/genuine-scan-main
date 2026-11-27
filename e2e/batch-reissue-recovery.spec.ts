@@ -482,8 +482,8 @@ test.describe("batch operations reissue recovery", () => {
     await brandPage.getByRole("tab", { name: "Operations" }).click();
     await expect(brandPage.getByText("Requested 5 labels")).toBeVisible();
     await expect(brandPage.getByText("Range QR-000006 to QR-000010", { exact: true }).first()).toBeVisible();
-    await brandPage.getByLabel("Decision note").fill("Approved after evidence review.");
-    await brandPage.getByRole("button", { name: "Approve" }).click();
+    await brandPage.getByLabel("Decision note").fill("Forwarded after evidence review.");
+    await brandPage.getByRole("button", { name: "Forward to super admin", exact: true }).click();
 
     await expect.poll(() => state.brandReviewCount).toBe(1);
     await expect(brandPage.getByText("Forwarded to super admin", { exact: true }).first()).toBeVisible();
@@ -499,7 +499,7 @@ test.describe("batch operations reissue recovery", () => {
     await replacementPage.getByText("Factory Recovery Batch").first().click({ force: true });
     await replacementPage.getByRole("tab", { name: "Operations" }).click();
     await replacementPage.getByRole("button", { name: /Replacement labels/i }).click();
-    await expect(replacementPage.getByText("Approved and ready to print")).toBeVisible();
+    await expect(replacementPage.getByText("Approved for execution review", { exact: true })).toBeVisible();
     const printButton = replacementPage.getByRole("button", { name: "Print replacement labels" });
     await expect(printButton).toBeEnabled();
     await printButton.click();

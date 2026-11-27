@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { PrintItemState, PrintJobStatus, PrintPipelineState, PrintSessionStatus } = require("@prisma/client");
 const { describeOriginalPrintJobForReissue } = require("../dist/services/printReissueService");
+const { sendPrintReissueExecutionError } = require("../dist/controllers/print-job/reissueOutcomeResponse");
 
 const repoRoot = path.resolve(__dirname, "..", "..");
 const read = (relativePath) => fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
@@ -103,7 +104,25 @@ assert(workflowSource.includes('operation: "REISSUE_LIST"'), "Reissue list respo
 assert(!workflowSource.includes("items:"), "Reissue request list/review queries must not hydrate print session items");
 assert(serviceSource.includes("PRINT_REISSUE_ORIGINAL_NOT_RECOVERABLE"), "Invalid original lifecycle must be a typed business conflict");
 assert(serviceSource.includes("NOT_ENOUGH_RECOVERABLE_LABELS"), "Invalid recovery range must return a typed 422-style conflict");
-assert(controllerSource.includes("error.statusCode") && controllerSource.includes("error?.details"), "Reissue print endpoint must return structured safe business errors");
+assert(controllerSource.includes("return sendPrintReissueExecutionError(res, error)"), "Reissue execution must use the reviewed response boundary");
+const reissueErrorResponse = (error) => {
+  const result = {};
+  const response = {
+    status(value) { result.status = value; return this; },
+    json(value) { result.body = value; return this; },
+  };
+  sendPrintReissueExecutionError(response, error);
+  return result;
+};
+for (const code of ["PHYSICAL_OUTCOME_UNCONFIRMED", "INVALID_STATE_TRANSITION", "NOT_ENOUGH_CODES", "PRINTER_ATTESTATION_STALE"]) {
+  const result = reissueErrorResponse({ code: "P2010", meta: { code: "P0001", message: `ERROR: ${code}` } });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.errorCode, code);
+  assert(!result.body.error.includes("ERROR:"));
+}
+const unexpected = reissueErrorResponse({ code: "P2010", meta: { code: "P0001", message: "ERROR: unexpected database fault" } });
+assert.equal(unexpected.status, 500);
+assert(!unexpected.body.error.includes("database fault"));
 assert(!/displayCode\s*\|\|\s*[^,\n]*code/i.test(serviceSource), "Print reissue service must not fall back from displayCode to public QR identity");
 assert(serviceSource.includes("REPLACEMENT_QR_PUBLIC_CODE_MISSING"), "Replacement printing must fail closed when QRCode.code is missing");
 assert(printingSql.includes('q."displayCode">=request_row."affectedRangeStart"'), "replacement execution must enforce the approved lower range");

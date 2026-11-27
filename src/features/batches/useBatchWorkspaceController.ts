@@ -21,6 +21,8 @@ type UseBatchWorkspaceControllerParams = {
   toast: ToastLike;
   isManufacturer: boolean;
   currentLicenseeScope?: string;
+  manufacturerActorId?: string;
+  initialTab?: "overview" | "operations" | "audit";
   onWorkspaceBatchChange?: (batch: BatchRow | null) => void;
   onWorkspaceDraftReset?: () => void;
 };
@@ -124,6 +126,8 @@ export function useBatchWorkspaceController({
   toast,
   isManufacturer,
   currentLicenseeScope,
+  manufacturerActorId,
+  initialTab = "overview",
   onWorkspaceBatchChange,
   onWorkspaceDraftReset,
 }: UseBatchWorkspaceControllerParams) {
@@ -131,10 +135,15 @@ export function useBatchWorkspaceController({
   const [allocationMapLoading, setAllocationMapLoading] = useState(false);
   const [allocationMap, setAllocationMap] = useState<AllocationMapPayload | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workspaceActor, setWorkspaceActor] = useState<string>();
+  const [workspaceTab, setWorkspaceTab] = useState<string>(initialTab);
+  const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null);
+  const [historyIncomplete, setHistoryIncomplete] = useState(false);
   const [workspaceBatch, setWorkspaceBatch] = useState<StableBatchOverviewRow | null>(null);
   const lastPageRows = useRef(stableRows);
   const workspaceTenant = workspaceBatch?.licensee?.id || workspaceBatch?.sourceBatchRow?.licenseeId;
-  const scopeMatches = isManufacturer || currentLicenseeScope === undefined || currentLicenseeScope === workspaceTenant;
+  const scopeMatches = isManufacturer ? workspaceActor === manufacturerActorId
+    : currentLicenseeScope === undefined || currentLicenseeScope === workspaceTenant;
   const workspaceMapQuery = useBatchAllocationMap(
     workspaceBatch?.focusBatchId,
     workspaceOpen && !isManufacturer && scopeMatches,
@@ -158,7 +167,7 @@ export function useBatchWorkspaceController({
 
   useEffect(() => () => { historyRequest.current += 1; }, []);
 
-  const fetchWorkspaceHistory = async (workspace: StableBatchOverviewRow, options?: { silent?: boolean }) => {
+  const fetchWorkspaceHistory = async (workspace: StableBatchOverviewRow, options?: { silent?: boolean; cursor?: string }) => {
     const { completeWorkspace: currentWorkspace, scopeMatches: currentScopeMatches } = historyContext.current;
     const selected = !isManufacturer && currentWorkspace?.sourceBatchId === workspace.sourceBatchId
       ? currentWorkspace : isManufacturer ? workspace : null;
@@ -171,6 +180,33 @@ export function useBatchWorkspaceController({
     setWorkspaceHistoryError(null);
 
     try {
+      if (isManufacturer) {
+        const childId = selected.allocations.find((allocation) => allocation.batchId === selected.focusBatchId)?.batchId ||
+          selected.allocations[0]?.batchId || selected.focusBatchId;
+        const licenseeId = selected.licensee?.id || rows.find((batch) => batch.id === childId)?.licenseeId;
+        if (!childId || !licenseeId) throw new Error("The batch allocation is unavailable.");
+        const response = await apiClient.getManufacturerBatchHistory(childId, licenseeId, options?.cursor);
+        if (request !== historyRequest.current) return;
+        if (!response.success || !response.data || !Array.isArray(response.data.events)) {
+          if (response.status === 401 || response.status === 403) {
+            setWorkspaceHistoryLogs([]);
+            setHistoryIncomplete(false);
+            setHistoryNextCursor(null);
+            setWorkspaceHistoryLastUpdatedAt(null);
+          }
+          throw new Error(response.error || "Batch history could not be loaded.");
+        }
+        const page = response.data;
+        setWorkspaceHistoryLogs((previous) => {
+          if (!options?.cursor) return page.events;
+          const seen = new Set(previous.map((event) => event.id));
+          return [...previous, ...page.events.filter((event) => !seen.has(event.id))];
+        });
+        setHistoryIncomplete(page.incomplete);
+        setHistoryNextCursor(page.nextCursor);
+        setWorkspaceHistoryLastUpdatedAt(new Date());
+        return;
+      }
       const batchIds = Array.from(
         new Set(
           [selected.sourceBatchRow?.id || selected.sourceBatchId, ...selected.allocations.map((allocation) => allocation.batchId)]
@@ -223,14 +259,17 @@ export function useBatchWorkspaceController({
     historyRequest.current += 1;
     openWorkspaceSource.current = workspace.sourceBatchId;
     setWorkspaceBatch(workspace);
+    setWorkspaceActor(manufacturerActorId);
     setWorkspaceOpen(true);
+    setWorkspaceTab(initialTab);
+    setHistoryIncomplete(false);
+    setHistoryNextCursor(null);
     setWorkspaceHistoryLogs([]);
     historyChunks.current.clear();
     setWorkspaceHistoryLastUpdatedAt(null);
     setWorkspaceHistoryError(null);
     onWorkspaceBatchChange?.(isManufacturer ? workspace.sourceBatchRow || null : null);
     onWorkspaceDraftReset?.();
-    if (isManufacturer) await fetchWorkspaceHistory(workspace);
   };
 
   const closeWorkspace = () => {
@@ -238,6 +277,8 @@ export function useBatchWorkspaceController({
     openWorkspaceSource.current = null;
     setWorkspaceOpen(false);
     setWorkspaceBatch(null);
+    setHistoryIncomplete(false);
+    setHistoryNextCursor(null);
     setWorkspaceHistoryLogs([]);
     historyChunks.current.clear();
     setWorkspaceHistoryLastUpdatedAt(null);
@@ -329,19 +370,26 @@ export function useBatchWorkspaceController({
   }, [completeWorkspace, isManufacturer, scopeMatches, workspaceOpen]);
 
   useEffect(() => {
-    if (workspaceOpen && !isManufacturer && !scopeMatches) closeWorkspace();
+    if (workspaceOpen && !scopeMatches) closeWorkspace();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentLicenseeScope, scopeMatches]);
 
   useEffect(() => {
+    if (!isManufacturer || !workspaceOpen || !workspaceBatch || !scopeMatches || workspaceTab !== "audit") return;
+    void fetchWorkspaceHistory(workspaceBatch);
+    return () => { historyRequest.current += 1; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isManufacturer, workspaceOpen, workspaceBatch, workspaceTab, scopeMatches]);
+
+  useEffect(() => {
     const currentWorkspace = isManufacturer ? workspaceBatch : completeWorkspace;
-    if (!workspaceOpen || !currentWorkspace) return;
+    if (!workspaceOpen || !currentWorkspace || (isManufacturer && workspaceTab !== "audit")) return;
     const timer = window.setInterval(() => {
       void fetchWorkspaceHistory(currentWorkspace, { silent: true });
     }, HISTORY_REFRESH_MS);
 
     return () => window.clearInterval(timer);
-  }, [completeWorkspace, isManufacturer, workspaceBatch, workspaceOpen]);
+  }, [completeWorkspace, isManufacturer, workspaceBatch, workspaceOpen, workspaceTab]);
 
   useEffect(() => {
     if (lastPageRows.current === stableRows) return;
@@ -360,7 +408,6 @@ export function useBatchWorkspaceController({
     if (isManufacturer) {
       setWorkspaceBatch(refreshed);
       onWorkspaceBatchChange?.(refreshed.sourceBatchRow || null);
-      void fetchWorkspaceHistory(refreshed, { silent: true });
     } else {
       void workspaceMapQuery.refetch();
     }
@@ -393,13 +440,17 @@ export function useBatchWorkspaceController({
     allocationMapLoading,
     allocationMap,
     workspaceOpen,
-    workspaceBatch: isManufacturer ? workspaceBatch : scopeMatches ? completeWorkspace : null,
+    workspaceBatch: scopeMatches ? (isManufacturer ? workspaceBatch : completeWorkspace) : null,
     workspaceLoading: !isManufacturer && workspaceOpen && workspaceMapQuery.isPending,
     workspaceError: !isManufacturer && workspaceOpen ? workspaceMapQuery.error?.message || null : null,
     workspaceHistoryLogs,
     workspaceHistoryLoading,
     workspaceHistoryError,
     workspaceHistoryLastUpdatedAt,
+    workspaceTab,
+    setWorkspaceTab,
+    historyIncomplete,
+    historyNextCursor,
     exportingBatchId,
     setWorkspaceOpen,
     setAllocationMapOpen,

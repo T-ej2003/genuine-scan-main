@@ -712,9 +712,25 @@ BEGIN
         FROM public."PrintItem" pi
         JOIN public."QRCode" q ON q.id=pi."qrCodeId"
         WHERE pi."printSessionId"=original_session_id
-          AND pi."printConfirmedAt" IS NULL
-          AND pi.state IN ('FAILED','FROZEN','CANCELLED','RESERVED','ISSUED')
-          AND q."batchId"=job_row."batchId"
+          AND pi.state IN ('FAILED','CANCELLED','RESERVED')
+          AND pi."issuedAt" IS NULL AND pi."dispatchedAt" IS NULL AND pi."agentAckedAt" IS NULL
+          AND pi."deviceJobRef" IS NULL AND pi."confirmationDeadlineAt" IS NULL
+          AND pi."printConfirmedAt" IS NULL AND pi."closedAt" IS NULL AND pi."frozenAt" IS NULL
+          AND coalesce(pi."confirmationEvidence",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+          AND ((pi."attemptCount"=0 AND coalesce(pi."dispatchMetadata",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb))
+            OR (pi.state='RESERVED' AND pi."dispatchMetadata" ? 'lastUnsubmittedAttemptId'
+              AND NOT (pi."dispatchMetadata" ?| ARRAY['attemptId','intentAt','upgradeNoReplay'])))
+          AND NOT EXISTS (SELECT 1 FROM public."PrintItemEvent" e
+            WHERE e."printItemId"=pi.id AND e."eventType" IN ('AGENT_ACKED','PRINT_CONFIRMED','CLOSED','FROZEN','INCIDENT_RAISED'))
+          AND NOT EXISTS (SELECT 1 FROM public."PrintAuditEvent" e
+            WHERE e."batchId"=job_row."batchId" AND e."qrCodeId"=q.id
+              AND e."eventType" IN ('CONNECTOR_INTENT','CONNECTOR_ACK','CONNECTOR_CONFIRM','CONNECTOR_FAIL',
+                'GATEWAY_ACK','GATEWAY_CONFIRM','GATEWAY_FAIL','AUTOMATIC_ACTIVATION','WORKER_DISPATCH_OUTCOME_UNCERTAIN'))
+          AND q."batchId"=job_row."batchId" AND q."licenseeId"=actor."batchLicenseeId"
+          AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND q.code=pi.code
+          AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
+          AND q."tokenNonce" IS NOT NULL AND q."tokenIssuedAt" IS NOT NULL
+          AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">clock_timestamp()
           AND (request_row."affectedRangeStart" IS NULL OR q."displayCode">=request_row."affectedRangeStart")
           AND (request_row."affectedRangeEnd" IS NULL OR q."displayCode"<=request_row."affectedRangeEnd")
         ORDER BY pi."issueSequence" NULLS LAST,pi.id

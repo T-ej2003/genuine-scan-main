@@ -1,4 +1,5 @@
 import { type ApiClientCore } from "@/lib/api/internal-client-core";
+import type { PrintRetirementRow, TraceEventRow } from "@/features/batches/types";
 import {
   controlledPrinterGet,
   controlledPrinterMutation,
@@ -26,6 +27,26 @@ const stablePrinterPayloadSignature = (value: unknown): string => {
 };
 
 export const createPrintingOperationsApi = (core: ApiClientCore) => ({
+  getManufacturerBatchHistory(batchId: string, licenseeId: string, cursor?: string) {
+    const query = new URLSearchParams({ licenseeId });
+    if (cursor) query.set("cursor", cursor);
+    return core.request<{ events: TraceEventRow[]; incomplete: boolean; nextCursor: string | null }>(
+      `/manufacturer/batches/${encodeURIComponent(batchId)}/history?${query}`
+    );
+  },
+
+  getPrintRetirements(jobId: string, cursor?: string) {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    return core.request<PrintRetirementRow[]>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/retirement${query}`);
+  },
+
+  decidePrintRetirement(jobId: string, input: { itemId: string; action: "REQUEST" | "APPROVE" | "REJECT"; reason: string }) {
+    return core.request(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/retirement`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
   requestPrintJobReissue(jobId: string, payload: { reason: string; quantity?: number }) {
     return core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}/reissue`, {
       method: "POST",

@@ -1,3 +1,5 @@
+import { PrintRetirementPanel } from "./PrintRetirementPanel";
+import type { TraceEventRow, TraceEventType } from "@/features/batches/types";
 import { ManufacturerPrintRunFacts } from "./ManufacturerPrintRunFacts";
 import { manufacturerRunStatus, printRunCount } from "@/lib/print-job-view";
 import React from "react";
@@ -44,21 +46,6 @@ type ManufacturerRow = {
   isActive: boolean;
 };
 
-type TraceEventType = "COMMISSIONED" | "ASSIGNED" | "PRINTED" | "REDEEMED" | "BLOCKED";
-
-type TraceEventRow = {
-  id: string;
-  eventType?: TraceEventType;
-  action?: string;
-  sourceAction?: string | null;
-  createdAt: string;
-  details?: any;
-  user?: { id: string; name?: string | null; email?: string | null } | null;
-  manufacturer?: { id: string; name?: string | null; email?: string | null } | null;
-  qrCode?: { id: string; code?: string | null } | null;
-  userId?: string | null;
-};
-
 type LicenseeBatchWorkspaceDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -86,8 +73,13 @@ type LicenseeBatchWorkspaceDialogProps = {
   historyLogs: TraceEventRow[];
   historyLastUpdatedAt: Date | null;
   onRefreshHistory: () => void;
+  onTabChange?: (tab: string) => void;
+  historyIncomplete?: boolean;
+  onLoadMoreHistory?: () => void;
   recentPrintJobs: PrintJobRow[];
   printJobsLoading: boolean;
+  printJobsAllocationId?: string;
+  onPrintJobsAllocationChange?: (id: string) => void;
   canRequestReissue: boolean;
   reissueReason: string;
   onReissueReasonChange: (value: string) => void;
@@ -105,6 +97,8 @@ type LicenseeBatchWorkspaceDialogProps = {
   onDecideReissueRequest?: (requestId: string, decision: "approve" | "reject") => void;
   onPrintApprovedReissueRequest?: (requestId: string) => void;
   onContinuePrintRecovery?: (job: PrintJobRow) => void;
+  onRetirementChanged?: () => void;
+  retirementActorId?: string;
   onRefreshPrinterStatus?: () => void;
   securePrinterReady?: boolean;
   initialTab?: "overview" | "operations" | "audit";
@@ -123,6 +117,9 @@ const eventBadgeClass = (eventType?: string) => {
 const historySummary = (log: TraceEventRow) => {
   const d = log?.details || {};
   const eventType = log?.eventType || "";
+  if (log.action === "ALLOCATED" && log.actorLabel) {
+    return typeof d.quantity === "number" ? `Licensee allocated ${d.quantity} labels.` : "Licensee allocated labels.";
+  }
   if (eventType === "COMMISSIONED") {
     const qty = d.quantity ?? d.created ?? d.totalCodes;
     return `Added ${qty ?? "-"} labels to this batch.`;
@@ -146,6 +143,7 @@ const historySummary = (log: TraceEventRow) => {
 };
 
 const historyActor = (log: TraceEventRow) => {
+  if (log.actorLabel) return log.actorLabel;
   if (log?.user?.name) return log.user.name;
   if (log?.manufacturer?.name) return log.manufacturer.name;
   if (log?.user?.email) return log.user.email;
@@ -212,6 +210,12 @@ const needsRecovery = (job: PrintJobRow) => {
 };
 
 const getRecoveryInstruction = (job: PrintJobRow) => {
+  if (job.runSummary?.operationalStatus === "NEEDS_OPERATOR_ACTION") {
+    return {
+      firstLine: "The previous run has labels with unknown output.",
+      secondLine: "If a print job is stuck, cancel it in the Windows print queue. Keep printed labels separate and check the run status again.",
+    };
+  }
   const recoveryRange = job.session?.recoveryRange;
   const pendingRange = job.session?.pendingRange;
   const start = recoveryRange?.startCode || job.session?.nextPrintableIndex || pendingRange?.startCode || null;
@@ -262,8 +266,8 @@ const reissueRequester = (request: any) =>
   request.requestedBy?.name || request.requestedBy?.email || request.requestedByName || "Requester not recorded";
 
 const reissueStatusLabel = (request: any) => {
-  if (request.status === "APPROVED") return "Approved and ready to print";
-  if (request.status === "EXECUTED") return "Replacement print job created";
+  if (request.status === "APPROVED") return "Approved for execution review";
+  if (request.status === "EXECUTED") return "Reissue print job created";
   if (request.status === "REJECTED") return "Rejected";
   if (request.targetApproverRole === "SUPER_ADMIN") return "Super admin review";
   return "Brand admin review";
@@ -371,8 +375,13 @@ export function LicenseeBatchWorkspaceDialog({
   historyLogs,
   historyLastUpdatedAt,
   onRefreshHistory,
+  onTabChange,
+  historyIncomplete,
+  onLoadMoreHistory,
   recentPrintJobs,
   printJobsLoading,
+  printJobsAllocationId,
+  onPrintJobsAllocationChange,
   canRequestReissue,
   reissueReason,
   onReissueReasonChange,
@@ -390,6 +399,8 @@ export function LicenseeBatchWorkspaceDialog({
   onDecideReissueRequest = () => undefined,
   onPrintApprovedReissueRequest = () => undefined,
   onRefreshPrinterStatus = () => undefined,
+  onRetirementChanged,
+  retirementActorId,
   securePrinterReady = false,
   initialTab = "overview",
   highlightedReissueRequestId = null,
@@ -402,9 +413,8 @@ export function LicenseeBatchWorkspaceDialog({
   const isManufacturerMode = role === "manufacturer";
   const isSuperAdminMode = role === "super_admin" || role === "platform_super_admin";
   const [selectedDetailJob, setSelectedPrintJobDetail] = React.useState<PrintJobRow | null>(null);
-  const selectedPrintJobDetail = selectedDetailJob && (isManufacturerMode
-    ? recentPrintJobs.find((job) => job.id === selectedDetailJob.id) ?? null
-    : selectedDetailJob);
+  const selectedPrintJobDetail = selectedDetailJob
+    ? recentPrintJobs.find((job) => job.id === selectedDetailJob.id) ?? null : null;
   const [manufacturerOperationSection, setManufacturerOperationSection] = React.useState<
     "menu" | "confirmed" | "stopped" | "replacement" | "pending"
   >("menu");
@@ -494,7 +504,7 @@ export function LicenseeBatchWorkspaceDialog({
               </div>
             </DialogHeader>
 
-            <Tabs key={`${workspace.sourceBatchId}:manufacturer:${initialTab}`} defaultValue={initialTab} className="flex min-h-0 flex-1 flex-col">
+            <Tabs key={`${workspace.sourceBatchId}:manufacturer:${initialTab}`} defaultValue={initialTab} onValueChange={onTabChange} className="flex min-h-0 flex-1 flex-col">
               <div className="border-b px-6 py-3">
                 <TabsList className="grid w-full grid-cols-3 sm:w-[26rem]">
                   <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -802,13 +812,16 @@ export function LicenseeBatchWorkspaceDialog({
                         <RefreshButtonLabel loading={historyLoading} />
                       </Button>
                     </div>
-                    {historyError && historyLogs.length > 0 ? <div role="alert" className="rounded-lg border border-destructive/40 p-4 text-sm text-destructive">{historyError} Showing the last complete history.</div> : null}
-                    {historyLoading && historyLogs.length === 0 ? (
+                    {historyIncomplete ? (
+                      <div className="text-sm text-muted-foreground">Some earlier allocation records are unavailable.</div>
+                    ) : null}
+                    {historyError && historyLogs.length > 0 ? <div role="alert" className="rounded-lg border border-destructive/40 p-4 text-sm text-destructive">{historyError} Showing the last available history.</div> : null}
+                    {(historyLoading || (!historyLastUpdatedAt && !historyError)) && historyLogs.length === 0 ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
                     ) : historyError && historyLogs.length === 0 ? (
                       <div role="alert" className="rounded-lg border border-destructive/40 p-6 text-sm text-destructive">{historyError}</div>
                     ) : historyLogs.length === 0 ? (
-                      <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No manufacturer-safe history found for this batch.</div>
+                      <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No recorded operations for this batch.</div>
                     ) : (
                       <div className="space-y-3">
                         {historyLogs.map((log, index) => (
@@ -820,6 +833,9 @@ export function LicenseeBatchWorkspaceDialog({
                         ))}
                       </div>
                     )}
+                    {onLoadMoreHistory ? (
+                      <Button variant="outline" onClick={onLoadMoreHistory} disabled={historyLoading}>Load older events</Button>
+                    ) : null}
                   </TabsContent>
                 </div>
               </ScrollArea>
@@ -898,7 +914,7 @@ export function LicenseeBatchWorkspaceDialog({
                     <div className="rounded-lg border p-4">
                       <div className="font-semibold">Reissue / replacement approvals</div>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Super admin approves or rejects replacement allocation. Manufacturer-local print jobs are not started from this governance view.
+                        Super admin gives final approval. The manufacturer starts an approved reissue when the original labels are still eligible.
                       </p>
                       <div className="mt-3 space-y-2">
                         <Label htmlFor="super-reissue-decision-note">Decision note</Label>
@@ -931,7 +947,7 @@ export function LicenseeBatchWorkspaceDialog({
                                 </div>
                                 <Badge variant="secondary">{request.targetApproverRole === "SUPER_ADMIN" ? "Super admin review" : humanStatusLabel(request.status || "review")}</Badge>
                               </div>
-                              {request.status === "PENDING" || request.targetApproverRole === "SUPER_ADMIN" ? (
+                              {request.status === "PENDING" && request.targetApproverRole === "SUPER_ADMIN" ? (
                                 <div className="mt-3 flex flex-wrap justify-end gap-2">
                                   <Button
                                     size="sm"
@@ -946,7 +962,7 @@ export function LicenseeBatchWorkspaceDialog({
                                     disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
                                     onClick={() => onDecideReissueRequest(request.id, "approve")}
                                   >
-                                    {decidingReissueRequestId === request.id ? "Saving..." : "Approve replacement allocation"}
+                                    {decidingReissueRequestId === request.id ? "Saving..." : "Approve reissue"}
                                   </Button>
                                 </div>
                               ) : null}
@@ -1381,7 +1397,7 @@ export function LicenseeBatchWorkspaceDialog({
                                           disabled={decidingReissueRequestId === request.id || reissueDecisionNote.trim().length < 8}
                                           onClick={() => onDecideReissueRequest(request.id, "approve")}
                                         >
-                                          {decidingReissueRequestId === request.id ? "Saving..." : "Approve"}
+                                          {decidingReissueRequestId === request.id ? "Saving..." : "Forward to super admin"}
                                         </Button>
                                       </div>
                                     )}
@@ -1391,6 +1407,19 @@ export function LicenseeBatchWorkspaceDialog({
                             )}
                           </div>
 
+                          {role === "licensee_admin" && workspace.allocations.length > 1 ? (
+                            <div className="space-y-1">
+                              <Label htmlFor="review-print-allocation">Print runs by allocation</Label>
+                              <Select value={printJobsAllocationId} onValueChange={onPrintJobsAllocationChange}>
+                                <SelectTrigger id="review-print-allocation"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {workspace.allocations.map((allocation) => (
+                                    <SelectItem key={allocation.batchId} value={allocation.batchId}>{allocation.batchName}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : null}
                           {printJobsLoading ? (
                             <div className="rounded-xl border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
                               Loading recent print jobs...
@@ -1431,6 +1460,11 @@ export function LicenseeBatchWorkspaceDialog({
                                           <div>{getRecoveryInstruction(job).firstLine}</div>
                                           <div>{getRecoveryInstruction(job).secondLine}</div>
                                         </div>
+                                      ) : null}
+                                      {role === "licensee_admin" ? (
+                                        <Button size="sm" variant="outline" onClick={() => setSelectedPrintJobDetail(job)}>
+                                          Review retirement requests
+                                        </Button>
                                       ) : null}
                                       {job.reprintReason ? (
                                         <div className="text-xs text-muted-foreground">Reason: {job.reprintReason}</div>
@@ -1598,11 +1632,14 @@ export function LicenseeBatchWorkspaceDialog({
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                 <div>{getRecoveryInstruction(selectedPrintJobDetail).firstLine}</div>
                 <div>{getRecoveryInstruction(selectedPrintJobDetail).secondLine}</div>
-                <div className="mt-1 font-medium">Next action: request re-issue, then print approved replacement labels.</div>
+                <div className="mt-1 font-medium">Cancellation does not verify what printed. Follow the actions available for this run.</div>
               </div>
             ) : null}
               </>
             )}
+            {retirementActorId && (role === "licensee_admin" || (isManufacturerMode && needsRecovery(selectedPrintJobDetail))) ? (
+              <PrintRetirementPanel key={`${retirementActorId}:${selectedPrintJobDetail.id}`} jobId={selectedPrintJobDetail.id} onChanged={onRetirementChanged} />
+            ) : null}
           </div>
         ) : null}
       </DialogContent>

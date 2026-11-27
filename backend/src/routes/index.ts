@@ -188,6 +188,8 @@ import {
   resumeManufacturerPrintJob,
   stopManufacturerPrintJob,
 } from "../controllers/printJobController";
+import { manufacturerPrintRetirement } from "../controllers/print-job/retirement";
+import { listManufacturerBatchHistory } from "../controllers/print-job/batchHistory";
 import { printJobEvents } from "../controllers/printJobEventsController";
 import {
   getPrinterConnectionStatus,
@@ -525,6 +527,13 @@ const printReadPreAuthRouteLimiter = createSharedRateLimiter({
   legacyHeaders: false,
   keyGenerator: (req) => buildPublicActorRateLimitKey(req, "print.read.pre-auth", protectedPreAuthActor),
   handler: createRateLimitJsonHandler("print.read.pre-auth", "Too many print status reads. Please wait before retrying."),
+});
+
+const printRecoveryReadIpLimiter = createPublicIpRateLimiter({
+  scope: "print.recovery.read:ip",
+  windowMs: 10 * 60 * 1000,
+  max: 180,
+  message: "Too many print recovery reads. Please wait before retrying.",
 });
 
 const printExportRouteLimiter = createSharedRateLimiter({
@@ -1958,6 +1967,16 @@ protectedMutationRouter.post(
   discoverPrinter
 );
 protectedReadRouter.get(
+  "/manufacturer/batches/:batchId/history",
+  printRecoveryReadIpLimiter,
+  authenticate,
+  requireOpsUser,
+  printReadRouteLimiter,
+  protectedReadRouteLimiter,
+  enforceTenantIsolation,
+  listManufacturerBatchHistory
+);
+protectedReadRouter.get(
   "/manufacturer/print-jobs",
   authenticate,
   requireOpsUser,
@@ -1984,6 +2003,28 @@ protectedReadRouter.get(
   protectedReadRouteLimiter,
   enforceTenantIsolation,
   getManufacturerPrintJobStatus
+);
+protectedReadRouter.get(
+  "/manufacturer/print-jobs/:id/retirement",
+  printRecoveryReadIpLimiter,
+  authenticate,
+  requireOpsUser,
+  printReadRouteLimiter,
+  protectedReadRouteLimiter,
+  enforceTenantIsolation,
+  manufacturerPrintRetirement
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-jobs/:id/retirement",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  manufacturerPrintRetirement
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/pause",

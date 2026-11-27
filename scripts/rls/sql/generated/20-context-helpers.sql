@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f'
+    AND source_contract_sha256='85aa849395c3a5845a913d1f3685d82155ad21320757382dbbcca2334caa77b5'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:85aa849395c3a5845a913d1f3685d82155ad21320757382dbbcca2334caa77b5'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:85aa849395c3a5845a913d1f3685d82155ad21320757382dbbcca2334caa77b5')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11603,9 +11603,25 @@ BEGIN
         FROM public."PrintItem" pi
         JOIN public."QRCode" q ON q.id=pi."qrCodeId"
         WHERE pi."printSessionId"=original_session_id
-          AND pi."printConfirmedAt" IS NULL
-          AND pi.state IN ('FAILED','FROZEN','CANCELLED','RESERVED','ISSUED')
-          AND q."batchId"=job_row."batchId"
+          AND pi.state IN ('FAILED','CANCELLED','RESERVED')
+          AND pi."issuedAt" IS NULL AND pi."dispatchedAt" IS NULL AND pi."agentAckedAt" IS NULL
+          AND pi."deviceJobRef" IS NULL AND pi."confirmationDeadlineAt" IS NULL
+          AND pi."printConfirmedAt" IS NULL AND pi."closedAt" IS NULL AND pi."frozenAt" IS NULL
+          AND coalesce(pi."confirmationEvidence",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+          AND ((pi."attemptCount"=0 AND coalesce(pi."dispatchMetadata",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb))
+            OR (pi.state='RESERVED' AND pi."dispatchMetadata" ? 'lastUnsubmittedAttemptId'
+              AND NOT (pi."dispatchMetadata" ?| ARRAY['attemptId','intentAt','upgradeNoReplay'])))
+          AND NOT EXISTS (SELECT 1 FROM public."PrintItemEvent" e
+            WHERE e."printItemId"=pi.id AND e."eventType" IN ('AGENT_ACKED','PRINT_CONFIRMED','CLOSED','FROZEN','INCIDENT_RAISED'))
+          AND NOT EXISTS (SELECT 1 FROM public."PrintAuditEvent" e
+            WHERE e."batchId"=job_row."batchId" AND e."qrCodeId"=q.id
+              AND e."eventType" IN ('CONNECTOR_INTENT','CONNECTOR_ACK','CONNECTOR_CONFIRM','CONNECTOR_FAIL',
+                'GATEWAY_ACK','GATEWAY_CONFIRM','GATEWAY_FAIL','AUTOMATIC_ACTIVATION','WORKER_DISPATCH_OUTCOME_UNCERTAIN'))
+          AND q."batchId"=job_row."batchId" AND q."licenseeId"=actor."batchLicenseeId"
+          AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND q.code=pi.code
+          AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
+          AND q."tokenNonce" IS NOT NULL AND q."tokenIssuedAt" IS NOT NULL
+          AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">clock_timestamp()
           AND (request_row."affectedRangeStart" IS NULL OR q."displayCode">=request_row."affectedRangeStart")
           AND (request_row."affectedRangeEnd" IS NULL OR q."displayCode"<=request_row."affectedRangeEnd")
         ORDER BY pi."issueSequence" NULLS LAST,pi.id
@@ -12089,6 +12105,162 @@ BEGIN
 END
 $fn$;
 
+-- One approval owns one committed original attempt. Retirement never releases the device fence.
+CREATE OR REPLACE FUNCTION app_rls.printing_retirement(
+  p_capability text,p_request_id text,p_operation text,p_job_id text,p_item_id text,p_reason text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+AS $fn$
+DECLARE
+  actor record; job_row record; item_row record; approval record;
+  device_id text; registration_id text; attempt_id text; proof jsonb; approval_id text;
+  now_at timestamp:=transaction_timestamp();
+BEGIN
+  IF p_operation NOT IN ('LIST','REQUEST','APPROVE','REJECT')
+    OR p_job_id IS NULL OR p_job_id !~* '^[0-9a-f-]{36}$'
+    OR (p_operation<>'LIST' AND (p_item_id IS NULL OR p_item_id !~* '^[0-9a-f-]{36}$'
+      OR length(coalesce(btrim(p_reason),'')) NOT BETWEEN 8 AND 500))
+  THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
+
+  SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,'printing-job-control',p_request_id,NULL);
+  PERFORM set_config('app.printing_job_id',p_job_id,true);
+  SELECT j."printerId",j."batchId",j."manufacturerId" INTO job_row FROM public."PrintJob" j WHERE j.id=p_job_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+  SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,'printing-job-control',p_request_id,job_row."batchId");
+  IF actor.role NOT IN ('MANUFACTURER_ADMIN','LICENSEE_ADMIN')
+    OR (actor.role='MANUFACTURER_ADMIN' AND job_row."manufacturerId"<>actor."userId")
+    OR (p_operation='REQUEST' AND actor.role<>'MANUFACTURER_ADMIN')
+    OR (p_operation IN ('APPROVE','REJECT') AND actor.role<>'LICENSEE_ADMIN')
+  THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+
+  device_id:=job_row."printerId";
+  IF p_operation<>'LIST' THEN
+    IF device_id IS NULL THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('printing_printer_'||device_id,0));
+  END IF;
+  PERFORM set_config('app.printing_job_id',p_job_id,true),
+    set_config('app.printing_operation','printing-qr-retirement',true);
+  SELECT j.status,j."pipelineState",j."printMode",j."batchId",j."manufacturerId",j."printerId"
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id;
+  IF job_row."printerId" IS DISTINCT FROM device_id
+    OR job_row."manufacturerId" IS DISTINCT FROM actor."batchManufacturerId"
+  THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+
+  SELECT ps.id INTO STRICT approval FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id;
+  PERFORM set_config('app.printing_session_row_id',approval.id,true);
+  SELECT ps.id,ps."printerRegistrationId" INTO STRICT approval FROM public."PrintSession" ps
+    WHERE ps.id=approval.id AND ps."batchId"=job_row."batchId"
+      AND ps."manufacturerId"=job_row."manufacturerId" AND ps."printerId"=device_id
+      AND ps."printerRegistrationId" IS NOT NULL;
+  registration_id:=approval."printerRegistrationId";
+
+  IF p_operation='LIST' THEN
+    RETURN (SELECT coalesce(jsonb_agg(entry ORDER BY entry->>'itemId'),'[]'::jsonb)
+      FROM (
+        SELECT jsonb_build_object('itemId',pi.id,'serial',q."displayCode",'status',coalesce(a.status,'UNREQUESTED'),
+          'requestReason',a.reason,'canRequest',a.id IS NULL AND actor.role='MANUFACTURER_ADMIN' AND eligibility.allowed,
+          'canReject',coalesce(a.status='PENDING' AND actor.role='LICENSEE_ADMIN' AND a."requestedByUserId"<>actor."userId",false),
+          'canApprove',coalesce(a.status='PENDING' AND actor.role='LICENSEE_ADMIN'
+            AND a."requestedByUserId"<>actor."userId" AND eligibility.allowed,false)) AS entry
+        FROM public."PrintItem" pi JOIN public."QRCode" q ON q.id=pi."qrCodeId"
+        LEFT JOIN LATERAL (
+          SELECT sa.id,sa.status,sa."requestedByUserId",sa.payload->>'reason' AS reason
+          FROM public."SensitiveActionApproval" sa WHERE sa."actionKey"='PRINT_QR_RETIREMENT'
+            AND sa."entityType"='PrintItem' AND sa."entityId"=pi.id AND sa."licenseeId"=actor."batchLicenseeId"
+            AND sa.payload->'binding'=jsonb_build_object('jobId',p_job_id,'sessionId',approval.id,'qrId',q.id,
+              'printerId',device_id,'registrationId',registration_id,'attemptId',pi."dispatchMetadata"->>'attemptId',
+              'payloadHash',pi."dispatchMetadata"->>'payloadHash')
+            AND (sa.status IN ('REJECTED','EXECUTED') OR sa."expiresAt">now_at)
+          ORDER BY sa."createdAt" DESC,sa.id DESC LIMIT 1
+        ) a ON TRUE
+        CROSS JOIN LATERAL (SELECT coalesce(job_row.status IN ('PAUSED','STOPPED')
+          AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION' AND job_row."printMode"='LOCAL_AGENT'
+          AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN') AND pi."dispatchedAt" IS NOT NULL
+          AND pi."printConfirmedAt" IS NULL AND q.status='ACTIVATED' AND q."printedAt" IS NULL
+          AND q."customerVerifiableAt" IS NULL
+          AND coalesce(pi."confirmationEvidence",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+          AND pi."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+          AND pi."dispatchMetadata"->>'attemptId' IS NOT NULL
+          AND pi."dispatchMetadata"->>'payloadHash' ~ '^[a-f0-9]{64}$',false) AS allowed) eligibility
+        WHERE pi."printSessionId"=approval.id AND (p_item_id IS NULL OR pi.id>p_item_id)
+          AND q."printJobId"=p_job_id AND q."batchId"=job_row."batchId" AND q."licenseeId"=actor."batchLicenseeId"
+          AND (a.id IS NOT NULL OR (actor.role='MANUFACTURER_ADMIN' AND eligibility.allowed))
+        ORDER BY pi.id LIMIT 50
+      ) candidates);
+  END IF;
+
+  PERFORM 1 FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+  PERFORM 1 FROM public."PrintSession" ps WHERE ps.id=approval.id FOR UPDATE;
+  PERFORM set_config('app.printing_item_id',p_item_id,true);
+  SELECT pi.id,pi.state,pi."qrCodeId",pi."dispatchedAt",pi."printConfirmedAt",pi."dispatchMetadata",pi."confirmationEvidence",
+    q.status AS qr_status,q."printedAt",q."customerVerifiableAt"
+    INTO item_row FROM public."PrintItem" pi JOIN public."QRCode" q ON q.id=pi."qrCodeId"
+    WHERE pi.id=p_item_id AND pi."printSessionId"=approval.id
+      AND q."printJobId"=p_job_id AND q."batchId"=job_row."batchId" AND q."licenseeId"=actor."batchLicenseeId"
+    FOR UPDATE OF pi,q;
+  IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+  attempt_id:=item_row."dispatchMetadata"->>'attemptId';
+  proof:=jsonb_build_object('jobId',p_job_id,'sessionId',approval.id,'qrId',item_row."qrCodeId",
+     'printerId',device_id,'registrationId',registration_id,'attemptId',attempt_id,'payloadHash',item_row."dispatchMetadata"->>'payloadHash');
+  SELECT sa.id,sa.status,sa."requestedByUserId",sa.payload INTO approval
+    FROM public."SensitiveActionApproval" sa WHERE sa."actionKey"='PRINT_QR_RETIREMENT'
+      AND sa."entityType"='PrintItem' AND sa."entityId"=p_item_id AND sa."licenseeId"=actor."batchLicenseeId"
+      AND sa.payload->'binding'=proof
+      AND (sa.status IN ('REJECTED','EXECUTED') OR sa."expiresAt">now_at)
+    ORDER BY sa."createdAt" DESC,sa.id DESC LIMIT 1 FOR UPDATE;
+
+  IF p_operation='REQUEST' AND approval.id IS NOT NULL
+     OR (p_operation='APPROVE' AND approval.status='EXECUTED')
+     OR (p_operation='REJECT' AND approval.status='REJECTED')
+  THEN RETURN jsonb_build_object('id',approval.id,'status',approval.status,'idempotent',true); END IF;
+  IF p_operation<>'REQUEST' AND (approval.id IS NULL OR approval.status<>'PENDING'
+    OR approval."requestedByUserId"=actor."userId") THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+  IF p_operation<>'REJECT' AND (
+    job_row.status NOT IN ('PAUSED','STOPPED') OR job_row."pipelineState"<>'NEEDS_OPERATOR_ACTION'
+    OR job_row."printMode"<>'LOCAL_AGENT' OR item_row.state NOT IN ('ISSUED','AGENT_ACKED','FROZEN')
+    OR item_row."dispatchedAt" IS NULL OR item_row."printConfirmedAt" IS NOT NULL
+    OR coalesce(item_row."confirmationEvidence",'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
+    OR item_row.qr_status<>'ACTIVATED' OR item_row."printedAt" IS NOT NULL OR item_row."customerVerifiableAt" IS NOT NULL
+    OR item_row."dispatchMetadata"->>'dispatchEvidenceVersion' IS DISTINCT FROM '1'
+    OR attempt_id IS NULL OR item_row."dispatchMetadata"->>'payloadHash' IS NULL
+    OR item_row."dispatchMetadata"->>'payloadHash' !~ '^[a-f0-9]{64}$'
+  ) THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
+
+  approval_id:=coalesce(approval.id,gen_random_uuid()::text);
+  PERFORM set_config('app.printing_retirement_approval_id',approval_id,true);
+  IF p_operation='REQUEST' THEN
+    INSERT INTO public."SensitiveActionApproval"(
+      id,"actionKey",status,"requestedByUserId","licenseeId","entityType","entityId",payload,"expiresAt","createdAt","updatedAt"
+    ) VALUES (approval_id,'PRINT_QR_RETIREMENT','PENDING',actor."userId",actor."batchLicenseeId",'PrintItem',p_item_id,
+      jsonb_build_object('binding',proof,'attemptId',attempt_id,'reason',btrim(p_reason)),now_at+interval '7 days',now_at,now_at);
+  ELSE
+    IF p_operation='APPROVE' THEN
+      UPDATE public."QRCode" SET status='BLOCKED',"blockedAt"=now_at,"updatedAt"=now_at WHERE id=item_row."qrCodeId";
+      UPDATE public."PrintItem" SET state='CANCELLED',"pipelineState"='NEEDS_OPERATOR_ACTION',
+        "failureReason"='historical_physical_outcome_unknown_qr_retired',"updatedAt"=now_at WHERE id=p_item_id;
+    END IF;
+    UPDATE public."SensitiveActionApproval" SET status=CASE WHEN p_operation='APPROVE' THEN 'EXECUTED' ELSE 'REJECTED' END,
+      "reviewedByUserId"=actor."userId","reviewedAt"=now_at,
+      "executedByUserId"=CASE WHEN p_operation='APPROVE' THEN actor."userId" END,
+      "executedAt"=CASE WHEN p_operation='APPROVE' THEN now_at END,"updatedAt"=now_at WHERE id=approval_id;
+  END IF;
+  PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
+    'PRINT_QR_RETIREMENT_'||p_operation,'PrintJob',p_job_id,
+    jsonb_build_object('approvalId',approval_id,'binding',proof,'historicalPhysicalOutcome','UNKNOWN','reason',btrim(p_reason)));
+  IF p_operation='APPROVE' THEN
+    INSERT INTO public."Notification"(id,"userId",audience,channel,type,title,body,data,"updatedAt")
+      SELECT gen_random_uuid()::text,u.id,'SUPER_ADMIN','WEB','print_qr_retired',
+        'QR label retired','The licensee approved retirement of a label with unknown physical output.',
+        jsonb_build_object('approvalId',approval_id,'jobId',p_job_id,'batchId',job_row."batchId"),now_at
+      FROM public."User" u WHERE u.role='SUPER_ADMIN' AND u."isActive" AND u.status='ACTIVE'
+        AND u."disabledAt" IS NULL AND u."deletedAt" IS NULL;
+  END IF;
+  RETURN jsonb_build_object('id',approval_id,
+    'status',CASE p_operation WHEN 'APPROVE' THEN 'EXECUTED' WHEN 'REJECT' THEN 'REJECTED' ELSE 'PENDING' END,
+    'idempotent',false);
+END
+$fn$;
+
 -- Read-only manufacturer run summary. Lifecycle mutation guards remain in printingLifecycle.sql.
 CREATE OR REPLACE FUNCTION app_rls.printing_run_projection(
   p_capability text,p_purpose text,p_request_id text,p_operation text,p_subject_id text,p_options jsonb
@@ -12180,7 +12352,7 @@ BEGIN
           SELECT CASE
             WHEN pi.state IN ('PRINT_CONFIRMED','CLOSED') AND pi."printConfirmedAt" IS NOT NULL THEN 'confirmed'
             WHEN pi."printConfirmedAt" IS NOT NULL OR pi.state IN ('PRINT_CONFIRMED','CLOSED') THEN NULL
-            WHEN j."failureReason"='historical_physical_outcome_unknown_qr_retired' AND q.status='BLOCKED'
+            WHEN pi."failureReason"='historical_physical_outcome_unknown_qr_retired' AND q.status='BLOCKED'
               AND pi.state='CANCELLED' THEN 'cancelled'
             WHEN pi.state='FROZEN' OR pi."pipelineState"='NEEDS_OPERATOR_ACTION'
               OR (pi.state IN ('ISSUED','AGENT_ACKED') AND
@@ -12272,6 +12444,112 @@ BEGIN
 END
 $fn$;
 REVOKE ALL ON FUNCTION app_rls.printing_run_projection(text,text,text,text,text,jsonb) FROM PUBLIC;
+
+-- Batch history has a distinct read scope from the personal audit feed.
+CREATE OR REPLACE FUNCTION app_rls.manufacturer_batch_history(
+  p_capability text,p_request_id text,p_batch_id text,p_licensee_id text,p_options jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+AS $fn$
+DECLARE
+  actor record;
+  root_id text;
+  batch_ids text[];
+  page_size integer:=least(greatest(coalesce((p_options->>'limit')::integer,50),1),100);
+  before_at timestamp:=nullif(p_options->>'beforeAt','')::timestamptz AT TIME ZONE 'UTC';
+  before_id text:=p_options->>'beforeId';
+  result jsonb;
+BEGIN
+  SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(
+    p_capability,'printing-readiness',p_request_id,p_batch_id
+  );
+  IF actor.role<>'MANUFACTURER_ADMIN' OR p_batch_id IS NULL
+     OR p_licensee_id IS NULL OR p_licensee_id IS DISTINCT FROM actor."batchLicenseeId" THEN
+    RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  SELECT coalesce(b."rootBatchId",b."parentBatchId",b.id) INTO STRICT root_id
+    FROM public."Batch" b WHERE b.id=p_batch_id AND b."manufacturerId"=actor."userId";
+  SELECT array_agg(b.id) INTO batch_ids FROM public."Batch" b
+    WHERE b."licenseeId"=p_licensee_id AND b."manufacturerId"=actor."userId"
+      AND (b.id=root_id OR b."rootBatchId"=root_id OR (b."rootBatchId" IS NULL AND b."parentBatchId"=root_id));
+  PERFORM set_config('app.printing_history_batches',coalesce(to_jsonb(batch_ids)::text,'[]'),true),
+    set_config('app.printing_operation','printing-manufacturer-batch-history',true);
+
+  WITH audit_rows AS (
+    SELECT 'a:'||a.id AS id,a."createdAt",a.action,
+      CASE WHEN a."userId"=actor."userId" THEN 'You'
+        WHEN a.action='ALLOCATED' THEN 'Licensee'
+        ELSE 'Administrator' END AS "actorLabel",
+      CASE WHEN a.action='ALLOCATED' AND jsonb_typeof(a.details->'quantity')='number'
+        THEN jsonb_build_object('quantity',a.details->'quantity') ELSE '{}'::jsonb END AS details
+    FROM public."AuditLog" a
+    WHERE a."licenseeId"=p_licensee_id
+      AND (
+        (a."entityType"='Batch' AND a."entityId"=ANY(batch_ids)
+          AND a.action IN ('ALLOCATED','BATCH_RELEASE_REQUESTED','BATCH_RELEASE_APPROVE','BATCH_RELEASE_REJECT'))
+        OR (a."entityType"='PrintJob'
+          AND a.action IN ('PRINT_JOB_CREATED','PRINT_JOB_PAUSE','PRINT_JOB_RESUME','PRINT_JOB_STOP',
+            'PRINT_JOB_ABANDON','PRINT_JOB_RETIRE_UNCERTAIN','PRINT_QR_RETIREMENT_REQUEST',
+            'PRINT_QR_RETIREMENT_APPROVE','PRINT_QR_RETIREMENT_REJECT')
+          AND EXISTS (SELECT 1 FROM public."PrintJob" j
+            WHERE j.id=a."entityId" AND j."batchId"=ANY(batch_ids) AND j."manufacturerId"=actor."userId"))
+        OR (a."entityType"='PrintReissueRequest'
+          AND a.action IN ('PRINT_REISSUE_CREATE','PRINT_REISSUE_REQUEST','PRINT_REISSUE_FORWARD',
+            'PRINT_REISSUE_APPROVE','PRINT_REISSUE_REJECT','PRINT_REISSUE_CANCEL','PRINT_REISSUE_EXECUTE')
+          AND EXISTS (SELECT 1 FROM public."PrintReissueRequest" r JOIN public."PrintJob" j ON j.id=r."originalPrintJobId"
+            WHERE r.id=a."entityId" AND j."batchId"=ANY(batch_ids) AND j."manufacturerId"=actor."userId"))
+      )
+      AND (before_at IS NULL OR (a."createdAt",'a:'||a.id)<(before_at,before_id))
+    ORDER BY a."createdAt" DESC,a.id DESC LIMIT (page_size+1)
+  ), print_rows AS (
+    SELECT 'p:'||e.id AS id,e."createdAt",e."eventType" AS action,
+      CASE WHEN e."eventType" IN ('SAMPLE_SCAN_PASSED','sample_scan_verified')
+        AND e."actorId"=actor."userId" THEN 'You' ELSE 'System' END AS "actorLabel",
+      jsonb_build_object('jobNumber',j."jobNumber") AS details
+    FROM public."PrintAuditEvent" e
+    JOIN public."PrintJob" j ON j.id=e."printJobId" AND j."batchId"=e."batchId"
+    WHERE e."batchId"=ANY(batch_ids) AND j."manufacturerId"=actor."userId"
+      AND e."eventType" IN ('CONNECTOR_ACK','CONNECTOR_CONFIRM','CONNECTOR_FAIL','CONNECTOR_ABORT',
+        'GATEWAY_ACK','GATEWAY_CONFIRM','GATEWAY_FAIL','WORKER_NETWORK_CONFIRM','WORKER_NETWORK_FAIL',
+        'WORKER_RECOVER_UNSUBMITTED','WORKER_DISPATCH_OUTCOME_UNCERTAIN','SAMPLE_SCAN_PASSED','sample_scan_verified')
+      AND (before_at IS NULL OR (e."createdAt",'p:'||e.id)<(before_at,before_id))
+    ORDER BY e."createdAt" DESC,e.id DESC LIMIT (page_size+1)
+  ), trace_rows AS (
+    SELECT 't:'||t.id AS id,t."createdAt",'ALLOCATED'::text AS action,
+      'Licensee'::text AS "actorLabel",
+      CASE WHEN jsonb_typeof(t.details->'quantity')='number'
+        THEN jsonb_build_object('quantity',t.details->'quantity') ELSE '{}'::jsonb END AS details
+    FROM public."TraceEvent" t
+    WHERE t."batchId"=ANY(batch_ids) AND t."licenseeId"=p_licensee_id
+      AND t."qrCodeId" IS NULL AND t."eventType"='ASSIGNED'
+      AND (before_at IS NULL OR (t."createdAt",'t:'||t.id)<(before_at,before_id))
+      AND NOT EXISTS (
+        SELECT 1 FROM public."AuditLog" a
+        WHERE a."licenseeId"=p_licensee_id AND a."entityType"='Batch'
+          AND a."entityId"=t."batchId" AND a.action='ALLOCATED'
+      )
+    ORDER BY t."createdAt" DESC,t.id DESC LIMIT (page_size+1)
+  ), page AS (
+    SELECT * FROM (
+      SELECT * FROM audit_rows UNION ALL SELECT * FROM print_rows UNION ALL SELECT * FROM trace_rows
+    ) events ORDER BY "createdAt" DESC,id DESC LIMIT (page_size+1)
+  )
+  SELECT jsonb_build_object('events',coalesce(jsonb_agg(
+      jsonb_build_object('id',id,'createdAt',"createdAt" AT TIME ZONE 'UTC','action',action,
+        'actorLabel',"actorLabel",'details',details) ORDER BY "createdAt" DESC,id DESC),'[]'::jsonb),
+    'incomplete',EXISTS (
+      SELECT 1 FROM unnest(batch_ids) child(id) WHERE NOT EXISTS (
+        SELECT 1 FROM public."AuditLog" a WHERE a."licenseeId"=p_licensee_id
+          AND a."entityType"='Batch' AND a."entityId"=child.id AND a.action='ALLOCATED'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM public."TraceEvent" t WHERE t."licenseeId"=p_licensee_id AND t."batchId"=child.id
+          AND t."qrCodeId" IS NULL AND t."eventType"='ASSIGNED'
+      )
+    )) INTO result FROM page;
+  RETURN result;
+END
+$fn$;
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_identity(text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_registration(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
@@ -12283,7 +12561,9 @@ GRANT EXECUTE ON FUNCTION app_rls.printing_idempotency(text,text,text,text,text,
 GRANT EXECUTE ON FUNCTION app_rls.printing_readiness(text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_record_sample(text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_release_batch(text,text,text,text,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.printing_retirement(text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_test_label_job(text,text,text,text,jsonb,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.manufacturer_batch_history(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_run_projection(text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_worker_network_job(text,text,text,jsonb) TO "mscqr_rls_cert_worker";
 GRANT EXECUTE ON FUNCTION app_rls.printing_worker_reconcile(text,text,integer) TO "mscqr_rls_cert_worker";

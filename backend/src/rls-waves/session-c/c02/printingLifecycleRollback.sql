@@ -1,3 +1,8 @@
+DROP POLICY IF EXISTS manufacturer_batch_history_auditlog_select ON public."AuditLog";
+DROP POLICY IF EXISTS manufacturer_batch_history_printauditevent_select ON public."PrintAuditEvent";
+DROP POLICY IF EXISTS manufacturer_batch_history_printjob_select ON public."PrintJob";
+DROP POLICY IF EXISTS manufacturer_batch_history_printreissuerequest_select ON public."PrintReissueRequest";
+DROP POLICY IF EXISTS manufacturer_batch_history_traceevent_select ON public."TraceEvent";
 DROP POLICY IF EXISTS printing_run_projection_batch_select ON public."Batch";
 DROP POLICY IF EXISTS printing_run_projection_printjob_select ON public."PrintJob";
 DROP POLICY IF EXISTS printing_run_projection_printitem_select ON public."PrintItem";
@@ -7,6 +12,7 @@ DROP POLICY IF EXISTS printing_run_projection_printsession_select ON public."Pri
 DROP POLICY IF EXISTS printing_run_projection_printitemevent_select ON public."PrintItemEvent";
 DROP POLICY IF EXISTS printing_run_projection_printjobchunk_select ON public."PrintJobChunk";
 DROP POLICY IF EXISTS printing_run_projection_printauditevent_select ON public."PrintAuditEvent";
+DROP POLICY IF EXISTS printing_lifecycle_notification_insert ON public."Notification";
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_insert ON public."ActionIdempotencyKey";
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_select ON public."ActionIdempotencyKey";
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_update ON public."ActionIdempotencyKey";
@@ -96,6 +102,8 @@ DROP FUNCTION IF EXISTS app_rls.printing_printer_administration(text,text,text,t
 DROP FUNCTION IF EXISTS app_rls.printing_idempotency(text,text,text,text,text,text,text,integer,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_connector_registration(text,text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_create_job(text,text,text,text,text,integer,text,text,text,text,text,jsonb);
+DROP FUNCTION IF EXISTS app_rls.printing_retirement(text,text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.manufacturer_batch_history(text,text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_run_projection(text,text,text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_readiness(text,text,text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_write_audit(text,text,text,text,text,text,text,jsonb);

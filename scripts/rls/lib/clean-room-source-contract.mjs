@@ -19,6 +19,7 @@ export const cleanRoomSourcePaths = [...new Set([
   "backend/src/rls-waves/session-a/productionRotationInventoryRollback.sql",
   "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
   "backend/src/rls-waves/session-c/c02/printingRunProjection.sql",
+  "backend/src/rls-waves/session-c/c02/printingRetirement.sql",
   "scripts/rls/lib/rotation-inventory-contract.mjs",
   "scripts/rls/generate-full-rls-sql.mjs",
   "scripts/rls/generate-clean-room-rls-sql.mjs",

@@ -107,7 +107,7 @@ export function useBatchPrintWorkflow({
   const printerFailureReportRef = useRef<{ signature: string; at: number }>({ signature: "", at: 0 });
   const printerFailureInFlightRef = useRef(false);
   const actionInFlightRef = useRef(new Map<string, Promise<void>>());
-  const printJobsQuery = usePrintJobs(printBatch?.id, 8, false);
+  const printJobsQuery = usePrintJobs(printBatch?.id, 12, isManufacturer && printOpen && Boolean(printBatch?.id));
 
   const securePrintReadiness = useMemo(() => buildSecurePrintReadiness(printerStatus), [printerStatus]);
   const printerReady = securePrintReadiness.ready;
@@ -342,14 +342,8 @@ export function useBatchPrintWorkflow({
   }, [runtime?.snapshot]);
 
   useEffect(() => {
-    if (printJobsQuery.data) setRecentPrintJobs(printJobsQuery.data as PrintJobRow[]);
-  }, [printJobsQuery.data]);
-
-  useEffect(() => {
-    if (!isManufacturer || !printOpen) return;
-    void loadRecentPrintJobs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isManufacturer, printOpen, userId]);
+    if (printOpen) setRecentPrintJobs((printJobsQuery.data ?? []) as PrintJobRow[]);
+  }, [printJobsQuery.data, printOpen, printBatch?.id]);
 
   useEffect(() => {
     if (!selectedPrinterId) return;
