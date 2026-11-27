@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='e28da7b5737e7205d4e6ab1acdab776fd558ce322d28f163e979c0dc35e4e085'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:e28da7b5737e7205d4e6ab1acdab776fd558ce322d28f163e979c0dc35e4e085'
+    AND source_contract_sha256='5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:e28da7b5737e7205d4e6ab1acdab776fd558ce322d28f163e979c0dc35e4e085')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -12236,7 +12236,7 @@ BEGIN
         CASE WHEN session_id IS NOT NULL AND status IN ('PENDING','SENT','PAUSED') THEN 'stop' END,
         CASE WHEN complete AND status='FAILED' AND "pipelineState"<>'NEEDS_OPERATOR_ACTION'
           AND uncertain=0 AND NOT abandon_fence THEN 'abandon' END,
-        CASE WHEN session_id IS NOT NULL AND quantity BETWEEN 1 AND 200000
+        CASE WHEN session_id IS NOT NULL
           AND "releasedAt" IS NULL AND "suspendedAt" IS NULL AND "lifecycleState"<>'RELEASED'
           AND NOT EXISTS (SELECT 1 FROM public."PrintReissueRequest" r WHERE r."originalPrintJobId"=facts.id AND r.status IN ('PENDING','APPROVED'))
           -- Request creation and execution have different guards. Execution still verifies label reuse.
@@ -12248,8 +12248,11 @@ BEGIN
               AND "lifecycleState" IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED')
               AND NOT EXISTS (SELECT 1 FROM public."PrintJobChunk" c WHERE c."printJobId"=facts.id OR c."printSessionId"=facts.session_id)
               AND NOT EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=facts.id)
-              AND NOT EXISTS (SELECT 1 FROM public."PrintJob" other WHERE other."batchId"=facts."batchId"
-                AND other.id<>facts.id AND other.status IN ('PENDING','SENT','PAUSED'))))
+              AND NOT EXISTS (SELECT 1 FROM public."PrintJob" other
+                JOIN public."PrintSession" other_session ON other_session."printJobId"=other.id
+                WHERE other."batchId"=facts."batchId" AND other.id<>facts.id
+                  AND other.status IN ('PENDING','SENT','PAUSED')
+                  AND other_session.status IN ('ACTIVE','PAUSED','RESUME_PENDING'))))
           THEN 'requestReissue' END
       ]::text[],NULL)),
       'complete',complete

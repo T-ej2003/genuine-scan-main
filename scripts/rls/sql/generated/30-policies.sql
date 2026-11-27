@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='e28da7b5737e7205d4e6ab1acdab776fd558ce322d28f163e979c0dc35e4e085'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:e28da7b5737e7205d4e6ab1acdab776fd558ce322d28f163e979c0dc35e4e085'
+    AND source_contract_sha256='5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f'
     AND administrator_role='certification-administrator'
 
     AND phase='runtime-grants-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:e28da7b5737e7205d4e6ab1acdab776fd558ce322d28f163e979c0dc35e4e085')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5c7925777bf19f55ce3a2a904821ae6e500bebf098d25ecb1ebcffe95afc902f')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -844,7 +844,7 @@ CREATE POLICY "printing_run_projection_printreissuerequest_select" ON public."Pr
 COMMENT ON POLICY "printing_run_projection_printreissuerequest_select" ON public."PrintReissueRequest" IS '{"boundary":"manufacturer-print-run-projection","scope":"bounded current manufacturer print run IDs"}';
 CREATE POLICY "printing_run_projection_qrcode_select" ON public."QRCode" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND "printJobId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))));
 COMMENT ON POLICY "printing_run_projection_qrcode_select" ON public."QRCode" IS '{"boundary":"manufacturer-print-run-projection","scope":"bounded current manufacturer print run IDs"}';
-CREATE POLICY "printing_run_projection_printsession_select" ON public."PrintSession" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND "manufacturerId"=current_setting('app.printing_user_id',true) AND "printJobId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))));
+CREATE POLICY "printing_run_projection_printsession_select" ON public."PrintSession" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND "manufacturerId"=current_setting('app.printing_user_id',true) AND ("printJobId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))) OR ("batchId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_batch_ids',true),'')::jsonb,'[]'::jsonb))) AND status IN ('ACTIVE','PAUSED','RESUME_PENDING'))));
 COMMENT ON POLICY "printing_run_projection_printsession_select" ON public."PrintSession" IS '{"boundary":"manufacturer-print-run-projection","scope":"bounded current manufacturer print run IDs"}';
 CREATE POLICY "printing_run_projection_printitemevent_select" ON public."PrintItemEvent" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND "printItemId" IN (SELECT pi.id FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" WHERE ps."printJobId" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb)))));
 COMMENT ON POLICY "printing_run_projection_printitemevent_select" ON public."PrintItemEvent" IS '{"boundary":"manufacturer-print-run-projection","scope":"bounded current manufacturer print run IDs"}';

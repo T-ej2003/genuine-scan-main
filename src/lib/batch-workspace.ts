@@ -47,10 +47,13 @@ export type BatchWorkspaceAllocation = {
   currentRangeEnd?: string | null;
 };
 
-export function aggregateBatchPrintAccounting(allocations: BatchWorkspaceAllocation[]): BatchPrintAccountingDTO | undefined {
-  let total: BatchPrintAccountingDTO | undefined;
-  for (const { printAccounting: accounting } of allocations) {
-    if (!accounting) return undefined;
+type WorkspacePrintAccounting = Omit<BatchPrintAccountingDTO, "activePrintRun">;
+
+export function aggregateBatchPrintAccounting(allocations: BatchWorkspaceAllocation[]): WorkspacePrintAccounting | undefined {
+  let total: WorkspacePrintAccounting | undefined;
+  for (const { printAccounting } of allocations) {
+    if (!printAccounting) return undefined;
+    const { activePrintRun: _activePrintRun, ...accounting } = printAccounting;
     total = total ? {
       totalAllocated: total.totalAllocated + accounting.totalAllocated,
       available: total.available + accounting.available,
@@ -61,7 +64,6 @@ export function aggregateBatchPrintAccounting(allocations: BatchWorkspaceAllocat
       needsReconciliation: total.needsReconciliation + accounting.needsReconciliation,
       scanned: total.scanned + accounting.scanned,
       redeemed: total.redeemed + accounting.redeemed,
-      activePrintRun: total.activePrintRun || accounting.activePrintRun,
       complete: total.complete && accounting.complete,
     } : accounting;
   }
@@ -320,7 +322,7 @@ export const buildStableBatchOverviewRows = (rows: BatchWorkspaceRow[]) => {
       redeemedCodes: group.redeemedCodes,
       blockedCodes: group.blockedCodes,
       manufacturerCount: group.allocationsByManufacturer.size,
-      manufacturerOperational: buildManufacturerOperationalSnapshot(Array.from(group.allocationsByManufacturer.values())),
+      manufacturerOperational: buildManufacturerOperationalSnapshot(group.allocations),
       allocations: group.allocations.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
       manufacturerSummary: Array.from(group.allocationsByManufacturer.values()).sort(
         (left, right) => right.allocatedCodes - left.allocatedCodes || left.manufacturerName.localeCompare(right.manufacturerName)

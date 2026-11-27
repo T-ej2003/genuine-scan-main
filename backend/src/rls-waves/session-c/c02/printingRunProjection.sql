@@ -145,7 +145,7 @@ BEGIN
         CASE WHEN session_id IS NOT NULL AND status IN ('PENDING','SENT','PAUSED') THEN 'stop' END,
         CASE WHEN complete AND status='FAILED' AND "pipelineState"<>'NEEDS_OPERATOR_ACTION'
           AND uncertain=0 AND NOT abandon_fence THEN 'abandon' END,
-        CASE WHEN session_id IS NOT NULL AND quantity BETWEEN 1 AND 200000
+        CASE WHEN session_id IS NOT NULL
           AND "releasedAt" IS NULL AND "suspendedAt" IS NULL AND "lifecycleState"<>'RELEASED'
           AND NOT EXISTS (SELECT 1 FROM public."PrintReissueRequest" r WHERE r."originalPrintJobId"=facts.id AND r.status IN ('PENDING','APPROVED'))
           -- Request creation and execution have different guards. Execution still verifies label reuse.
@@ -157,8 +157,11 @@ BEGIN
               AND "lifecycleState" IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED')
               AND NOT EXISTS (SELECT 1 FROM public."PrintJobChunk" c WHERE c."printJobId"=facts.id OR c."printSessionId"=facts.session_id)
               AND NOT EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=facts.id)
-              AND NOT EXISTS (SELECT 1 FROM public."PrintJob" other WHERE other."batchId"=facts."batchId"
-                AND other.id<>facts.id AND other.status IN ('PENDING','SENT','PAUSED'))))
+              AND NOT EXISTS (SELECT 1 FROM public."PrintJob" other
+                JOIN public."PrintSession" other_session ON other_session."printJobId"=other.id
+                WHERE other."batchId"=facts."batchId" AND other.id<>facts.id
+                  AND other.status IN ('PENDING','SENT','PAUSED')
+                  AND other_session.status IN ('ACTIVE','PAUSED','RESUME_PENDING'))))
           THEN 'requestReissue' END
       ]::text[],NULL)),
       'complete',complete

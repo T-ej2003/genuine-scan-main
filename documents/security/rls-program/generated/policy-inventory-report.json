@@ -7791,7 +7791,7 @@
         "printing-readiness"
       ],
       "scopeType": "verified-manufacturer-print-run-ids",
-      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"manufacturerId\"=current_setting('app.printing_user_id',true) AND \"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb)))",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-manufacturer-run-projection' AND current_setting('app.printing_role',true)='MANUFACTURER_ADMIN' AND \"manufacturerId\"=current_setting('app.printing_user_id',true) AND (\"printJobId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_job_ids',true),'')::jsonb,'[]'::jsonb))) OR (\"batchId\" IN (SELECT jsonb_array_elements_text(coalesce(nullif(current_setting('app.printing_run_projection_batch_ids',true),'')::jsonb,'[]'::jsonb))) AND status IN ('ACTIVE','PAUSED','RESUME_PENDING')))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:manufacturer-print-run-projection:PrintSession:SELECT"

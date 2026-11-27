@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildStableBatchOverviewRows, type BatchWorkspaceRow } from "@/lib/batch-workspace";
+import { aggregateBatchPrintAccounting, buildStableBatchOverviewRows, type BatchWorkspaceRow } from "@/lib/batch-workspace";
 
 describe("buildStableBatchOverviewRows", () => {
   it("reconciles a source across batch pages when given the complete allocation-map rows", () => {
@@ -104,5 +104,56 @@ describe("buildStableBatchOverviewRows", () => {
     expect(group.manufacturerOperational.remainingPrintableRangeEnd).toBe("AADS0000001600");
     expect(group.manufacturerOperational.nextPrintableLabelCode).toBe("AADS0000001401");
     expect(group.manufacturerSummary[0].manufacturerName).toBe("Factory A");
+  });
+});
+
+describe("manufacturer workspace print accounting", () => {
+  const available = {
+    totalAllocated: 6, available: 6, confirmedPrinted: 0, reservedInProgress: 0,
+    awaitingRecovery: 0, retiredBlocked: 0, needsReconciliation: 0,
+    scanned: 0, redeemed: 0, complete: true,
+  };
+  const first: BatchWorkspaceRow = {
+    id: "factory-first", name: "First allocation", licenseeId: "tenant", manufacturerId: "factory",
+    batchKind: "MANUFACTURER_CHILD", parentBatchId: "source", rootBatchId: "source",
+    startCode: "L0001", endCode: "L0006", totalCodes: 6, printableCodes: 6,
+    printedAt: null, createdAt: "2026-03-02T00:00:00Z",
+    printAccounting: { ...available, activePrintRun: false },
+  };
+  const second: BatchWorkspaceRow = {
+    ...first, id: "factory-second", startCode: "L0007", endCode: "L0012", printableCodes: 0,
+    printAccounting: {
+      ...available, available: 0, confirmedPrinted: 2, reservedInProgress: 1,
+      awaitingRecovery: 2, retiredBlocked: 1, scanned: 1, redeemed: 1, activePrintRun: true,
+    },
+  };
+  const group = (...rows: BatchWorkspaceRow[]) => buildStableBatchOverviewRows(rows)[0];
+
+  it("preserves one allocation and reconciles every bucket across disjoint children of the same source", () => {
+    expect(aggregateBatchPrintAccounting(group(first).allocations)).toEqual(available);
+    const workspace = group(first, second);
+    expect(workspace.manufacturerOperational).toMatchObject({
+      originalAssignedRangeStart: "L0001", originalAssignedRangeEnd: "L0012",
+    });
+    const grouped = aggregateBatchPrintAccounting(workspace.allocations);
+    expect(grouped).toEqual({
+      totalAllocated: 12, available: 6, confirmedPrinted: 2, reservedInProgress: 1,
+      awaitingRecovery: 2, retiredBlocked: 1, needsReconciliation: 0,
+      scanned: 1, redeemed: 1, complete: true,
+    });
+    expect(grouped!.totalAllocated).toBe(grouped!.available + grouped!.confirmedPrinted +
+      grouped!.reservedInProgress + grouped!.awaitingRecovery + grouped!.retiredBlocked +
+      grouped!.needsReconciliation);
+  });
+
+  it("keeps unknown accounting explicit and propagates reconciliation from a child", () => {
+    expect(aggregateBatchPrintAccounting(group(first, { ...second, printAccounting: undefined }).allocations)).toBeUndefined();
+    const incomplete = {
+      ...second,
+      printAccounting: { ...second.printAccounting!, awaitingRecovery: 1, needsReconciliation: 1, complete: false },
+    };
+    expect(aggregateBatchPrintAccounting(group(first, incomplete).allocations)).toMatchObject({
+      totalAllocated: 12, awaitingRecovery: 1, needsReconciliation: 1, complete: false,
+    });
   });
 });

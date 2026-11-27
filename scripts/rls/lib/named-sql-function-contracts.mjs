@@ -1019,7 +1019,7 @@ const printingRunOwnerPolicies = [
   ["PrintItem","SELECT",`${printingRunRead} AND "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printJobId" IN (${printingRunJobs}))`],
   ["PrintReissueRequest","SELECT",`${printingRunRead} AND "originalPrintJobId" IN (${printingRunJobs})`],
   ["QRCode","SELECT",`${printingRunRead} AND "printJobId" IN (${printingRunJobs})`],
-  ["PrintSession","SELECT",`${printingRunRead} AND "manufacturerId"=current_setting('app.printing_user_id',true) AND "printJobId" IN (${printingRunJobs})`],
+  ["PrintSession","SELECT",`${printingRunRead} AND "manufacturerId"=current_setting('app.printing_user_id',true) AND ("printJobId" IN (${printingRunJobs}) OR ("batchId" IN (${printingRunBatches}) AND status IN ('ACTIVE','PAUSED','RESUME_PENDING')))`],
   ["PrintItemEvent","SELECT",`${printingRunRead} AND "printItemId" IN (SELECT pi.id FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" WHERE ps."printJobId" IN (${printingRunJobs}))`],
   ["PrintJobChunk","SELECT",`${printingRunRead} AND ("printJobId" IN (${printingRunJobs}) OR "printSessionId" IN (SELECT ps.id FROM public."PrintSession" ps WHERE ps."printJobId" IN (${printingRunJobs})))`],
   ["PrintAuditEvent","SELECT",`${printingRunRead} AND "printJobId" IN (${printingRunJobs})`],
