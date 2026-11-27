@@ -34,27 +34,31 @@ function evidenceDeadline(status: PrinterConnectionStatusDTO) {
   return Math.min(Date.parse(attestation.issuedAt || ""), Date.parse(status.lastHeartbeatAt || "")) + evidenceLifetimeMs;
 }
 
-function reconcile(snapshot: ManufacturerPrinterRuntime, expectedPrinter: string | null) {
+function reconcile(snapshot: ManufacturerPrinterRuntime, expectedPrinter: string | null): ManufacturerPrinterRuntime {
   const { remoteStatus: status, localBinding: local, localAgent, registeredPrinters } = snapshot;
-  if (!buildSecurePrintReadiness(status).ready) return snapshot;
+  const unverified = { ...snapshot, deviceVerified: false };
+  if (!buildSecurePrintReadiness(status).ready) return unverified;
 
   const selected = status.selectedPrinterId;
-  const matches = Boolean(selected && status.registrationId && local?.printerId === selected &&
+  const matchesDevice = Boolean(selected && status.registrationId && local?.printerId === selected &&
     (!expectedPrinter || selected === expectedPrinter) &&
     local.agentId && local.agentId === status.agentId &&
-    local.deviceFingerprint && local.deviceFingerprint === status.deviceFingerprint &&
-    registeredPrinters.some((row) => row.isActive && row.connectionType === "LOCAL_AGENT" &&
-      row.printerRegistrationId === status.registrationId && (row.nativePrinterId || row.id) === selected));
+    local.deviceFingerprint && local.deviceFingerprint === status.deviceFingerprint);
 
   if (!localAgent.connected) {
-    return { ...snapshot, remoteStatus: { ...blocked(status, "Printer helper is disconnected."), connected: false, stale: false } };
+    return { ...unverified, remoteStatus: { ...blocked(status, "Printer helper is disconnected."), connected: false, stale: false } };
   }
-  if (!matches || normalizeLocalPrinterRows(snapshot.localInventory).some((row) => row.printerId === selected && row.online === false)) {
-    return { ...snapshot, remoteStatus: blocked(status, "Check the selected printer and its connection.") };
+  if (!matchesDevice || normalizeLocalPrinterRows(snapshot.localInventory).some((row) => row.printerId === selected && row.online === false)) {
+    return { ...unverified, remoteStatus: blocked(status, "Check the selected printer and its connection.") };
   }
   const deadline = evidenceDeadline(status);
-  return Number.isFinite(deadline) && deadline > Date.now()
-    ? snapshot : { ...snapshot, remoteStatus: blocked(status, expired) };
+  if (!Number.isFinite(deadline) || deadline <= Date.now()) {
+    return { ...unverified, remoteStatus: blocked(status, expired) };
+  }
+  const savedBindingMatches = registeredPrinters.some((row) => row.isActive && row.connectionType === "LOCAL_AGENT" &&
+    row.printerRegistrationId === status.registrationId && (row.nativePrinterId || row.id) === selected);
+  return { ...snapshot, deviceVerified: true, remoteStatus: savedBindingMatches
+    ? status : blocked(status, "Check the saved printer setup for this connector.") };
 }
 
 type RefreshOptions = { force?: boolean };
@@ -98,7 +102,7 @@ function useRuntimeOwner(user: User) {
     ++revision.current;
     needsSnapshot.current = true;
     const snapshot = snapshotForScope();
-    publish({ ...snapshot, remoteStatus: blocked(snapshot.remoteStatus, reason) });
+    publish({ ...snapshot, deviceVerified: false, remoteStatus: blocked(snapshot.remoteStatus, reason) });
   };
 
   const refresh: Refresh = (options) => {
@@ -117,7 +121,7 @@ function useRuntimeOwner(user: User) {
     const started = revision.current;
     const prior = snapshotForScope();
     const eventAtStart = lastEventTime.current;
-    if (force) publish({ ...prior, remoteStatus: blocked(prior.remoteStatus, checking) });
+    if (force) publish({ ...prior, deviceVerified: false, remoteStatus: blocked(prior.remoteStatus, checking) });
     setCheckingScope(scope);
     const request = { scope, revision: started, force, promise: Promise.resolve<ManufacturerPrinterRuntime | null>(null) };
     request.promise = (async () => {
@@ -234,7 +238,7 @@ function useRuntimeOwner(user: User) {
         }
         if (!needsSnapshot.current) invalidate();
         if (!buildSecurePrintReadiness(status).ready && !changingPrinter.current) {
-          publish({ ...snapshotForScope(), remoteStatus: status });
+          if (!snapshot.authorizationRejected) publish({ ...snapshotForScope(), deviceVerified: false, remoteStatus: status });
           return;
         }
         const now = Date.now();
@@ -273,7 +277,7 @@ function useRuntimeOwner(user: User) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, authorized, suppressed, live, ready]);
 
-  const deadline = ready ? evidenceDeadline(snapshot.remoteStatus) : NaN;
+  const deadline = snapshot.deviceVerified ? evidenceDeadline(snapshot.remoteStatus) : NaN;
   useEffect(() => {
     if (!Number.isFinite(deadline)) return;
     const timer = window.setTimeout(() => {

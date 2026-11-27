@@ -159,7 +159,7 @@ export function useBatchPrintWorkflow({
       : false;
   const selectedLocalProfileRegistrationStale = Boolean(
     selectedPrinterProfile?.connectionType === "LOCAL_AGENT" &&
-      printerReady &&
+      runtime?.snapshot.deviceVerified &&
       selectedPrinterProfile.printerRegistrationId &&
       printerStatus.registrationId &&
       selectedPrinterProfile.printerRegistrationId !== printerStatus.registrationId &&
@@ -238,12 +238,7 @@ export function useBatchPrintWorkflow({
   ) => {
     setSelectedPrinterProfileId((previous) => {
       const current = printers.find((row) => row.id === previous && row.isActive);
-      if (
-        current &&
-        (current.connectionType !== "LOCAL_AGENT" ||
-          !preferredRegistrationId ||
-          current.printerRegistrationId === preferredRegistrationId)
-      ) return previous;
+      if (current) return previous;
 
       const trimmedLocalId = String(preferredLocalPrinterId || "").trim();
       if (trimmedLocalId) {
@@ -363,8 +358,7 @@ export function useBatchPrintWorkflow({
     setSelectedPrinterProfileId((previous) => {
       const current = registeredPrinters.find((row) => row.id === previous) || null;
       if (current?.connectionType && current.connectionType !== "LOCAL_AGENT") return previous;
-      if (current?.isActive && current.nativePrinterId === selectedPrinterId &&
-          (!printerStatus.registrationId || current.printerRegistrationId === printerStatus.registrationId)) return previous;
+      if (current?.isActive && current.nativePrinterId === selectedPrinterId) return previous;
 
       const matchingLocal = registeredPrinters.find(
         (row) =>

@@ -25,6 +25,7 @@ export type ManufacturerPrinterRuntime = {
   localInventory: unknown[];
   localBinding: { printerId: string | null; agentId: string | null; deviceFingerprint: string | null } | null;
   authorizationRejected?: boolean;
+  deviceVerified?: boolean;
   localResult?: Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>;
 };
 

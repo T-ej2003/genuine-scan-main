@@ -170,6 +170,18 @@ describe("Start print run dialogue lifecycle", () => {
     view.unmount();
   });
 
+  it("offers relink for a stale saved profile while blocking print execution", async () => {
+    const staleProfile = { ...profile, printerRegistrationId: "previous-registration" };
+    vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({ success: true, data: [staleProfile] });
+    const view = mount();
+    await waitFor(() => expect(view.result.current.dialogProps.registeredPrinters).toHaveLength(1));
+    act(() => view.result.current.dialogProps.onSelectedPrinterProfileIdChange(staleProfile.id));
+    await waitFor(() => expect(view.result.current.dialogProps.selectedLocalProfileRegistrationStale).toBe(true));
+    expect(view.result.current.dialogProps.securePrintReadiness.ready).toBe(false);
+    expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(false);
+    expect(apiClient.createPrintJob).not.toHaveBeenCalled();
+  });
+
   it("does not expire verification when the already selected printer is selected again", async () => {
     const view = mount();
     await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe("profile-1"));
