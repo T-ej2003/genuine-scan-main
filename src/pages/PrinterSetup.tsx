@@ -27,8 +27,7 @@ import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-u
 import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 import { evaluateConnectorCompatibility, type LatestConnectorReleaseInfo } from "@/features/connector/connectorCompatibility";
 import { createUiActionState } from "@/lib/ui-actions";
-import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
-import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
+import { useManufacturerPrinterRuntime } from "@/features/printing/manufacturer-printer-runtime";
 import { APP_PATHS } from "@/app/route-metadata";
 import type { RegisteredPrinterDTO } from "../../shared/contracts/runtime/printing";
 
@@ -337,16 +336,8 @@ export default function PrinterSetupPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const detectedPlatform = useMemo(() => detectCurrentPlatform(), []);
-  const runtimeQuery = useManufacturerPrinterRuntime(true, true);
-  const inventoryQuery = useQuery({
-    queryKey: ["printer-setup", "inventory"], refetchInterval: visibleRefetchInterval(pollingPolicy.printerSetupRefreshMs),
-    refetchOnWindowFocus: false, staleTime: pollingPolicy.printerSetupRefreshMs,
-    queryFn: async () => {
-      const response = await apiClient.getLocalPrintAgentStatus();
-      if (!response.success) return [] as PrinterInventoryRow[];
-      return normalizePrinterInventoryRows((response.data as { printers?: unknown[] } | undefined)?.printers || []);
-    },
-  });
+  const runtime = useManufacturerPrinterRuntime();
+  const refreshReadiness = () => runtime?.refresh({ force: true });
   const connectorReleaseQuery = useQuery({
     queryKey: ["printer-setup", "connector-release"],
     staleTime: 60_000,
@@ -374,9 +365,10 @@ export default function PrinterSetupPage() {
     return run;
   };
 
-  const inventory = inventoryQuery.data || [];
-  const registeredPrinters = (runtimeQuery.data?.registeredPrinters || []) as RegisteredPrinterDTO[];
-  const remoteStatus = runtimeQuery.data?.remoteStatus || null;
+  const localInventory = runtime?.snapshot.localInventory;
+  const inventory = useMemo(() => normalizePrinterInventoryRows(localInventory || []), [localInventory]);
+  const registeredPrinters = (runtime?.snapshot.registeredPrinters || []) as RegisteredPrinterDTO[];
+  const remoteStatus = runtime?.snapshot.remoteStatus || null;
   const helperReadiness = useMemo(() => buildSecurePrintReadiness(remoteStatus), [remoteStatus]);
   const localReady = helperReadiness.ready;
   const helperVersion = String(remoteStatus?.agentVersion || "").trim();
@@ -533,7 +525,7 @@ export default function PrinterSetupPage() {
 
       await Promise.allSettled([
         apiClient.discoverRegisteredPrinter(printerId),
-        runtimeQuery.refetch(),
+        refreshReadiness(),
       ]);
 
       setTestingPrinterId(printerId);
@@ -551,7 +543,7 @@ export default function PrinterSetupPage() {
         variant: confirmed || queued ? "default" : "destructive",
       });
 
-      await runtimeQuery.refetch();
+      await refreshReadiness();
     } finally {
       setTestingPrinterId(null);
       setSaving(false);
@@ -577,7 +569,7 @@ export default function PrinterSetupPage() {
               : sanitizePrinterUiError(data?.message || response.error, "This printer route still needs attention."),
           variant: confirmed || queued ? "default" : "destructive",
         });
-        await runtimeQuery.refetch();
+        await refreshReadiness();
       } finally {
         setTestingPrinterId(null);
       }
@@ -589,17 +581,16 @@ export default function PrinterSetupPage() {
     return runSingleFlightAction(`use-usb-printer:${recommendedUsbPrinter.printerId}`, async () => {
       setSaving(true);
       try {
-        const response = await apiClient.selectLocalPrinter(recommendedUsbPrinter.printerId);
-        if (!response.success) {
+        const response = await runtime?.changePrinter(recommendedUsbPrinter.printerId);
+        if (!response?.success) {
           toast({
             title: "USB label printer was not selected",
-            description: sanitizePrinterUiError(response.error, "MSCQR could not switch the local printer selection."),
+            description: sanitizePrinterUiError(response?.error, "MSCQR could not switch the local printer selection."),
             variant: "destructive",
           });
           return;
         }
         setSelectedPrinterId(recommendedUsbPrinter.printerId);
-        await Promise.allSettled([inventoryQuery.refetch(), runtimeQuery.refetch()]);
         toast({
           title: "USB label printer selected",
           description: "Print a setup test label on this USB route before starting production labels.",
@@ -693,7 +684,7 @@ export default function PrinterSetupPage() {
                     {!freshInstallOnly && detectedPlatformRelease && compatibility.offerInstaller ? <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
                       {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download signed connector"}
                     </Button> : null}
-                    <Button size="sm" variant="outline" onClick={() => runtimeQuery.refetch()}>
+                    <Button size="sm" variant="outline" onClick={() => refreshReadiness()}>
                       Re-check connector
                     </Button>
                   </div>
@@ -780,8 +771,8 @@ export default function PrinterSetupPage() {
                 </Select>
               </div>
               <div className="flex items-end">
-                <Button variant="outline" onClick={() => inventoryQuery.refetch()} disabled={inventoryQuery.isFetching}>
-                  {inventoryQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                <Button variant="outline" onClick={refreshReadiness} disabled={runtime?.checking}>
+                  {runtime?.checking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                   Refresh detection
                 </Button>
               </div>

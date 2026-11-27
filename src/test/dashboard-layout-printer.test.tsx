@@ -1,5 +1,5 @@
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
@@ -12,6 +12,15 @@ import {
 } from "@/lib/active-print-session";
 import { CONSENT_STORAGE_KEY, type ConsentState } from "@/lib/consent";
 import { renderWithQueryClient } from "@/test/render-with-query-client";
+import { ManufacturerPrinterRuntimeProvider } from "@/features/printing/manufacturer-printer-runtime";
+import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import type { User } from "@/types";
+
+const user = { id: "manufacturer-1", role: "manufacturer", name: "Factory User", email: "factory@example.com" } as User;
+const renderLayout = (ui: React.ReactNode) => renderWithQueryClient(
+  <ManufacturerPrinterRuntimeProvider user={user}>{ui}</ManufacturerPrinterRuntimeProvider>
+);
+
 
 const localStorageState = new Map<string, string>();
 const sessionStorageState = new Map<string, string>();
@@ -28,7 +37,7 @@ const functionalConsent: ConsentState = {
 
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
-    user: { id: "manufacturer-1", role: "manufacturer", name: "Factory User", email: "factory@example.com" },
+    user,
     logout: vi.fn(),
   }),
 }));
@@ -86,14 +95,14 @@ describe("DashboardLayout printer connection dialog", () => {
     freshHelperHeartbeat: true,
     helperConnection: true,
     eligiblePrinter: true,
-    signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: "2026-03-13T19:23:35.000Z" },
+    signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: new Date().toISOString() },
     missingFields: [],
     recoveryAction: null,
     stale: false,
     requiredForPrinting: true,
     trustStatus: "TRUSTED",
     trustReason: "Trusted printer ready",
-    lastHeartbeatAt: "2026-03-13T19:23:36.000Z",
+    lastHeartbeatAt: new Date().toISOString(),
     ageSeconds: 0,
     registrationId: "printer-managed-1",
     agentId: "agent-1",
@@ -135,6 +144,7 @@ describe("DashboardLayout printer connection dialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearActivePrintSession();
+    setRequestCoordinatorScope(user);
     emitPrinterConnectionStatus = null;
     localStorageState.clear();
     sessionStorageState.clear();
@@ -240,10 +250,12 @@ describe("DashboardLayout printer connection dialog", () => {
     } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
   });
 
+  afterEach(() => setRequestCoordinatorScope(null));
+
   it("opens the printer dialog even when the local agent is unreachable", async () => {
     localStorageState.set(onboardingKey, "dismissed");
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -251,7 +263,7 @@ describe("DashboardLayout printer connection dialog", () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /printing needs review/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /printing needs review/i }));
 
     await waitFor(() => {
       expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalled();
@@ -269,7 +281,7 @@ describe("DashboardLayout printer connection dialog", () => {
   });
 
   it("shows first-run printer onboarding for manufacturers", async () => {
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter initialEntries={["/batches"]}>
         <DashboardLayout>
           <div>Batches content</div>
@@ -280,7 +292,7 @@ describe("DashboardLayout printer connection dialog", () => {
     await waitFor(() => {
       expect(screen.getByText("Set up printing on this computer")).toBeInTheDocument();
     });
-    expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).not.toHaveBeenCalled();
+    expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalledOnce();
     expect(screen.getByText(/Connect the printer and install its driver on this computer/i)).toBeInTheDocument();
     expect(screen.getByText(/Selected printer: None yet/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /install printer helper/i })).toBeInTheDocument();
@@ -288,7 +300,7 @@ describe("DashboardLayout printer connection dialog", () => {
   });
 
   it("does not auto-open printer onboarding away from Batches", async () => {
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter initialEntries={["/dashboard"]}>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -301,7 +313,7 @@ describe("DashboardLayout printer connection dialog", () => {
     });
 
     expect(screen.queryByText("Set up printing on this computer")).not.toBeInTheDocument();
-    expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).not.toHaveBeenCalled();
+    expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).toHaveBeenCalledOnce();
   });
 
   it("keeps saved network printers visible instead of pushing helper install when a saved route is ready", async () => {
@@ -325,7 +337,7 @@ describe("DashboardLayout printer connection dialog", () => {
       ],
     } as Awaited<ReturnType<typeof apiClient.listRegisteredPrinters>>);
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -343,54 +355,21 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.queryByRole("button", { name: /install printer helper/i })).not.toBeInTheDocument();
   });
 
+  const registerSelectedPrinter = (id: string) => vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({
+    success: true, data: [{ id: "profile-1", name: "Factory printer", connectionType: "LOCAL_AGENT",
+      nativePrinterId: id, printerRegistrationId: "printer-managed-1", isActive: true }],
+  } as Awaited<ReturnType<typeof apiClient.listRegisteredPrinters>>);
+
   it("does not auto-open the helper when the printer is ready", async () => {
     localStorageState.set(onboardingKey, "dismissed");
-    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
-      success: true,
-      data: {
-        connected: true,
-        trusted: true,
-        compatibilityMode: false,
-        compatibilityReason: null,
-        eligibleForPrinting: true,
-        connectionClass: "TRUSTED",
-        stale: false,
-        requiredForPrinting: true,
-        trustStatus: "TRUSTED",
-        trustReason: "Trusted printer ready",
-        lastHeartbeatAt: "2026-03-13T19:23:36.000Z",
-        ageSeconds: 0,
-        registrationId: "printer-managed-1",
-        agentId: "agent-1",
-        deviceFingerprint: "device-fingerprint",
-        mtlsFingerprint: "mtls-fingerprint",
-        printerName: "Canon TS4100i series 2",
-        printerId: "printer-1",
-        selectedPrinterId: "printer-1",
-        selectedPrinterName: "Canon TS4100i series 2",
-        deviceName: "Factory Mac",
-        agentVersion: "2026.3.13",
-        capabilitySummary: null,
-        printers: [
-          {
-            printerId: "printer-1",
-            printerName: "Canon TS4100i series 2",
-            model: "TS4100i",
-            connection: "ipps",
-            online: true,
-            isDefault: true,
-            protocols: ["ipp"],
-            languages: ["pdf"],
-            mediaSizes: ["A4"],
-            dpi: 300,
-          },
-        ],
-        calibrationProfile: null,
-        error: null,
-      },
-    } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
+    registerSelectedPrinter("printer-1");
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: true, data: {
+      connected: true, agentId: "agent-1", deviceFingerprint: "device-fingerprint",
+      selectedPrinterId: "printer-1", printers: trustedPrinterStatus.printers,
+    } } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({ success: true, data: trustedPrinterStatus });
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -435,7 +414,7 @@ describe("DashboardLayout printer connection dialog", () => {
         ],
       },
     } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
-    vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
       success: true,
       degraded: true,
       data: {
@@ -490,7 +469,7 @@ describe("DashboardLayout printer connection dialog", () => {
       },
     } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -519,26 +498,29 @@ describe("DashboardLayout printer connection dialog", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /printing needs review/i })).toBeInTheDocument();
     });
-    expect(vi.mocked(apiClient.getPrinterConnectionStatus)).not.toHaveBeenCalled();
+    expect(vi.mocked(apiClient.getPrinterConnectionStatus)).toHaveBeenCalledOnce();
     expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /printing needs review/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /printing (needs review|status unknown)/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Printing Status")).toBeInTheDocument();
     });
 
-    expect(screen.getAllByText(/Printer verification expired\. Refresh printer helper before printing\./i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Recovery mode").length).toBeGreaterThan(0);
+    expect(await screen.findAllByText(/current connector status is unavailable|printer verification unavailable/i)).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /printing ready/i })).not.toBeInTheDocument();
   });
 
   it("retains printer identity but blocks readiness when status refresh is rate-limited", async () => {
     localStorageState.set(onboardingKey, "dismissed");
+    registerSelectedPrinter("zdesigner-zt410");
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: true,
       data: {
         connected: true,
         printerName: "ZDesigner ZT410-300dpi ZPL",
+        agentId: "agent-1",
+        deviceFingerprint: "device-fingerprint",
         printerId: "zdesigner-zt410",
         selectedPrinterId: "zdesigner-zt410",
         selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
@@ -575,14 +557,14 @@ describe("DashboardLayout printer connection dialog", () => {
           freshHelperHeartbeat: true,
           helperConnection: true,
           eligiblePrinter: true,
-          signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: "2026-03-13T19:23:35.000Z" },
+          signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: new Date().toISOString() },
           missingFields: [],
           recoveryAction: null,
           stale: false,
           requiredForPrinting: true,
           trustStatus: "TRUSTED",
           trustReason: "Trusted printer ready",
-          lastHeartbeatAt: "2026-03-13T19:23:36.000Z",
+          lastHeartbeatAt: new Date().toISOString(),
           ageSeconds: 0,
           registrationId: "printer-managed-1",
           agentId: "agent-1",
@@ -621,7 +603,7 @@ describe("DashboardLayout printer connection dialog", () => {
         error: "Too many printer status requests. Please wait before retrying.",
       } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -669,11 +651,14 @@ describe("DashboardLayout printer connection dialog", () => {
 
   it("keeps ZDesigner selected instead of switching to Canon AirPrint", async () => {
     localStorageState.set(onboardingKey, "dismissed");
+    registerSelectedPrinter("zdesigner-zt410");
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: true,
       data: {
         connected: true,
         printerName: "ZDesigner ZT410-300dpi ZPL",
+        agentId: "agent-1",
+        deviceFingerprint: "device-fingerprint",
         printerId: "zdesigner-zt410",
         selectedPrinterId: "zdesigner-zt410",
         selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
@@ -721,14 +706,14 @@ describe("DashboardLayout printer connection dialog", () => {
         freshHelperHeartbeat: true,
         helperConnection: true,
         eligiblePrinter: true,
-        signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: "2026-03-13T19:23:35.000Z" },
+        signedAttestation: { required: true, present: true, signatureValid: true, fresh: true, issuedAt: new Date().toISOString() },
         missingFields: [],
         recoveryAction: null,
         stale: false,
         requiredForPrinting: true,
         trustStatus: "TRUSTED",
         trustReason: "Trusted printer ready",
-        lastHeartbeatAt: "2026-03-13T19:23:36.000Z",
+        lastHeartbeatAt: new Date().toISOString(),
         ageSeconds: 0,
         registrationId: "printer-managed-1",
         agentId: "agent-1",
@@ -772,7 +757,7 @@ describe("DashboardLayout printer connection dialog", () => {
       },
     } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -822,7 +807,7 @@ describe("DashboardLayout printer connection dialog", () => {
     await waitFor(() => {
       expect(screen.getByText("Printing Status")).toBeInTheDocument();
     });
-    expect(screen.getAllByText("ZDesigner ZT410-300dpi ZPL").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("ZDesigner ZT410-300dpi ZPL")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /active printer/i })).toBeInTheDocument();
   });
 
@@ -833,6 +818,8 @@ describe("DashboardLayout printer connection dialog", () => {
       data: {
         connected: true,
         printerName: "ZDesigner ZT410-300dpi ZPL",
+        agentId: "agent-1",
+        deviceFingerprint: "device-fingerprint",
         printerId: "zdesigner-zt410",
         selectedPrinterId: "zdesigner-zt410",
         selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
@@ -854,7 +841,7 @@ describe("DashboardLayout printer connection dialog", () => {
         ],
       },
     } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
-    vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
       success: true,
       data: {
         ...trustedPrinterStatus,
@@ -872,9 +859,9 @@ describe("DashboardLayout printer connection dialog", () => {
         selectedPrinterName: "Canon TS4100i series",
         printers: [{ printerId: "canon-old", printerName: "Canon TS4100i series", online: true }],
       },
-    } as Awaited<ReturnType<typeof apiClient.reportPrinterHeartbeat>>);
+    } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -882,12 +869,12 @@ describe("DashboardLayout printer connection dialog", () => {
       </MemoryRouter>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /printing needs review/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /printing needs review/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Printing Status")).toBeInTheDocument();
     });
-    expect(screen.getAllByText("ZDesigner ZT410-300dpi ZPL").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("ZDesigner ZT410-300dpi ZPL")).length).toBeGreaterThan(0);
     expect(screen.queryByText("Canon TS4100i series")).not.toBeInTheDocument();
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
   });
@@ -901,7 +888,7 @@ describe("DashboardLayout printer connection dialog", () => {
       terminal: false,
     });
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter initialEntries={["/dashboard"]}>
         <DashboardLayout>
           <div>Dashboard content</div>
@@ -919,7 +906,7 @@ describe("DashboardLayout printer connection dialog", () => {
   it("keeps the normal printer status behavior when no active print job exists", async () => {
     localStorageState.set(onboardingKey, "dismissed");
 
-    renderWithQueryClient(
+    renderLayout(
       <MemoryRouter>
         <DashboardLayout>
           <div>Dashboard content</div>

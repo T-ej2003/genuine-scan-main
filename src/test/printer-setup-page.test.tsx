@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router";
 import PrinterSetupPage from "@/pages/PrinterSetup";
 import apiClient from "@/lib/api-client";
 import { renderWithQueryClient } from "@/test/render-with-query-client";
-import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
+import { useManufacturerPrinterRuntime } from "@/features/printing/manufacturer-printer-runtime";
 
 const toastMock = vi.hoisted(() => vi.fn());
 
@@ -20,7 +20,7 @@ vi.mock("@/hooks/use-toast", () => ({
   }),
 }));
 
-vi.mock("@/features/printing/hooks", () => ({
+vi.mock("@/features/printing/manufacturer-printer-runtime", () => ({
   useManufacturerPrinterRuntime: vi.fn(),
 }));
 
@@ -35,11 +35,24 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
+const setRuntime = ({ data, refetch }: { data: Record<string, unknown>; refetch: () => Promise<unknown> }) => {
+  vi.mocked(useManufacturerPrinterRuntime).mockImplementation(() => ({
+    snapshot: { ...data, localInventory: testInventory },
+    refresh: refetch,
+    changePrinter: apiClient.selectLocalPrinter,
+  }) as ReturnType<typeof useManufacturerPrinterRuntime>);
+};
+
+let testInventory: unknown[];
+const setLocalInventory = (response: { success: boolean; data: { printers: unknown[] } }) => {
+  testInventory = response.data.printers;
+};
+
 describe("PrinterSetupPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
+    setRuntime({
       data: {
         registeredPrinters: [],
         remoteStatus: {
@@ -63,7 +76,7 @@ describe("PrinterSetupPage", () => {
       },
     } as any);
 
-    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+    setLocalInventory({
       success: true,
       data: {
         printers: [
@@ -120,7 +133,7 @@ describe("PrinterSetupPage", () => {
   });
 
   it("shows connector update and USB Zebra alternative for a stale WiFi queue", async () => {
-    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
+    setRuntime({
       data: {
         registeredPrinters: [],
         remoteStatus: {
@@ -140,7 +153,7 @@ describe("PrinterSetupPage", () => {
         release: { platforms: { windows: { version: "2026.6.13" } } },
       },
     } as any);
-    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
+    setLocalInventory({
       success: true,
       data: {
         printers: [
@@ -205,7 +218,7 @@ describe("PrinterSetupPage", () => {
   it("keeps backend-required update visible without offering a fresh-only installer", async () => {
     vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
     vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
-    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
+    setRuntime({
       data: { registeredPrinters: [], remoteStatus: { connected: false, connectorUpdateRequired: true, agentVersion: "2026.6.26" } },
       refetch: vi.fn().mockResolvedValue(undefined),
     } as any);
@@ -223,7 +236,7 @@ describe("PrinterSetupPage", () => {
   it("shows the backend minimum-build failure for a fresh-only release", async () => {
     vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
     vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
-    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({ data: { registeredPrinters: [], remoteStatus: {
+    setRuntime({ data: { registeredPrinters: [], remoteStatus: {
       connected: true, agentVersion: "2026.10.29.1", buildVersion: "2026.10.29.1", protocolVersion: "local-agent-direct-v2",
       persistentSessionMinimumBuildVersion: "2026.11.6.1", eligibleForPrinting: false,
     } }, refetch: vi.fn().mockResolvedValue(undefined) } as any);
@@ -241,7 +254,7 @@ describe("PrinterSetupPage", () => {
   it("offers a certified newer release without blocking an eligible printer", async () => {
     vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
     vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
-    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({ data: { registeredPrinters: [], remoteStatus: {
+    setRuntime({ data: { registeredPrinters: [], remoteStatus: {
       connected: true, trusted: true, eligibleForPrinting: true, agentVersion: "2026.11.6.1", buildVersion: "2026.11.6.1",
       protocolVersion: "local-agent-direct-v2", persistentSessionMinimumBuildVersion: "2026.11.6.1",
     } }, refetch: vi.fn().mockResolvedValue(undefined) } as any);
@@ -257,7 +270,7 @@ describe("PrinterSetupPage", () => {
   });
 
   it("keeps the backend persistent-session rejection visible without a published installer", async () => {
-    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({ data: { registeredPrinters: [], remoteStatus: {
+    setRuntime({ data: { registeredPrinters: [], remoteStatus: {
       connected: false, buildVersion: "2026.10.29.1", persistentSessionUpdateRequired: true,
       persistentSessionMinimumBuildVersion: "2026.11.6.1", eligibleForPrinting: false,
     } }, refetch: vi.fn().mockResolvedValue(undefined) } as any);
@@ -271,7 +284,7 @@ describe("PrinterSetupPage", () => {
   });
 
   it("shows a queued setup test label as pending connector confirmation", async () => {
-    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
+    setRuntime({
       data: {
         registeredPrinters: [
           {

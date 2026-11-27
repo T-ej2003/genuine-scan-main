@@ -1,7 +1,7 @@
 import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { APP_PATHS } from "@/app/route-metadata";
+import { APP_PATHS, getAppRouteMeta } from "@/app/route-metadata";
 
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -18,6 +18,11 @@ import { SeoController } from "@/components/seo/SeoController";
 import { MutationEventBridge, queryClient } from "@/lib/query-client";
 import { clientSecurityScope } from "@/lib/api/request-coordinator";
 
+const ManufacturerPrinterRuntimeProvider = lazy(() =>
+  import("@/features/printing/manufacturer-printer-runtime").then(({ ManufacturerPrinterRuntimeProvider }) => ({
+    default: ManufacturerPrinterRuntimeProvider,
+  })),
+);
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
 const VerifyEmail = lazy(() => import("@/pages/VerifyEmail"));
@@ -191,9 +196,10 @@ function AppRoutes() {
   const keepPreviousRoute = navigationValidationPending && renderedScope.current === displayScope;
   if (navigationValidationPending && !keepPreviousRoute) return <LoadingScreen />;
 
-  return (
+  const visibleLocation = keepPreviousRoute ? renderedLocation.current : location;
+  const routes = (
     <Suspense fallback={<LoadingScreen />}>
-      <Routes location={keepPreviousRoute ? renderedLocation.current : location}>
+      <Routes location={visibleLocation}>
         {/* Public */}
         <Route path="/" element={<Index />} />
         <Route path="/trust" element={<TrustCenter />} />
@@ -577,6 +583,14 @@ function AppRoutes() {
       </Routes>
     </Suspense>
   );
+  const path = visibleLocation.pathname;
+  const manufacturerWorkspace = user?.role === "manufacturer" &&
+    getAppRouteMeta(path)?.roles?.includes("manufacturer");
+  return manufacturerWorkspace
+    ? <Suspense fallback={<LoadingScreen />}>
+        <ManufacturerPrinterRuntimeProvider user={user}>{routes}</ManufacturerPrinterRuntimeProvider>
+      </Suspense>
+    : routes;
 }
 
 export default function App() {

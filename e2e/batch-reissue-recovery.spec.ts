@@ -305,6 +305,8 @@ const installBatchReissueMocks = async (page: Page, role: Role, state: ReissueFl
     if (url.pathname === "/status") {
       return json(route, {
         connected: true,
+        agentId: "agent-e2e",
+        deviceFingerprint: "device-e2e",
         selectedPrinterId: "e2e-local-printer",
         printerId: "e2e-local-printer",
         selectedPrinterName: "ZDesigner ZT410-300dpi ZPL",
@@ -356,7 +358,11 @@ const installBatchReissueMocks = async (page: Page, role: Role, state: ReissueFl
         data: [{ id: "manufacturer-p0-user", name: "Acme Factory", email: "factory@acme.example", isActive: true }],
       });
     }
-    if (path === "/manufacturer/printer-agent/status") return json(route, { success: true, data: readyPrinterStatus });
+    if (path === "/manufacturer/printer-agent/status") {
+      const issuedAt = new Date().toISOString();
+      return json(route, { success: true, data: { ...readyPrinterStatus, lastHeartbeatAt: issuedAt,
+        signedAttestation: { ...readyPrinterStatus.signedAttestation, issuedAt } } });
+    }
     if (path === "/print-agent/local/status") {
       return json(route, {
         success: true,

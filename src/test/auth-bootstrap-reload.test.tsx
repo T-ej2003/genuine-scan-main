@@ -55,6 +55,7 @@ vi.mock("@/lib/api-client", () => ({
     getPrinterConnectionStatus: vi.fn(),
     getLocalPrintAgentStatus: vi.fn(),
     listRegisteredPrinters: vi.fn(),
+    streamPrinterConnectionStatus: vi.fn(() => () => undefined),
   },
 }));
 
@@ -104,16 +105,12 @@ vi.mock("@/pages/Batches", async () => {
   const { useLocation, useNavigate } = await vi.importActual<typeof import("react-router")>("react-router");
   const { useAuth } = await vi.importActual<typeof import("@/contexts/AuthContext")>("@/contexts/AuthContext");
   const { useBatches } = await vi.importActual<typeof import("@/features/batches/hooks")>("@/features/batches/hooks");
-  const { useManufacturerPrinterRuntime } =
-    await vi.importActual<typeof import("@/features/printing/hooks")>("@/features/printing/hooks");
-
   return {
     default: function ProtectedBatchesProbe() {
       const auth = useAuth();
       const location = useLocation();
       const navigate = useNavigate();
       useBatches(new URLSearchParams(location.search).get("licenseeId") || undefined, true);
-      useManufacturerPrinterRuntime(true, true);
       return React.createElement("div", { "data-testid": "protected-batches-probe", "data-licensee": auth.user?.licenseeId,
         "data-search": location.search }, "Protected batches",
         React.createElement("button", { onClick: () => navigate("/batches?licenseeId=B") }, "Switch licensee"));
@@ -242,7 +239,7 @@ describe("auth bootstrap after reload", () => {
     expect(screen.getByTestId("protected-dashboard-probe")).toHaveAttribute("data-path", "/dashboard");
     expect(screen.queryByTestId("protected-batches-probe")).not.toBeInTheDocument();
     expect(apiClient.getBatches).not.toHaveBeenCalled();
-    expect(apiClient.getPrinterConnectionStatus).not.toHaveBeenCalled();
+    expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledOnce();
     await act(async () => resolveRefresh({ success: true, data: { user: manufacturerUser } } as any));
     expect(await screen.findByTestId("protected-batches-probe")).toBeInTheDocument();
     await waitFor(() => expect(apiClient.getBatches).toHaveBeenCalledOnce());

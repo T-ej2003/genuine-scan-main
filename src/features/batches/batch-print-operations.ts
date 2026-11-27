@@ -100,7 +100,7 @@ type BatchPrintOperationContext = PrintProgressSetters & {
   printerStatus: PrinterConnectionStatus;
   activeLocalPrinterId: string;
   selectedPrinterCanPrint: boolean;
-  setPrinterStatus: Dispatch<SetStateAction<PrinterConnectionStatus>>;
+  onPrinterVerificationFailed?: (reason?: string) => void;
   buildCalibrationPayload: () => Record<string, unknown>;
   autoReportPrinterFailure: AutoReportPrinterFailure;
   onBatchesChanged?: () => Promise<void> | void;
@@ -434,7 +434,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     printerStatus,
     activeLocalPrinterId,
     selectedPrinterCanPrint,
-    setPrinterStatus,
+    onPrinterVerificationFailed,
     buildCalibrationPayload,
     autoReportPrinterFailure,
     setPrintJobId,
@@ -540,17 +540,9 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       verificationUnavailable ||
       !buildSecurePrintReadiness(effectiveLiveStatus).ready
     ) {
-      setPrinterStatus({
-        ...effectiveLiveStatus,
-        trusted: false,
-        eligibleForPrinting: false,
-        stale: true,
-        trustReason: verificationUnavailable
-          ? "Printer verification is unavailable. Refresh printer status and try again."
-          : effectiveLiveStatus.trustReason,
-        printers: detectedPrinters,
-        error: livePrinterStatus.error || effectiveLiveStatus.error || null,
-      });
+      onPrinterVerificationFailed?.(verificationUnavailable
+        ? "Printer verification is unavailable. Refresh printer status and try again."
+        : effectiveLiveStatus.trustReason || undefined);
       const updateRequired =
         Boolean(effectiveLiveStatus.persistentSessionUpdateRequired || (effectiveLiveStatus as PrinterConnectionStatus & { connectorUpdateRequired?: boolean }).connectorUpdateRequired) ||
         String(livePrinterStatus.code || livePrinterStatus.errorCode || "").toLowerCase() === "connector_update_required";
@@ -571,7 +563,6 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       return;
     }
 
-    setPrinterStatus(effectiveLiveStatus);
     const selectedPrinter =
       detectedPrinters.find((row) => row.printerId === selectedPrinterId) ||
       detectedPrinters.find(
