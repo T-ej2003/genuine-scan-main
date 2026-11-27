@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -542,6 +542,9 @@ describe("DashboardLayout printer connection dialog", () => {
         ],
       },
     } as Awaited<ReturnType<typeof apiClient.getLocalPrintAgentStatus>>);
+    type StatusResponse = Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>;
+    let finishRefresh!: (response: StatusResponse) => void;
+    const refreshResponse = new Promise<StatusResponse>((resolve) => { finishRefresh = resolve; });
     vi.mocked(apiClient.getPrinterConnectionStatus)
       .mockResolvedValueOnce({
         success: true,
@@ -594,14 +597,8 @@ describe("DashboardLayout printer connection dialog", () => {
           calibrationProfile: null,
           error: null,
         },
-      } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>)
-      .mockResolvedValue({
-        success: false,
-        status: 429,
-        code: "RATE_LIMITED",
-        retryAfterSec: 60,
-        error: "Too many printer status requests. Please wait before retrying.",
-      } as Awaited<ReturnType<typeof apiClient.getPrinterConnectionStatus>>);
+      } as StatusResponse)
+      .mockReturnValue(refreshResponse);
 
     renderLayout(
       <MemoryRouter>
@@ -638,15 +635,23 @@ describe("DashboardLayout printer connection dialog", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /printing ready/i }));
-    await waitFor(() => {
-      expect(screen.getByText("Printing Status")).toBeInTheDocument();
+    const dialog = within(await screen.findByRole("dialog", { name: "Printing Status" }));
+    for (const button of await dialog.findAllByRole("button", { name: /connector checking/i })) {
+      expect(button).toBeDisabled();
+    }
+    expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledTimes(2);
+    finishRefresh({
+      success: false,
+      status: 429,
+      code: "RATE_LIMITED",
+      retryAfterSec: 60,
+      error: "Too many printer status requests. Please wait before retrying.",
     });
-    fireEvent.click(screen.getAllByRole("button", { name: /refresh status/i })[0]);
 
-    await waitFor(() => {
-      expect(screen.getAllByText(/Current connector status is unavailable\. Printing is blocked until verification recovers/i).length).toBeGreaterThan(0);
-    });
-    expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
+    expect(await dialog.findAllByText(/current connector status is unavailable\. Printing is blocked until verification recovers/i)).not.toHaveLength(0);
+    expect(dialog.getAllByText(/ZDesigner ZT410/i)).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /printing ready/i })).not.toBeInTheDocument();
+    expect(dialog.queryByText("Recovery mode")).not.toBeInTheDocument();
   });
 
   it("keeps ZDesigner selected instead of switching to Canon AirPrint", async () => {
